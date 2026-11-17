@@ -1,0 +1,7 @@
+# Global ownership: all changes require review by the project maintainer.
+* @uzbatsu-beep
+
+# Protocol core and transports are especially sensitive areas.
+/src-tauri/src/modbus/    @uzbatsu-beep
+/src-tauri/src/transport/ @uzbatsu-beep
+/src-tauri/src/scanner/   @uzbatsu-beep
