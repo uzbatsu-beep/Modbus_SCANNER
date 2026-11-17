@@ -2,7 +2,10 @@
 name = "modbus-scanner"
 version = "0.1.0"
 description = "Modbus RTU/ASCII/TCP/UDP scanner - cross-platform desktop tool"
-authors = ["you"]
+authors = ["uzbatsu-beep <uzbatsu@gmail.com>"]
+license = "GPL-3.0-only"
+repository = "https://github.com/uzbatsu-beep/Modbus_SCANNER"
+homepage = "https://github.com/uzbatsu-beep/Modbus_SCANNER#readme"
 edition = "2021"
 rust-version = "1.77"
 

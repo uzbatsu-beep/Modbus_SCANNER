@@ -1,0 +1,65 @@
+name: Bug report / Ошибка
+description: Report incorrect scanner behaviour / Сообщить о некорректной работе
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please fill in as much as possible.
+  - type: input
+    id: version
+    attributes:
+      label: Version / Версия
+      placeholder: "0.1.0 (or commit hash)"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: OS / ОС
+      options:
+        - Windows
+        - Linux
+        - macOS
+    validations:
+      required: true
+  - type: dropdown
+    id: transport
+    attributes:
+      label: Transport / Транспорт
+      options:
+        - RTU
+        - ASCII
+        - TCP
+        - UDP
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / Что произошло?
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour / Ожидаемое поведение
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce / Шаги воспроизведения
+      placeholder: |
+        1. Open Scan tab
+        2. Set COM3, 9600 8N1
+        3. Start scan...
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / Логи
+      description: "Run with RUST_LOG=debug and paste relevant output."
+      render: shell

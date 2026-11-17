@@ -1,5 +1,7 @@
 # Modbus Scanner
 
+[![CI](https://github.com/uzbatsu-beep/Modbus_SCANNER/actions/workflows/ci.yml/badge.svg)](https://github.com/uzbatsu-beep/Modbus_SCANNER/actions/workflows/ci.yml)
+
 [English version](README.md)
 
 Кроссплатформенный десктопный сканер Modbus-устройств.
@@ -94,4 +96,4 @@ cargo test --lib         # юнит-тесты протокола
 
 ## Лицензия
 
-TBD.
+[GNU GPL v3.0](LICENSE) — свободное ПО с копилефтом. Полный текст — в [LICENSE](LICENSE).

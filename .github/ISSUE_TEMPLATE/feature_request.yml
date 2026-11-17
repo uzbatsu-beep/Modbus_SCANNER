@@ -1,0 +1,27 @@
+name: Feature request / Предложение
+description: Suggest an improvement / Предложить улучшение
+title: "[Feature]: "
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Проблема
+      description: What are you trying to do that is currently hard or impossible?
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution / Предлагаемое решение
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives / Альтернативы
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context / Дополнительный контекст
+      description: Protocol details, device models, references to the Modbus spec.

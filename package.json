@@ -3,6 +3,15 @@
   "private": true,
   "version": "0.1.0",
   "description": "Modbus RTU/ASCII/TCP/UDP scanner - cross-platform desktop tool",
+  "license": "GPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/uzbatsu-beep/Modbus_SCANNER.git"
+  },
+  "homepage": "https://github.com/uzbatsu-beep/Modbus_SCANNER#readme",
+  "bugs": {
+    "url": "https://github.com/uzbatsu-beep/Modbus_SCANNER/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "vite",

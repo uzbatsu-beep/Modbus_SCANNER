@@ -1,5 +1,7 @@
 # Modbus Scanner
 
+[![CI](https://github.com/uzbatsu-beep/Modbus_SCANNER/actions/workflows/ci.yml/badge.svg)](https://github.com/uzbatsu-beep/Modbus_SCANNER/actions/workflows/ci.yml)
+
 [Русская версия](README.ru.md)
 
 Cross-platform desktop tool for discovering and probing **Modbus** devices.
@@ -94,4 +96,5 @@ IP concurrency) are still being wired into the engine — see [ROADMAP](docs/ROA
 
 ## License
 
-TBD.
+[GNU GPL v3.0](LICENSE) — free software, copyleft. See [LICENSE](LICENSE) for the
+full text.
