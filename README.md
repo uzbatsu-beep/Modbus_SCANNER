@@ -60,6 +60,8 @@ console and register map).
 - [Scanning](docs/SCANNING.md) — strategies, timeouts, safety
 - [IPC API](docs/API.md) — commands and events with payload schemas
 - [Development](docs/DEVELOPMENT.md) — setup, build, tests, conventions
+- [Research](docs/RESEARCH.md) — market/community/academic findings and sources
+- [Development plan](docs/PLAN.md) — prioritized phases v0.2 → v1.0
 - [Roadmap](docs/ROADMAP.md) — current status and next steps
 - [Security](docs/SECURITY.md) — safety of writing to unknown devices
 

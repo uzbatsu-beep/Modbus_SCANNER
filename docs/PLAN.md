@@ -1,0 +1,196 @@
+# План разработки / Development plan
+
+[Русская версия ниже] · [English summary](#english-summary) ·
+Обоснование — в [RESEARCH.md](RESEARCH.md), текущее состояние — в [ROADMAP.md](ROADMAP.md).
+
+**Дата:** 2026-11-18 · **Горизонт:** 4 релиза (v0.2 → v1.0) ·
+**Принцип:** каждый этап даёт работающий, безопасный, проверяемый инкремент.
+
+---
+
+## 1. Цели и ограничения / Goals and constraints
+
+### Цель продукта
+Стать **безопасным «сканером-переводчиком»**: не только найти Modbus-устройство,
+но и понять, что оно из себя представляет, какие регистры отдает и как их читать,
+сохранив результат в виде готовой карты тегов.
+
+### Жёсткие принципы (не обсуждаются)
+1. **Discovery = read-only.** Никаких write-кодов в контуре обнаружения. Интеграционный
+   тест с mock-устройством проверяет нулевое число write-запросов (практика Modbus Logic).
+2. **Явное действие пользователя.** Никакой фоновой активности; сканирование,
+   мониторинг и логирование запускаются кнопкой и всегда имеют Stop/Pause.
+3. **Осторожно к OT.** «Тихий» режим с ограничением частоты; предупреждение об
+   авторизации и о нагрузке на устройства; никаких write-тестов по умолчанию.
+4. **Никакой телеметрии.** Локальные данные, локальные файлы (как у референсов).
+5. **Собственный протокольный стек.** Контроль над таймингами и фреймингом — наше
+   конкурентное преимущество; не заменять на pymodbus-подобную библиотеку.
+
+---
+
+## 2. Базовый уровень и пробелы / Baseline and gaps
+
+Есть: RTU/ASCII/TCP/UDP, CRC/LRC/MBAP, свип unit ID, IP-диапазоны, события Tauri,
+карта регистров (raw), ручная консоль, экспорт CSV/JSON/XML, конфиг, 4 вкладки UI,
+CI, документация EN/RU, GPL-3.0, Release v0.1.0.
+
+Нет (по [RESEARCH.md](RESEARCH.md)): свип скорости/чётности, адаптивный register scan,
+FC43 identification, декодирование типов и byte order, живой мониторинг, raw-лог,
+«тихий» режим, параллелизм IP, CLI, проекты/история/дифф, безопасный аудит.
+
+---
+
+## 3. Этапы / Phases
+
+| Этап | Тема | Длительность* | Ключевой результат |
+|------|------|---------------|--------------------|
+| **v0.2** | Field Discovery | 3–4 недели | Нашли устройство с неизвестными настройками за один запуск |
+| **v0.3** | Decode & Monitor | 4–6 недель | Получили именованную карту тегов и подтвердили декодирование |
+| **v0.4** | Diagnostics & Security (opt-in) | 4–6 недель | Диагностика, raw-лог, PCAP, отчёт по безопасности |
+| **v1.0** | Ecosystem & Release | 4 недели | CLI/headless, профили, локализация, дистрибутивы |
+
+\* Оценка для одного разработчика, при 20–30 ч/нед.
+
+---
+
+## 4. v0.2 — Field Discovery (P0)
+
+**Цель:** закрыть главную боль полевого инженера — «устройство есть, документации нет».
+
+| ID | Задача | Приоритет | Обоснование (источник) | Оценка |
+|----|--------|-----------|------------------------|--------|
+| P2-01 | Свип настроек шины: baud 1200…115200 × 8N1/8E1/8O1 (и 7N1/7E1), ранняя остановка после первого валидного CRC | P0 | Почти каждый полевой гайд; [ModbusCloud](https://www.modbuscloud.com/knowledge-base/modbus-network-scan) | M |
+| P2-02 | Подключить `ScanParams` к движку: timeout/retries/request_gap/ip_concurrency реально работают | P0 | Наш ROADMAP; база для quiet mode | S |
+| P2-03 | Адаптивный register scan: Quick/Balanced/Deep, сплит неудачного блока 100→20→5, exception 01/03 → immediate abort, timeouts не делятся | P0 | [Modbus Logic](https://www.modbuslogic.com/docs/modbus-scanner/) | L |
+| P2-04 | Классификация IP-целей: «валидный Modbus» / «порт открыт, не Modbus» / refused / timeout / unreachable | P0 | Там же; открытый 502 ≠ устройство | M |
+| P2-05 | Идентификация FC43/MEI14 (basic: VendorName, ProductCode, Revision) | P1 | [FC43](https://www.merobix.com/blog/what-is-modbus-function-code-43-device-identification), [Nmap modbus-discover](https://nmap.org/nsedoc/scripts/modbus-discover.html) | M |
+| P2-06 | Параллельный IP-пул с отдельным транспортом на цель, лимит `ip_concurrency` | P1 | [modbus-probe](https://github.com/isecwire/modbus-probe), [Modbus Connect](https://modbusconnect.com/features) | M |
+| P2-07 | Deep-scan для TCP/UDP single device (сейчас только serial) | P1 | Наш ROADMAP | S |
+| P2-08 | Экспорт по выбранному устройству + classical 1-based/0-based/reference/hex нотации в таблице | P1 | [Reddit r/PLC](https://www.reddit.com/r/PLC/comments/f2728e/), Modbus Logic | S |
+
+**Exit criteria:** неизвестное RTU-устройство находится с любого стандартного baud/parity
+за ≤ 5 минут; 0 write-запросов в discovery (тест); IP-сканирование /24 за ≤ 30 с
+при concurrency 32; все параметры из UI реально влияют на движок.
+
+**Архитектура:** новые `scanner::strategies::BaudSweepStrategy`, `RegisterScanStrategy`,
+`modbus::device_id` (FC43 PDU), `scanner::classifier` (классификация ответов),
+расширение `ScanTarget`/`ScanParams` + синхронизация `src/types/ipc.ts`.
+
+---
+
+## 5. v0.3 — Decode & Monitor (P1)
+
+**Цель:** превратить «список сырых регистров» в понятную карту тегов.
+
+| ID | Задача | Приоритет | Обоснование | Оценка |
+|----|--------|-----------|-------------|--------|
+| P3-01 | Декодер: int16/uint16/int32/uint32/float32/ASCII + 4 byte order (ABCD, BADC, CDAB, DCBA) | P0 | CAS, Chipkin, Modbus Logic, Proxus decoder | L |
+| P3-02 | Подсказки «возможно float32 (ABCD)» с пометкой «предположение, не факт» | P1 | Modbus Logic inspector | S |
+| P3-03 | Именованные регистры: имя, тип, byte order, scaling `(raw×mul÷div)+offset`, единицы, описание | P0 | Modbus Logic io-tags | M |
+| P3-04 | Проекты: сохранить устройства + карты тегов + историю сканов в один файл | P1 | Modbus Logic projects | M |
+| P3-05 | Live Monitor: polling 250 мс–10 с, min/max, подсветка изменений, тренд 1 мин–1 ч | P0 | Modbus Connect, ModbusLens | L |
+| P3-06 | Raw TX/RX лог с таймстемпами и FC; экспорт лога CSV/JSON | P1 | Modbus Connect | M |
+| P3-07 | Логгер с ротацией (daily/session/size), несколько логгеров | P2 | Modbus Connect | M |
+| P3-08 | Сравнение двух сканов (diff карты регистров) | P2 | Наш ROADMAP; Chickin «versioning register map» | M |
+| P3-09 | Полная локализация RU/EN + светлая тема | P2 | Наш ROADMAP; i18n в modbus-rtu-tool | M |
+
+**Exit criteria:** пара регистров `0x4367 0x3333` корректно показывается как
+float32 ≈ 231.2 во всех byte order; имя и scaling сохраняются в проекте; мониторинг
+10 тегов с периодом 1 с работает без утечек и без блокировки UI.
+
+**Архитектура:** `modbus::decode` (чистые функции + тесты), `state::TagMap`,
+новый Pinia-store `monitor`, Tauri-события `monitor:update`, компонент `TrendChart`.
+
+---
+
+## 6. v0.4 — Diagnostics & Security (opt-in, P2)
+
+**Цель:** диагностика для инженера и безопасный аудит (по запросу, с авторизацией).
+
+| ID | Задача | Оценка |
+|----|--------|--------|
+| P4-01 | FC08 Diagnostics (subcodes), FC07/0B/0C — только по serial, read-only | M |
+| P4-02 | FC support map: опрос FC 1–127 в режиме «только чтение»; тайминги ответов | M |
+| P4-03 | PCAP-экспортModbus-трафика (как у modbus-probe) для Wireshark | M |
+| P4-04 | «Тихий» режим: ≤2 запроса/с, адаптивный backoff, явное предупреждение | S |
+| P4-05 | Пассивный fingerprinting (прослушивание трафика) как исследовательский прототип | L |
+| P4-06 | Опциональный security-отчёт: severity, JSON/CSV, дисклеймер об авторизации | M |
+| P4-07 | Write-тест с rollback — **только** отдельный mode, двойное подтверждение, off по умолчанию | M |
+
+**Важно:** P4-07 реализовывать последним и только если появится реальный запрос;
+научные работы и стандарты ([IEEE](https://ieeexplore.ieee.org/document/11471618/),
+[IEC 62443](https://www.isa.org/standards-and-publications/isa-standards/isa-iec-62443-series-of-standards))
+подтверждают риск активного воздействия на OT.
+
+---
+
+## 7. v1.0 — Ecosystem & Release (P2)
+
+- CLI/headless-режим того же движка (`modbus-scanner scan --rtu COM3 --sweep ... --json`).
+- Локальный REST/WebSocket API для интеграций (по образцу экосистемы Modbus Logic).
+- Профили устройств: база известных register map (импорт CSV/JSON), автоподстановка декодера.
+- Modbus TLS (port 802) — исследовательская задача после стабилизации TCP.
+- Дистрибутивы: Windows MSI, Linux AppImage/deb, macOS dmg; GitHub Release automation.
+- Документация: полная EN/RU-пара, видео-туториал, примеры для реальных устройств.
+
+---
+
+## 8. Метрики качества / KPI
+
+| Метрика | Целевое значение |
+|---------|------------------|
+| Write-запросов в discovery | **0** (интеграционный тест на каждом PR) |
+| Время обнаружения при неизвестном baud/parity | ≤ 5 мин (247 ID × 7 baud × 3 parity, с early-exit) |
+| Ложные «устройства» | 0 для открытого порта без Modbus-ответа |
+| Память при скане 65536 регистров | ≤ 200 MB |
+| CI | зелёный на Windows + Linux на каждом коммите |
+| Покрытие протокольного слоя тестами | ≥ 80% линий |
+| Sync IPC-типов | 100% (Rust ↔ `src/types/ipc.ts`) |
+
+---
+
+## 9. Риски и митигации / Risks
+
+| Риск | Митигация |
+|------|-----------|
+| Свип baud/parity занимает часы | Early-exit, приоритетный порядок (9600 8N1 → 2400 → 19200 → 8E1), parallel по ID только после фиксации настроек |
+| Дубли адресов дают CRC-коллизии | Показывать подозрение на коллизию, советовать point-to-point; не считать CRC-ошибку «устройством» |
+| Перегрузка устройства/TCP-шлюза | Quiet mode, request gap, concurrency cap, таймауты по умолчанию 300–800 мс |
+| Два master на RS-485 | Предупреждение в UI перед сканом (проверка modbuscloud) |
+| Расхождение Rust/TS типов | Генератор типов (ts-rs) в v0.3–v0.4 |
+| Парсер 32-bit float/endianness ошибок | Таблица тест-векторов из реальных приборов; подсказки помечены как гипотезы |
+| Юридический риск security-режима | Opt-in, дисклеймер, требование авторизации, только read по умолчанию |
+
+---
+
+## 10. Порядок работы на ближайшей итерации / Next sprint
+
+1. P2-02 (пробросить параметры) → 2. P2-01 (baud sweep) → 3. P2-03 (register scan) →
+4. P2-04 (классификация IP) → 5. P2-05 (FC43) → 6. P2-08 (экспорт по устройству).
+Каждый шаг — отдельный PR с тестами и обновлением EN/RU-доков.
+
+---
+
+## English summary
+
+**Goal:** evolve from an address scanner into a safe "scanner + interpreter" that
+finds devices with unknown settings, maps their registers, decodes values and
+exports a ready-to-use tag map.
+
+**Research verdict:** address sweeping is commodity (modpoll, CAS, QModMaster,
+nmap). The unmet need is at the discovery→understanding boundary: automatic
+serial-setting detection, adaptive/quiet register scanning, FC43 identification,
+float/endianness decoding, live monitoring, and tag-map export. Academic work
+warns that active OT scanning can be harmful, so read-by-design and a quiet mode
+are differentiators.
+
+**Phases:** v0.2 Field Discovery (baud sweep, wire params, adaptive register
+scan, IP classification, FC43, IP concurrency); v0.3 Decode & Monitor (types,
+byte order, scaling, named tags, projects, live trends, raw logs); v0.4
+Diagnostics & Security opt-in (FC08, FC map, PCAP, passive fingerprinting,
+authorized audit); v1.0 Ecosystem (CLI, REST, profiles, Modbus TLS, installers).
+
+**Hard rules:** zero writes in discovery, no background activity, no telemetry,
+explicit authorization warnings, custom protocol stack retained. **KPI:** zero
+write requests in discovery tests, <5 min to find a device with unknown serial
+settings, no false positives on open non-Modbus ports.
