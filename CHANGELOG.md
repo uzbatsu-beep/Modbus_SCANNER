@@ -11,7 +11,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
-- Market/community/academic research report and prioritized development plan (docs/RESEARCH.md, docs/PLAN.md)
+- Market/community/academic research report and prioritized development plan (EN/RU: docs/RESEARCH.md, docs/RESEARCH.ru.md, docs/PLAN.md, docs/PLAN.ru.md)
 - GNU GPL v3.0 license, repository metadata, CI badge, issue/PR templates
 
 ## [0.1.0] - 2026-11-17

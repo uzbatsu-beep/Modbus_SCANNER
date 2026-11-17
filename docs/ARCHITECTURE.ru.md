@@ -136,6 +136,18 @@ pub trait Transport: Send {
 читают/пишут `config.json` в `app_config_dir()` Tauri (например,
 `%APPDATA%\com.modbus-scanner.app\config.json` в Windows).
 
+## Планируемые модули (v0.2+, см. [PLAN.ru.md](PLAN.ru.md))
+
+| Модуль | Назначение |
+|--------|------------|
+| `scanner::strategies::BaudSweepStrategy` | свип baud/framing перед сканом адресов |
+| `scanner::strategies::RegisterScanStrategy` | адаптивный поиск регистров Quick/Balanced/Deep |
+| `scanner::classifier` | классификация IP: валидный Modbus / открытый порт / таймаут / недоступен |
+| `modbus::device_id` | идентификация устройства FC43/MEI14 |
+| `modbus::decode` | чистые функции декодирования (int/float, byte order, scaling) |
+| `state::TagMap` | именованные регистры и масштабирование в проектах |
+| `stores/monitor.ts`, события `monitor:update` | живой опрос и тренды |
+
 ## Границы сборки
 
 - `src-tauri/tauri.conf.json` — frontend dist `../dist`, окно, бандл, иконки.

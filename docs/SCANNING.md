@@ -90,6 +90,23 @@ a timeout creates false negatives; too long makes a 247-id scan painfully slow.
 - `transport_error` — port could not be opened, connection refused, malformed
   frame. Check cabling/port permissions/firewall.
 
+## Field practice (from the research)
+
+See [RESEARCH.md](RESEARCH.md) for the full source list. The following practices
+are consistently recommended in field guides and will be implemented in v0.2:
+
+- **Unknown serial settings:** sweep baud × framing before sweeping unit IDs.
+  Priority order: 9600 8N1 → 2400 8N1 → 19200 8N1 → even-parity variants (8E1).
+  Stop at the first combination that produces a valid CRC.
+- **Duplicate addresses:** two slaves on the same address answer simultaneously,
+  producing CRC collisions. A CRC error must never be reported as a device.
+  Recommendation: connect devices one at a time (point-to-point) to set addresses.
+- **One master only:** scanning a bus while a PLC is already polling produces
+  unusable results — disconnect the master or scan in a quiet window.
+- **Exception 02 (Illegal Data Address)** is a positive signal: the device is
+  alive, only the probed address is absent.
+- **Open port 502 is not a device** — the response must be valid Modbus.
+
 ## Safety
 
 - The scanner only issues **read** function codes (01–04) during discovery.

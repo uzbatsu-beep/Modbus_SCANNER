@@ -35,6 +35,24 @@ id 1 и 255 безопасно, но глубокое сканирование �
 устройств за шлюзом. Считайте шлюз границей производственной системы и согласовывайте
 сканирование с её владельцем.
 
+## Active scanning in OT / Активное сканирование в OT
+
+Academic and standards sources ([IEEE 11471618](https://ieeexplore.ieee.org/document/11471618/),
+[MOSTO](https://www.sciencedirect.com/science/article/pii/S0167404823002833),
+[ISA/IEC 62443](https://www.isa.org/standards-and-publications/isa-standards/isa-iec-62443-series-of-standards))
+note that active scanning can affect industrial networks and that audits must not
+interfere with ICS workflows. Therefore:
+
+- discovery stays strictly read-only (FC01–FC04);
+- a future **quiet mode** will cap request rate (≤2 req/s) and add adaptive backoff;
+- passive fingerprinting is preferred over aggressive probing where possible;
+- write-access testing is a separate opt-in mode with double confirmation and rollback.
+
+Научные работы и стандарты отмечают, что активное сканирование может влиять на
+промышленные сети, а аудит не должен мешать работе ICS. Поэтому обнаружение
+остаётся строго read-only (FC01–FC04), «тихий» режим ограничит частоту запросов,
+а тесты записи будут вынесены в отдельный режим с подтверждением и rollback.
+
 ## Network authorization / Права на сеть
 
 - Only scan networks and hosts you own or are authorized to test.

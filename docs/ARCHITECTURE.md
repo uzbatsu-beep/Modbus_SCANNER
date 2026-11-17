@@ -137,6 +137,18 @@ via `tauri::generate_handler!`.
 `config.json` under Tauri's `app_config_dir()` (e.g.
 `%APPDATA%\com.modbus-scanner.app\config.json` on Windows).
 
+## Planned modules (v0.2+, see [PLAN.md](PLAN.md))
+
+| Module | Purpose |
+|--------|---------|
+| `scanner::strategies::BaudSweepStrategy` | sweep serial baud/framing before unit-ID scan |
+| `scanner::strategies::RegisterScanStrategy` | Quick/Balanced/Deep adaptive register discovery |
+| `scanner::classifier` | classify IP targets: valid Modbus / open port / timeout / unreachable |
+| `modbus::device_id` | FC43/MEI14 device identification |
+| `modbus::decode` | pure decoding functions (int/float, byte order, scaling) |
+| `state::TagMap` | named registers and scaling, persisted in projects |
+| frontend `stores/monitor.ts`, `monitor:update` events | live polling and trends |
+
 ## Build boundaries
 
 - `src-tauri/tauri.conf.json` — frontend dist `../dist`, window, bundle, icons.
