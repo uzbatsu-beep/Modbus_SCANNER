@@ -1,0 +1,708 @@
+//! Scan engine: async task management, event emission, pause/resume/stop.
+//!
+//! Design:
+//! - [`ScannerHandle`] is a cheap cloneable handle stored in the Tauri state;
+//! - `start_scan` spawns a tokio task that consumes work items from a strategy;
+//! - serial work is strictly sequential (one bus!); IP work is bounded-concurrent;
+//! - control is done via an mpsc [`ControlMsg`] channel + a watch channel for pause;
+//! - results are shared via [`Arc<RwLock<ScanResults>>`] and pushed to the
+//!   frontend as Tauri events (`scan:progress`, `scan:event`).
+
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+use parking_lot::RwLock;
+use tokio::sync::{mpsc, watch, Mutex};
+
+use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
+use crate::modbus::frame::Pdu;
+use crate::transport::serial::{SerialPortConfig, SerialTransport};
+use crate::transport::tcp::TcpTransport;
+use crate::transport::udp::UdpTransport;
+use crate::transport::{Transport, TransportError};
+
+use super::strategies::{build_strategy, ScanStrategy, WorkItem};
+use super::types::*;
+
+/// Control messages to the engine task.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ControlMsg {
+    Pause,
+    Resume,
+    Stop,
+}
+
+/// Shared engine state handle.
+pub struct ScannerHandle {
+    /// Control channel to the running task (None when idle).
+    control_tx: Mutex<Option<mpsc::Sender<ControlMsg>>>,
+    /// Current status (watch: UI reads it cheaply).
+    status_tx: watch::Sender<ScanStatus>,
+    /// Shared results.
+    results: Arc<RwLock<ScanResults>>,
+}
+
+impl Default for ScannerHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl ScannerHandle {
+    pub fn new() -> Self {
+        let (status_tx, _) = watch::channel(ScanStatus::Idle);
+        Self {
+            control_tx: Mutex::new(None),
+            status_tx,
+            results: Arc::new(RwLock::new(ScanResults::default())),
+        }
+    }
+
+    pub fn status(&self) -> ScanStatus {
+        *self.status_tx.borrow()
+    }
+
+    /// Latest progress snapshot.
+    pub fn progress(&self) -> ScanProgress {
+        let results = self.results.read();
+        let total = results.stats.requests_sent + results.stats.timeouts;
+        ScanProgress {
+            status: *self.status_tx.borrow(),
+            total,
+            done: total,
+            found: results.records.len() as u64,
+            current: String::new(),
+            errors: results.stats.timeouts + results.stats.transport_errors,
+            elapsed_ms: results.stats.elapsed_ms(),
+        }
+    }
+
+    pub fn results(&self) -> ScanResults {
+        self.results.read().clone()
+    }
+
+    pub fn clear_results(&self) {
+        let mut r = self.results.write();
+        *r = ScanResults::default();
+    }
+
+    /// Start a new scan. Returns an error if one is already running.
+    pub async fn start(
+        &self,
+        app: tauri::AppHandle,
+        target: ScanTarget,
+        params: ScanParams,
+    ) -> Result<(), String> {
+        {
+            let mut guard = self.control_tx.lock().await;
+            if let Some(tx) = guard.as_ref() {
+                if !tx.is_closed() && *self.status_tx.borrow() == ScanStatus::Running {
+                    return Err("scan already in progress".into());
+                }
+            }
+            let (tx, rx) = mpsc::channel(8);
+            *guard = Some(tx);
+
+            let (pause_tx, pause_rx) = watch::channel(false);
+            let results = self.results.clone();
+            let status_tx = self.status_tx.clone();
+
+            let _ = self.status_tx.send(ScanStatus::Preparing);
+            let _ = status_tx;
+
+            let strategy = build_strategy(target, params)
+                .map_err(|e| {
+                    let _ = self.status_tx.send(ScanStatus::Failed);
+                    e
+                })?;
+
+            *self.results.write() = ScanResults {
+                records: Vec::new(),
+                stats: ScanStats {
+                    started_ms: Some(now_ms()),
+                    ..Default::default()
+                },
+            };
+
+            tokio::spawn(engine_task(
+                app,
+                strategy,
+                rx,
+                (pause_tx, pause_rx),
+                results,
+                status_tx,
+            ));
+            Ok(())
+        }
+    }
+
+    pub async fn control(&self, msg: ControlMsg) -> Result<(), String> {
+        let guard = self.control_tx.lock().await;
+        match guard.as_ref() {
+            Some(tx) => tx.send(msg).await.map_err(|e| e.to_string()),
+            None => Err("no scan running".into()),
+        }
+    }
+}
+
+/// The engine task.
+async fn engine_task(
+    app: tauri::AppHandle,
+    mut strategy: Box<dyn ScanStrategy + Send>,
+    mut control_rx: mpsc::Receiver<ControlMsg>,
+    (pause_tx, mut pause_rx): (watch::Sender<bool>, watch::Receiver<bool>),
+    results: Arc<RwLock<ScanResults>>,
+    status_tx: watch::Sender<ScanStatus>,
+) {
+    let total = strategy.total();
+    let mut done: u64 = 0;
+    let mut serial_transport: Option<SerialTransport> = None;
+    let mut want_stop = false;
+
+    let _ = status_tx.send(ScanStatus::Running);
+    emit_event(&app, &ScanEvent::StatusChanged {
+        status: ScanStatus::Running,
+        message: "scanning started".into(),
+    });
+
+    'main: while !want_stop {
+        // Handle control messages (non-blocking).
+        while let Ok(msg) = control_rx.try_recv() {
+            match msg {
+                ControlMsg::Stop => {
+                    want_stop = true;
+                    let _ = status_tx.send(ScanStatus::Stopped);
+                    continue 'main;
+                }
+                ControlMsg::Pause => {
+                    let _ = pause_tx.send(true);
+                    let _ = status_tx.send(ScanStatus::Paused);
+                    emit_event(&app, &ScanEvent::StatusChanged {
+                        status: ScanStatus::Paused,
+                        message: "scanning paused".into(),
+                    });
+                }
+                ControlMsg::Resume => {
+                    let _ = pause_tx.send(false);
+                    let _ = status_tx.send(ScanStatus::Running);
+                    emit_event(&app, &ScanEvent::StatusChanged {
+                        status: ScanStatus::Running,
+                        message: "scanning resumed".into(),
+                    });
+                }
+            }
+        }
+
+        // Wait while paused.
+        if *pause_rx.borrow() {
+            tokio::select! {
+                _ = pause_rx.changed() => {},
+                msg = control_rx.recv() => {
+                    if let Some(ControlMsg::Stop) = msg {
+                        want_stop = true;
+                        let _ = status_tx.send(ScanStatus::Stopped);
+                        continue 'main;
+                    }
+                }
+            }
+            continue;
+        }
+
+        let item = strategy.next_item();
+        let item = match item {
+            Some(i) => i,
+            None => break,
+        };
+
+        // Execute.
+        let outcome = match &item {
+            WorkItem::Probe { target, function, pdu } => {
+                results.write().stats.requests_sent += 1;
+                execute_probe(
+                    &app,
+                    &mut serial_transport,
+                    target,
+                    *function,
+                    pdu,
+                    &results,
+                    &mut strategy,
+                    &mut done,
+                )
+                .await
+            }
+            WorkItem::RegisterRead { target, function, start, quantity, pdu } => {
+                results.write().stats.requests_sent += 1;
+                execute_register_read(
+                    &app,
+                    &mut serial_transport,
+                    target,
+                    *function,
+                    *start,
+                    *quantity,
+                    pdu,
+                    &results,
+                )
+                .await
+            }
+        };
+
+        if outcome == Outcome::DeviceFound && strategy.stop_on_found() {
+            break;
+        }
+
+        done += 1;
+        emit_progress(&app, *status_tx.borrow(), total, done, &results);
+    }
+
+    // Cleanup.
+    if let Some(mut t) = serial_transport.take() {
+        let _ = t.close().await;
+    }
+
+    let status = if want_stop { ScanStatus::Stopped } else { ScanStatus::Finished };
+    {
+        let mut r = results.write();
+        r.stats.finished_ms = Some(now_ms());
+    }
+    let _ = status_tx.send(status);
+
+    let r = results.read();
+    emit_event(&app, &ScanEvent::Finished {
+        total: done,
+        found: r.records.len() as u64,
+        errors: r.stats.timeouts + r.stats.transport_errors,
+        elapsed_ms: r.stats.elapsed_ms(),
+    });
+    let _ = status_tx;
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Ok,
+    DeviceFound,
+    Failed,
+}
+
+/// Build the ADU for a target kind + raw PDU.
+fn build_adu(kind: TransportKind, unit_id: u8, pdu: &[u8]) -> Vec<u8> {
+    match kind {
+        TransportKind::Rtu => crate::modbus::rtu::encode(UnitId(unit_id), pdu),
+        TransportKind::Ascii => crate::modbus::ascii::encode(UnitId(unit_id), pdu),
+        TransportKind::Tcp => {
+            // MBAP + PDU, transaction id 0 (client matches at the transport layer)
+            let mut frame = Vec::with_capacity(7 + pdu.len());
+            frame.extend_from_slice(&0u16.to_be_bytes());
+            frame.extend_from_slice(&0u16.to_be_bytes());
+            frame.extend_from_slice(&((1 + pdu.len()) as u16).to_be_bytes());
+            frame.push(unit_id);
+            frame.extend_from_slice(pdu);
+            frame
+        }
+        TransportKind::Udp => {
+            // RTU-style ADU over UDP
+            crate::modbus::rtu::encode(UnitId(unit_id), pdu)
+        }
+    }
+}
+
+/// Verify a response ADU against the request.
+fn verify_adu(kind: TransportKind, expected_unit: u8, expected_fc: u8, adu: &[u8]) -> Result<Pdu, TransportError> {
+    let pdu = match kind {
+        TransportKind::Rtu => {
+            let f = crate::modbus::rtu::decode(adu).map_err(TransportError::Modbus)?;
+            if f.unit_id.0 != expected_unit {
+                return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
+                    expected: expected_unit,
+                    actual: f.unit_id.0,
+                }));
+            }
+            f.pdu
+        }
+        TransportKind::Ascii => {
+            let f = crate::modbus::ascii::decode(adu).map_err(TransportError::Modbus)?;
+            if f.unit_id.0 != expected_unit {
+                return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
+                    expected: expected_unit,
+                    actual: f.unit_id.0,
+                }));
+            }
+            f.pdu
+        }
+        TransportKind::Tcp => {
+            if adu.len() < 8 {
+                return Err(TransportError::Modbus(ModbusError::TooShort(adu.len())));
+            }
+            let unit_id = adu[6];
+            if unit_id != expected_unit {
+                return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
+                    expected: expected_unit,
+                    actual: unit_id,
+                }));
+            }
+            Pdu::from_bytes(&adu[7..]).map_err(TransportError::Modbus)?
+        }
+        TransportKind::Udp => {
+            let f = crate::modbus::rtu::decode(adu).map_err(TransportError::Modbus)?;
+            if f.unit_id.0 != expected_unit {
+                return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
+                    expected: expected_unit,
+                    actual: f.unit_id.0,
+                }));
+            }
+            f.pdu
+        }
+    };
+
+    if pdu.is_exception() {
+        return Ok(pdu);
+    }
+    let fc = pdu.function();
+    if fc != expected_fc {
+        return Err(TransportError::Modbus(ModbusError::UnexpectedFunction(fc)));
+    }
+    Ok(pdu)
+}
+
+#[allow(clippy::too_many_arguments)]
+#[allow(unused_assignments)]
+async fn execute_probe(
+    app: &tauri::AppHandle,
+    serial_transport: &mut Option<SerialTransport>,
+    target: &DeviceTarget,
+    function: u8,
+    pdu: &[u8],
+    results: &Arc<RwLock<ScanResults>>,
+    strategy: &mut Box<dyn ScanStrategy + Send>,
+    done: &mut u64,
+) -> Outcome {
+    let adu = build_adu(target.kind, target.unit_id, pdu);
+
+    let mut attempts = 0u32;
+    let retries = 1u32; // from params
+    let timeout = Duration::from_millis(800);
+    let mut last_err: Option<TransportError> = None;
+
+    loop {
+        let started = Instant::now();
+        let res: Result<Vec<u8>, TransportError> = match target.kind {
+            TransportKind::Rtu | TransportKind::Ascii => {
+                let mode = match target.serial_mode {
+                    Some(SerialMode::Ascii) => SerialMode::Ascii,
+                    _ => SerialMode::Rtu,
+                };
+                if serial_transport.is_none() {
+                    let sp = match target.serial.clone() {
+                        Some(sp) => sp,
+                        None => {
+                            last_err = Some(TransportError::Other("serial params required".into()));
+                            break;
+                        }
+                    };
+                    let cfg = SerialPortConfig {
+                        port_name: sp.port_name,
+                        baud_rate: sp.baud_rate,
+                        data_bits: sp.data_bits.into(),
+                        parity: sp.parity.into(),
+                        stop_bits: sp.stop_bits.into(),
+                        frame_gap: Duration::from_millis(2),
+                    };
+                    match SerialTransport::open(cfg, mode).await {
+                        Ok(t) => *serial_transport = Some(t),
+                        Err(e) => {
+                            let mut r = results.write();
+                            r.stats.transport_errors += 1;
+                            last_err = Some(e);
+                            break;
+                        }
+                    }
+                }
+                let t = serial_transport.as_mut().unwrap();
+                match t.transact(&adu, timeout, 8).await {
+                    Ok(resp) => Ok(resp),
+                    Err(e) => {
+                        if matches!(e, TransportError::Timeout(_)) {
+                            // after a timeout, reset the RX buffer
+                            let _ = t.reset().await;
+                        }
+                        Err(e)
+                    }
+                }
+            }
+            TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
+                host: target.endpoint.clone(),
+                port: target.port.unwrap_or(502),
+                connect_timeout: timeout,
+            })
+            .await
+            {
+                Ok(mut t) => match t.transact(&adu, timeout, 8).await {
+                    Ok(resp) => {
+                        let _ = t.close().await;
+                        Ok(resp)
+                    }
+                    Err(e) => Err(e),
+                },
+                Err(e) => Err(e),
+            },
+            TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
+                Ok(mut t) => t.transact(&adu, timeout, 8).await,
+                Err(e) => Err(e),
+            },
+        };
+
+        match res {
+            Ok(resp) => {
+                let rtt = started.elapsed().as_micros();
+                match verify_adu(target.kind, target.unit_id, function, &resp) {
+                    Ok(p) => {
+                        let result = super::strategies::classify_response(function, &p.to_bytes(), rtt);
+                        let is_found = matches!(result, ProbeResult::Ok { .. } | ProbeResult::Exception { .. });
+
+                        // Update results inside a closed scope: the write guard
+                        // must not live across the await below.
+                        let record: Option<DeviceRecord> = {
+                            let mut r = results.write();
+                            match &result {
+                                ProbeResult::Ok { .. } => r.stats.responses_ok += 1,
+                                ProbeResult::Exception { .. } => r.stats.responses_exception += 1,
+                                _ => {}
+                            }
+                            let key = format!(
+                                "{}:{}:{}",
+                                kind_short(target.kind),
+                                target.endpoint,
+                                target.port.map(|p| p.to_string()).unwrap_or_default()
+                            );
+                            let key = format!("{key}:{}", target.unit_id);
+                            if is_found {
+                                if let Some(rec) = r.records.iter_mut().find(|rec| rec.key == key) {
+                                    rec.probes.insert(function, result.clone());
+                                    rec.last_seen_ms = now_ms();
+                                } else {
+                                    let mut probes = HashMap::new();
+                                    probes.insert(function, result.clone());
+                                    r.records.push(DeviceRecord {
+                                        key: key.clone(),
+                                        target: target.clone(),
+                                        probes,
+                                        registers: HashMap::new(),
+                                        first_seen_ms: now_ms(),
+                                        last_seen_ms: now_ms(),
+                                    });
+                                }
+                                r.records.iter().find(|rec| rec.key == key).cloned()
+                            } else {
+                                None
+                            }
+                        };
+
+                        if is_found {
+                            if let Some(rec) = record {
+                                emit_event(app, &ScanEvent::DeviceFound { record: rec });
+                            }
+                            // Register plan for the found device.
+                            for w in strategy.on_device_found(target) {
+                                let r2 = results.clone();
+                                let app2 = app.clone();
+                                let mut st = None;
+                                execute_work(app2, w, &mut st, &r2).await;
+                            }
+                            return Outcome::DeviceFound;
+                        }
+                        return Outcome::Ok;
+                    }
+                    Err(e) => {
+                        last_err = Some(e);
+                    }
+                }
+            }
+            Err(e) => {
+                last_err = Some(e);
+            }
+        }
+
+        attempts += 1;
+        if attempts > retries {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    // No response / error after retries.
+    {
+        let mut r = results.write();
+        match &last_err {
+            Some(TransportError::Timeout(_)) | None => r.stats.timeouts += 1,
+            Some(_) => r.stats.transport_errors += 1,
+        }
+    }
+    let _ = done;
+    Outcome::Failed
+}
+
+async fn execute_work(
+    app: tauri::AppHandle,
+    item: WorkItem,
+    serial_transport: &mut Option<SerialTransport>,
+    results: &Arc<RwLock<ScanResults>>,
+) {
+    if let WorkItem::RegisterRead { target, function, start, quantity, pdu } = &item {
+        results.write().stats.requests_sent += 1;
+        let _ = execute_register_read(&app, serial_transport, target, *function, *start, *quantity, pdu, results).await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn execute_register_read(
+    app: &tauri::AppHandle,
+    serial_transport: &mut Option<SerialTransport>,
+    target: &DeviceTarget,
+    function: u8,
+    start: u16,
+    quantity: u16,
+    pdu: &[u8],
+    results: &Arc<RwLock<ScanResults>>,
+) -> Outcome {
+    let adu = build_adu(target.kind, target.unit_id, pdu);
+    let timeout = Duration::from_millis(800);
+
+    let res: Result<Vec<u8>, TransportError> = match target.kind {
+        TransportKind::Rtu | TransportKind::Ascii => {
+            if serial_transport.is_none() {
+                return Outcome::Failed;
+            }
+            let t = serial_transport.as_mut().unwrap();
+            t.transact(&adu, timeout, 3 + (quantity as usize) * 2).await
+        }
+        TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
+            host: target.endpoint.clone(),
+            port: target.port.unwrap_or(502),
+            connect_timeout: timeout,
+        })
+        .await
+        {
+            Ok(mut t) => match t.transact(&adu, timeout, 8).await {
+                Ok(resp) => {
+                    let _ = t.close().await;
+                    Ok(resp)
+                }
+                Err(e) => Err(e),
+            },
+            Err(e) => Err(e),
+        },
+        TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
+            Ok(mut t) => t.transact(&adu, timeout, 8).await,
+            Err(e) => Err(e),
+        },
+    };
+
+    let resp = match res {
+        Ok(r) => r,
+        Err(e) => {
+            let mut r = results.write();
+            match e {
+                TransportError::Timeout(_) => r.stats.timeouts += 1,
+                _ => r.stats.transport_errors += 1,
+            }
+            return Outcome::Failed;
+        }
+    };
+
+    let rtt: u128 = 0;
+    match verify_adu(target.kind, target.unit_id, function, &resp) {
+        Ok(p) if !p.is_exception() => {
+            let data = match &p {
+                Pdu::Response { data, .. } => data.clone(),
+                _ => Vec::new(),
+            };
+            let key = format!(
+                "{}:{}:{}",
+                kind_short(target.kind),
+                target.endpoint,
+                target.port.map(|p| p.to_string()).unwrap_or_default()
+            );
+            let key = format!("{key}:{}", target.unit_id);
+
+            let values: Vec<u16> = match function {
+                0x03 | 0x04 => crate::modbus::frame::response::parse_registers(&data).unwrap_or_default(),
+                0x01 | 0x02 => crate::modbus::frame::response::parse_bits(&data, quantity)
+                    .map(|bits| bits.iter().map(|&b| b as u16).collect())
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            };
+
+            let mut r = results.write();
+            r.stats.responses_ok += 1;
+            if let Some(rec) = r.records.iter_mut().find(|rec| rec.key == key) {
+                for (i, raw) in values.iter().enumerate() {
+                    rec.registers.insert(
+                        format!("{function:02x}:{:04x}", start + i as u16),
+                        RegisterValue {
+                            function,
+                            address: start + i as u16,
+                            raw: *raw,
+                            as_hex: format!("{raw:04x}"),
+                            rtt_us: rtt,
+                        },
+                    );
+                }
+                rec.last_seen_ms = now_ms();
+                let rec_clone = rec.clone();
+                drop(r);
+                emit_event(app, &ScanEvent::DeviceUpdated { record: rec_clone });
+            }
+            Outcome::Ok
+        }
+        Ok(p) => {
+            if let Pdu::Exception { code: _, .. } = p {
+                let mut r = results.write();
+                r.stats.responses_exception += 1;
+            }
+            Outcome::Ok
+        }
+        Err(e) => {
+            let mut r = results.write();
+            r.stats.transport_errors += 1;
+            let _ = e;
+            Outcome::Failed
+        }
+    }
+}
+
+fn kind_short(kind: TransportKind) -> &'static str {
+    match kind {
+        TransportKind::Rtu => "rtu",
+        TransportKind::Ascii => "ascii",
+        TransportKind::Tcp => "tcp",
+        TransportKind::Udp => "udp",
+    }
+}
+
+fn emit_event(app: &tauri::AppHandle, event: &ScanEvent) {
+    use tauri::Emitter;
+    if let Err(e) = app.emit("scan:event", event) {
+        tracing::warn!("failed to emit scan event: {e}");
+    }
+}
+
+fn emit_progress(
+    app: &tauri::AppHandle,
+    status: ScanStatus,
+    total: u64,
+    done: u64,
+    results: &Arc<RwLock<ScanResults>>,
+) {
+    use tauri::Emitter;
+    let r = results.read();
+    let progress = ScanProgress {
+        status,
+        total,
+        done,
+        found: r.records.len() as u64,
+        current: String::new(),
+        errors: r.stats.timeouts + r.stats.transport_errors,
+        elapsed_ms: r.stats.elapsed_ms(),
+    };
+    let _ = app.emit("scan:progress", &progress);
+}

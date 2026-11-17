@@ -1,0 +1,89 @@
+# Security & operational safety / Безопасность
+
+## Discovery is read-only / Обнаружение только читает
+
+During discovery the scanner sends **only read function codes** (FC01–FC04).
+This is intentional: scanning an unknown device must never change its state.
+Write functions (FC05, FC06, FC0F, FC10) are available only in the Manual tab and
+only after an explicit user action.
+
+При обнаружении сканер отправляет **только функции чтения** (FC01–FC04) — сканирование
+неизвестного устройства не должно менять его состояние. Функции записи доступны
+только во вкладке Manual и только после явного действия пользователя.
+
+## Broadcast / Broadcast
+
+Serial unit id `0` is a broadcast address. Devices do not answer broadcast reads,
+so it is excluded from meaningful scans. A **broadcast write** (Manual tab, unit 0)
+affects **every device on the bus** — never use it unless you are certain of the
+consequences. Unit ids 248–255 are reserved by the Modbus specification.
+
+Последовательный адрес `0` — broadcast. Устройства не отвечают на broadcast-чтение,
+поэтому он бесполезен при сканировании. **Broadcast-запись** (Manual, unit 0)
+ затрагивает **все устройства на шине** — применяйте её только если полностью
+ понимаете последствия. Адреса 248–255 зарезервированы спецификацией.
+
+## Gateways / Шлюзы
+
+A Modbus TCP gateway routes by unit id to serial slaves. Probing unit ids 1 and
+255 is harmless, but a deep scan with ids 2–247 can reach real devices behind the
+gateway. Treat a gateway as a production boundary: coordinate scanning with the
+system owner.
+
+Modbus TCP-шлюз маршрутизирует по unit id на последовательные устройства. Зондирование
+id 1 и 255 безопасно, но глубокое сканирование с id 2–247 может дойти до реальных
+устройств за шлюзом. Считайте шлюз границей производственной системы и согласовывайте
+сканирование с её владельцем.
+
+## Network authorization / Права на сеть
+
+- Only scan networks and hosts you own or are authorized to test.
+- IP sweeps generate many connection attempts in a short time; on shared networks
+  this can trip IDS/IPS or overload fragile equipment.
+- The default concurrency value (32) is intentionally modest; prefer 1–8 on
+  OT/ICS networks.
+
+- Сканируйте только те сети и хосты, которыми вы владеете или на которые у вас есть
+  разрешение.
+- IP-перебор генерирует много попыток подключения за короткое время — на общих сетях
+  это может сработать с IDS/IPS или перегрузить чувствительное оборудование.
+- Значение параллелизма по умолчанию (32) умеренное; в сетях OT/ICS используйте 1–8.
+
+## Data handling / Работа с данными
+
+- Scan results and exported files may contain process values, device addresses and
+  configuration details — treat them as sensitive.
+- The app stores configuration in `config.json` under the Tauri app config dir;
+  it contains no credentials by design.
+- Exported files are written to the path the user chooses; the app never uploads
+  data anywhere (no network calls beyond Modbus targets).
+
+- Результаты и экспортированные файлы могут содержать технологические значения,
+  адреса устройств и детали конфигурации — обращайтесь с ними как с конфиденциальными.
+- Приложение хранит настройки в `config.json` каталога конфигурации Tauri;
+  учётных данных в них нет по дизайну.
+- Файлы экспорта записываются по пути, выбранному пользователем; приложение никуда
+  не отправляет данные (кроме запросов Modbus).
+
+## Tauri surface / Поверхность Tauri
+
+- Capabilities are minimal: `core:default` + `shell:allow-open`.
+- The frontend receives raw response hex and values; no arbitrary Rust code can be
+  invoked from the WebView beyond registered commands.
+- Raw frame sending (`send_raw_frame`) bypasses PDU builders: a malformed frame can
+  trigger unexpected behaviour in a device. Use it only for debugging on equipment
+  you can safely reset.
+
+- Права минимальны: `core:default` + `shell:allow-open`.
+- Фронтенд получает hex ответов и значения; из WebView недоступен произвольный Rust
+  код, только зарегистрированные команды.
+- Отправка raw-кадра обходит сборщики PDU: некорректный кадр может вызвать неожиданное
+  поведение устройства. Используйте её только для отладки на оборудовании, которое
+  можно безопасно перезапустить.
+
+## Reporting vulnerabilities / Сообщение об уязвимостях
+
+The project is at MVP stage; no security contact is defined yet. Open an issue with
+reproduction steps and affected version.
+Проект находится на стадии MVP; контакт для безопасности пока не назначен.
+Создайте issue с шагами воспроизведения и затронутой версией.

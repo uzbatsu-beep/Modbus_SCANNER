@@ -1,0 +1,278 @@
+/**
+ * IPC contract types — TypeScript mirror of `src-tauri/src/scanner/types.rs`,
+ * `src-tauri/src/commands/*` and `src-tauri/src/transport/serial.rs`.
+ *
+ * IMPORTANT: any change on the Rust side must be mirrored here (and vice versa).
+ */
+
+// ---------------------------------------------------------------------------
+// Common / transport
+// ---------------------------------------------------------------------------
+
+export type TransportKind = "rtu" | "ascii" | "tcp" | "udp";
+
+export type DataBitsSerde = "five" | "six" | "seven" | "eight";
+export type ParitySerde = "none" | "odd" | "even";
+export type StopBitsSerde = "one" | "two";
+
+export interface SerialPortParams {
+  port_name: string;
+  baud_rate: number;
+  data_bits: DataBitsSerde;
+  parity: ParitySerde;
+  stop_bits: StopBitsSerde;
+}
+
+export type SerialMode = "rtu" | "ascii";
+export type IpTransportKind = "tcp" | "udp";
+
+// ---------------------------------------------------------------------------
+// Scan targets
+// ---------------------------------------------------------------------------
+
+export interface UnitIdRange {
+  type: "unit_id_range";
+  from: number;
+  to: number;
+  port: SerialPortParams;
+  mode: SerialMode;
+}
+
+export interface IpRange {
+  type: "ip_range";
+  /** "192.168.1.1" or CIDR "192.168.1.0/24" */
+  from: string;
+  to?: string | null;
+  port: number;
+  kind: IpTransportKind;
+}
+
+export interface SingleDevice {
+  type: "single_device";
+  target: DeviceTarget;
+  register_plan: RegisterRange[];
+}
+
+export type ScanTarget = UnitIdRange | IpRange | SingleDevice;
+
+export interface DeviceTarget {
+  kind: TransportKind;
+  endpoint: string;
+  port?: number | null;
+  unit_id: number;
+  serial?: SerialPortParams | null;
+  serial_mode?: SerialMode | null;
+}
+
+export interface RegisterRange {
+  function: number;
+  start: number;
+  quantity: number;
+}
+
+// ---------------------------------------------------------------------------
+// Scan params / results
+// ---------------------------------------------------------------------------
+
+export interface ScanParams {
+  timeout_ms: number;
+  request_gap_ms: number;
+  retries: number;
+  probe_functions: number[];
+  stop_on_first: boolean;
+  register_plan: RegisterRange[];
+  ip_concurrency: number;
+}
+
+export type ProbeResult =
+  | { status: "ok"; function: number; values: number[]; raw_hex: string; rtt_us: number }
+  | { status: "exception"; function: number; code: number; message: string; rtt_us: number }
+  | { status: "no_response"; function: number }
+  | { status: "transport_error"; function: number; message: string };
+
+export interface RegisterValue {
+  function: number;
+  address: number;
+  raw: number;
+  as_hex: string;
+  rtt_us: number;
+}
+
+export interface DeviceRecord {
+  key: string;
+  target: DeviceTarget;
+  /** map: function code -> result */
+  probes: Record<number, ProbeResult>;
+  /** map: "fc:address" -> value */
+  registers: Record<string, RegisterValue>;
+  first_seen_ms: number;
+  last_seen_ms: number;
+}
+
+export type ScanStatus =
+  | "idle"
+  | "preparing"
+  | "running"
+  | "paused"
+  | "stopped"
+  | "finished"
+  | "failed";
+
+export interface ScanProgress {
+  status: ScanStatus;
+  total: number;
+  done: number;
+  found: number;
+  current: string;
+  errors: number;
+  elapsed_ms: number;
+}
+
+export type ScanEvent =
+  | { kind: "status_changed"; status: ScanStatus; message: string }
+  | { kind: "device_found"; record: DeviceRecord }
+  | { kind: "device_updated"; record: DeviceRecord }
+  | { kind: "probe_completed"; device_key: string; function: number; result: ProbeResult }
+  | { kind: "finished"; total: number; found: number; errors: number; elapsed_ms: number };
+
+export interface ScanStats {
+  requests_sent: number;
+  responses_ok: number;
+  responses_exception: number;
+  timeouts: number;
+  transport_errors: number;
+  started_ms?: number | null;
+  finished_ms?: number | null;
+}
+
+export interface ScanResults {
+  records: DeviceRecord[];
+  stats: ScanStats;
+}
+
+// ---------------------------------------------------------------------------
+// Serial ports (system)
+// ---------------------------------------------------------------------------
+
+export interface SerialPortInfo {
+  port_name: string;
+  port_type: string;
+  vid?: number | null;
+  pid?: number | null;
+  manufacturer?: string | null;
+  product?: string | null;
+}
+
+export interface TestSerialResult {
+  opened: boolean;
+  error?: string | null;
+  modbus_responded: boolean;
+  rtt_us?: number | null;
+  response_hex?: string | null;
+}
+
+// ---------------------------------------------------------------------------
+// Manual (debug) commands
+// ---------------------------------------------------------------------------
+
+export interface ManualTarget {
+  kind: TransportKind;
+  endpoint: string;
+  port?: number | null;
+  unit_id: number;
+  serial?: SerialPortParams | null;
+  serial_mode?: SerialMode | null;
+}
+
+export interface ManualTiming {
+  timeout_ms: number;
+  retries?: number;
+}
+
+export interface ReadRequest {
+  target: ManualTarget;
+  function: number;
+  start_address: number;
+  quantity: number;
+  timing?: ManualTiming | null;
+}
+
+export interface WriteRequest {
+  target: ManualTarget;
+  function: number;
+  start_address: number;
+  values: number[];
+  timing?: ManualTiming | null;
+}
+
+export interface RawFrameRequest {
+  target: ManualTarget;
+  adu_hex: string;
+  is_full_adu: boolean;
+  timing?: ManualTiming | null;
+}
+
+export interface ManualResponse {
+  ok: boolean;
+  error?: string | null;
+  exception_code?: number | null;
+  values: number[];
+  response_hex?: string | null;
+  rtt_us?: number | null;
+}
+
+// ---------------------------------------------------------------------------
+// Config
+// ---------------------------------------------------------------------------
+
+export interface Config {
+  language: string;
+  theme: string;
+  scan_params: ScanParams;
+  last_serial?: SerialPortParamsFull | null;
+  last_tcp_host?: string | null;
+  last_tcp_port?: number | null;
+  last_udp_host?: string | null;
+  last_udp_port?: number | null;
+  export_dir?: string | null;
+  export_format: string;
+}
+
+/** Backend Config.last_serial uses transport::serial::SerialPortConfig. */
+export interface SerialPortParamsFull extends SerialPortParams {
+  frame_gap_ms?: number;
+}
+
+export type ExportFormat = "csv" | "json" | "xml";
+
+// ---------------------------------------------------------------------------
+// Modbus constants (UI)
+// ---------------------------------------------------------------------------
+
+export const FC = {
+  READ_COILS: 0x01,
+  READ_DISCRETE_INPUTS: 0x02,
+  READ_HOLDING_REGISTERS: 0x03,
+  READ_INPUT_REGISTERS: 0x04,
+  WRITE_SINGLE_COIL: 0x05,
+  WRITE_SINGLE_REGISTER: 0x06,
+  WRITE_MULTIPLE_COILS: 0x0f,
+  WRITE_MULTIPLE_REGISTERS: 0x10,
+  MASK_WRITE_REGISTER: 0x16,
+  READ_WRITE_MULTIPLE_REGISTERS: 0x17,
+} as const;
+
+export const FC_NAMES: Record<number, string> = {
+  0x01: "Read Coils (0x01)",
+  0x02: "Read Discrete Inputs (0x02)",
+  0x03: "Read Holding Registers (0x03)",
+  0x04: "Read Input Registers (0x04)",
+  0x05: "Write Single Coil (0x05)",
+  0x06: "Write Single Register (0x06)",
+  0x0f: "Write Multiple Coils (0x0F)",
+  0x10: "Write Multiple Registers (0x10)",
+  0x16: "Mask Write Register (0x16)",
+  0x17: "Read/Write Multiple Registers (0x17)",
+};
+
+export const BAUD_RATES = [1200, 2400, 4800, 9600, 19200, 38400, 57600, 115200];
