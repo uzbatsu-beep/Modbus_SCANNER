@@ -54,6 +54,9 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: exports only the selected `DeviceRecord` (probes, registers, FC43 identity); `false`/error if key is unknown |
 | `save_project` | `{ path: string, name: string }` | `string` (path) | P3-04: writes devices + tag map + scan history to one JSON file; appends a snapshot (max 20) |
 | `load_project` | `{ path: string }` | `Project` | P3-04: restores results and tags, syncs `config.json` |
+| `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: poll registers every 250–10000 ms |
+| `stop_monitor` | — | `void` | Stop live polling |
+| `get_monitor_state` | — | `MonitorValueState[]` | Current min/max/changed values and sample history |
 
 `ScanTarget` variants:
 
@@ -217,6 +220,12 @@ interface DeviceIdentification {
 `Project` (P3-04): `{ name, version, created_ms, updated_ms,
 results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, where
 `ScanSnapshot = { timestamp_ms, label, results }`.
+
+### `monitor:update` — `MonitorUpdate` (P3-05)
+
+`{ values: MonitorValueState[], cycle_ms: number }` — emitted once per monitor
+poll cycle. `MonitorValueState` carries `key`, `name`, `unit`, latest `values`,
+`min`/`max`, a `changed` flag and up to 5000 `samples` (one hour window).
 
 ### IP target classification (P2-04)
 

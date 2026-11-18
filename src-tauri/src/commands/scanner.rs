@@ -6,8 +6,8 @@ use tauri::{AppHandle, State};
 
 use crate::scanner::engine::{ControlMsg, ScannerHandle};
 use crate::scanner::types::{
-    now_ms, DeviceRecord, ProbeResult, Project, ScanParams, ScanProgress, ScanResults,
-    ScanSnapshot, ScanStatus, ScanTarget,
+    now_ms, DeviceRecord, MonitorValueState, MonitorWatch, ProbeResult, Project, ScanParams,
+    ScanProgress, ScanResults, ScanSnapshot, ScanStatus, ScanTarget,
 };
 use crate::state::AppState;
 
@@ -88,6 +88,27 @@ pub async fn export_results(
 
     let _ = app;
     Ok(count)
+}
+
+/// Start live polling of selected registers (P3-05).
+#[tauri::command]
+pub async fn start_monitor(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    watches: Vec<MonitorWatch>,
+    interval_ms: u32,
+) -> Result<(), String> {
+    state.monitor.start(app, watches, interval_ms).await
+}
+
+#[tauri::command]
+pub async fn stop_monitor(state: State<'_, AppState>) -> Result<(), String> {
+    state.monitor.stop().await
+}
+
+#[tauri::command]
+pub fn get_monitor_state(state: State<'_, AppState>) -> Vec<MonitorValueState> {
+    state.monitor.snapshot()
 }
 
 /// Save the current session, tag map and scan history into one project file (P3-04).

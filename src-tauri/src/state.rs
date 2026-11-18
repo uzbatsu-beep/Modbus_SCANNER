@@ -8,6 +8,8 @@ use crate::scanner::types::{ScanParams, TagDefinition};
 pub struct AppState {
     /// Scanner engine handle
     pub scanner: crate::scanner::ScannerHandle,
+    /// Live register monitor handle
+    pub monitor: crate::scanner::monitor::MonitorHandle,
     /// Configuration store
     pub config: parking_lot::Mutex<Config>,
 }

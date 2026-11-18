@@ -269,6 +269,39 @@ export type ScanEvent =
   | { kind: "probe_completed"; device_key: string; function: number; result: ProbeResult }
   | { kind: "finished"; total: number; found: number; errors: number; elapsed_ms: number };
 
+export interface MonitorWatch {
+  key: string;
+  target: ManualTarget;
+  function: number;
+  address: number;
+  quantity: number;
+  name?: string | null;
+  unit?: string | null;
+}
+
+export interface MonitorSample {
+  timestamp_ms: number;
+  values: number[];
+  rtt_us: number;
+}
+
+export interface MonitorValueState {
+  key: string;
+  name: string;
+  unit: string;
+  values: number[];
+  min?: number | null;
+  max?: number | null;
+  changed: boolean;
+  samples: MonitorSample[];
+  errors: number;
+}
+
+export interface MonitorUpdate {
+  values: MonitorValueState[];
+  cycle_ms: number;
+}
+
 export interface ScanSnapshot {
   timestamp_ms: number;
   label: string;

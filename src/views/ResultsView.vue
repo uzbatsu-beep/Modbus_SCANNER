@@ -4,6 +4,7 @@ import { onMounted } from "vue";
 import DevicesTable from "@/components/results/DevicesTable.vue";
 import DeviceDetail from "@/components/results/DeviceDetail.vue";
 import IpTargetTable from "@/components/results/IpTargetTable.vue";
+import MonitorPanel from "@/components/results/MonitorPanel.vue";
 import { useDevicesStore } from "@/stores/devices";
 import { useScannerStore } from "@/stores/scanner";
 
@@ -20,6 +21,7 @@ onMounted(() => {
   <div class="results-view">
     <DevicesTable />
     <IpTargetTable />
+    <MonitorPanel />
     <DeviceDetail />
   </div>
 </template>

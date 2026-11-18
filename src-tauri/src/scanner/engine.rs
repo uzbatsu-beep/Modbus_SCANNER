@@ -525,7 +525,7 @@ struct ProbeOutcome {
 }
 
 /// Next MBAP transaction id (shared by all concurrent IP probes).
-fn next_transaction_id() -> u16 {
+pub(crate) fn next_transaction_id() -> u16 {
     static NEXT: AtomicU16 = AtomicU16::new(1);
     NEXT.fetch_add(1, Ordering::Relaxed)
 }
@@ -574,7 +574,7 @@ fn verify_mbap(adu: &[u8], expected_unit: u8, expected_tx: u16) -> Result<Pdu, T
 }
 
 /// Build the wire ADU, honouring the selected TCP/UDP framing.
-fn build_adu(kind: TransportKind, unit_id: u8, pdu: &[u8], engine: EngineParams, tx: u16) -> Vec<u8> {
+pub(crate) fn build_adu(kind: TransportKind, unit_id: u8, pdu: &[u8], engine: EngineParams, tx: u16) -> Vec<u8> {
     match kind {
         TransportKind::Rtu => crate::modbus::rtu::encode(UnitId(unit_id), pdu),
         TransportKind::Ascii => crate::modbus::ascii::encode(UnitId(unit_id), pdu),
@@ -608,7 +608,7 @@ fn verify_rtu(adu: &[u8], expected_unit: u8) -> Result<Pdu, TransportError> {
 }
 
 /// Verify a response ADU against the request (including transaction id for MBAP).
-fn verify_adu(
+pub(crate) fn verify_adu(
     kind: TransportKind,
     expected_unit: u8,
     expected_fc: u8,
@@ -1260,7 +1260,7 @@ async fn identify_device(
 }
 
 /// Settings currently required by a serial work item (None for IP targets).
-fn serial_signature(target: &DeviceTarget) -> Option<String> {
+pub(crate) fn serial_signature(target: &DeviceTarget) -> Option<String> {
     let sp = target.serial.as_ref()?;
     Some(format!(
         "{}|{}|{:?}|{:?}|{:?}|{:?}",
@@ -1274,7 +1274,7 @@ fn serial_signature(target: &DeviceTarget) -> Option<String> {
 }
 
 /// Reopen the shared serial port when the sweep moves to different settings.
-async fn ensure_serial_settings(
+pub(crate) async fn ensure_serial_settings(
     transport: &mut Option<SerialTransport>,
     signature: &mut Option<String>,
     target: &DeviceTarget,

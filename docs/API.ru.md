@@ -54,6 +54,9 @@
 | `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: экспортирует только выбранное устройство (зонды, регистры, FC43-идентификацию); ошибка, если ключ неизвестен |
 | `save_project` | `{ path: string, name: string }` | `string` (путь) | P3-04: пишет устройства + теги + историю сканов в один JSON; добавляет снимок (макс. 20) |
 | `load_project` | `{ path: string }` | `Project` | P3-04: восстанавливает результаты и теги, синхронизирует `config.json` |
+| `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: опрос регистров каждые 250–10000 мс |
+| `stop_monitor` | — | `void` | Остановить опрос |
+| `get_monitor_state` | — | `MonitorValueState[]` | Текущие min/max/изменения и история выборок |
 
 Варианты `ScanTarget`:
 
@@ -216,6 +219,12 @@ interface DeviceIdentification {
 `Project` (P3-04): `{ name, version, created_ms, updated_ms,
 results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, где
 `ScanSnapshot = { timestamp_ms, label, results }`.
+
+### `monitor:update` — `MonitorUpdate` (P3-05)
+
+`{ values: MonitorValueState[], cycle_ms: number }` — отправляется один раз за
+цикл опроса. `MonitorValueState` содержит `key`, `name`, `unit`, последние
+`values`, `min`/`max`, флаг `changed` и до 5000 `samples` (окно один час).
 
 ### Классификация IP-целей (P2-04)
 

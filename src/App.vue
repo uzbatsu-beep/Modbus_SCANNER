@@ -5,13 +5,17 @@ import TopBar from "@/components/layout/TopBar.vue";
 import StatusBar from "@/components/layout/StatusBar.vue";
 import { useScannerStore } from "@/stores/scanner";
 import { useSettingsStore } from "@/stores/settings";
+import { useMonitorStore } from "@/stores/monitor";
 
 const scanner = useScannerStore();
 const settings = useSettingsStore();
+const monitor = useMonitorStore();
 
 onMounted(async () => {
   await settings.load();
   await scanner.bindEvents();
+  await monitor.bind();
+  await monitor.refresh();
 });
 </script>
 

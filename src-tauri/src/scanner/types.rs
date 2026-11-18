@@ -430,6 +430,50 @@ pub struct IpTargetStatus {
     pub last_seen_ms: u64,
 }
 
+/// One register address watched by the live monitor (P3-05).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorWatch {
+    pub key: String,
+    pub target: DeviceTarget,
+    pub function: u8,
+    pub address: u16,
+    pub quantity: u16,
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub unit: Option<String>,
+}
+
+/// One poll result for a watch.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorSample {
+    pub timestamp_ms: u64,
+    pub values: Vec<u16>,
+    pub rtt_us: u128,
+}
+
+/// Aggregated state of a watched register.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorValueState {
+    pub key: String,
+    pub name: String,
+    pub unit: String,
+    pub values: Vec<u16>,
+    pub min: Option<u16>,
+    pub max: Option<u16>,
+    /// True when the last poll differed from the previous one.
+    pub changed: bool,
+    pub samples: Vec<MonitorSample>,
+    pub errors: u32,
+}
+
+/// Event emitted once per monitor poll cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorUpdate {
+    pub values: Vec<MonitorValueState>,
+    pub cycle_ms: u64,
+}
+
 /// One saved scan snapshot inside a project (P3-04).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanSnapshot {

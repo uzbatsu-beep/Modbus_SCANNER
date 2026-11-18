@@ -17,6 +17,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI Node.js version bumped to 22
 
 ### Added
+- P3-05: live register monitor (250 ms–10 s), min/max, change highlighting and SVG trends with `monitor:update` event
 - P3-04: portable projects (`save_project`/`load_project`) with devices, tags and up to 20 scan snapshots
 - P3-01/02/03: register decoder (INT/UINT/FLOAT32/ASCII, ABCD/BADC/CDAB/DCBA), labelled float hypotheses and named tags with scaling persisted in config
 - `probe_completed` events for every finished probe (including timeouts/errors) and per-probe log lines in the UI — v0.2 complete

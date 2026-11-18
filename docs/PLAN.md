@@ -65,7 +65,8 @@ per-probe log ✅ done. v0.2 is complete.
 **v0.3 started:** P3-01 ✅ (decoder: int/uint/float32/ASCII × 4 byte orders),
 P3-02 ✅ (labelled float hypotheses), P3-03 ✅ (named tags with scaling, stored
 in config), P3-04 ✅ (portable projects with devices, tags and up to 20 scan
-snapshots). P3-05+ (live monitor, logs, diff, i18n) are still open.
+snapshots), P3-05 ✅ (live monitor: 250 ms–10 s polling, min/max, change flags,
+1 min/5 min/1 h SVG trends). P3-06+ (raw logs, diff, i18n) are still open.
 
 **Goal:** solve the main field-engineer pain — “the device is there, the docs are not”.
 

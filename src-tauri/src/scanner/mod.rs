@@ -5,6 +5,7 @@
 //! - `engine`     - async engine: task management, event emission (Tauri events), pause/resume/stop
 
 pub mod engine;
+pub mod monitor;
 pub mod strategies;
 pub mod types;
 

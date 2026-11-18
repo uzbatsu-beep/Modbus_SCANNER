@@ -13,6 +13,9 @@ import type {
   DecodedValue,
   ExportFormat,
   ManualResponse,
+  MonitorUpdate,
+  MonitorValueState,
+  MonitorWatch,
   Project,
   ReadRequest,
   RawFrameRequest,
@@ -66,6 +69,15 @@ export const api = {
     saveProject: (path: string, name: string) =>
       invoke<string>("save_project", { path, name }),
     loadProject: (path: string) => invoke<Project>("load_project", { path }),
+    startMonitor: (watches: MonitorWatch[], interval_ms: number) =>
+      invoke<void>("start_monitor", { watches, interval_ms }),
+    stopMonitor: () => invoke<void>("stop_monitor"),
+    getMonitorState: () => invoke<MonitorValueState[]>("get_monitor_state"),
+  },
+
+  monitor: {
+    onUpdate: (cb: (u: MonitorUpdate) => void) =>
+      listen<MonitorUpdate>("monitor:update", (e) => cb(e.payload)),
   },
 
   modbus: {
