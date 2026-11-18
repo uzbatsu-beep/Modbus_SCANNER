@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -19,9 +20,9 @@ pub struct AppState {
     /// Live register monitor handle
     pub monitor: crate::scanner::monitor::MonitorHandle,
     /// Raw Modbus traffic log
-    pub traffic: TrafficLogHandle,
+    pub traffic: Arc<TrafficLogHandle>,
     /// File loggers with rotation
-    pub loggers: LoggerHandle,
+    pub loggers: Arc<LoggerHandle>,
     /// Configuration store
     pub config: parking_lot::Mutex<Config>,
 }
@@ -274,6 +275,18 @@ impl LoggerHandle {
                 Err(e) => state.error = Some(e.to_string()),
             }
         }
+    }
+}
+
+impl crate::scanner::TrafficSink for TrafficLogHandle {
+    fn push(&self, record: TrafficRecord) {
+        TrafficLogHandle::push(self, record);
+    }
+}
+
+impl crate::scanner::SampleSink for LoggerHandle {
+    fn write(&self, values: &[MonitorValueState]) {
+        LoggerHandle::write(self, values);
     }
 }
 

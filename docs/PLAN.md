@@ -62,7 +62,10 @@ with P2-02, P2-08 ✅ done (per-device export), MBAP transaction-id validation
 and TCP/UDP ADU format selectors ✅ done, `probe_completed` events with a
 per-probe log ✅ done. v0.2 is complete.
 
-**v0.3 started:** P3-01 ✅ (decoder: int/uint/float32/ASCII × 4 byte orders),
+**v1.0 started:** E-01 ✅ (engine and monitor decoupled from Tauri via `EventSink`,
+`TrafficSink` and `SampleSink`; `bridge.rs` is the only Tauri-aware module).
+
+**v0.3:** P3-01 ✅ (decoder: int/uint/float32/ASCII × 4 byte orders),
 P3-02 ✅ (labelled float hypotheses), P3-03 ✅ (named tags with scaling, stored
 in config), P3-04 ✅ (portable projects with devices, tags and up to 20 scan
 snapshots), P3-05 ✅ (live monitor: 250 ms–10 s polling, min/max, change flags,

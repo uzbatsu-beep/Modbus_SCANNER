@@ -149,6 +149,13 @@ via `tauri::generate_handler!`.
 | `state::TagMap` | named registers and scaling, persisted in projects |
 | frontend `stores/monitor.ts`, `monitor:update` events | live polling and trends |
 
+## Framework boundary (v1.0)
+
+`scanner/` no longer imports Tauri. The core emits through `EventSink` and sends
+raw exchanges/samples through `TrafficSink` / `SampleSink` traits. The only
+Tauri-aware module is `bridge.rs`, which builds an `EventSink` from `AppHandle`.
+A future CLI can pass `EventSink::null()` or its own emitter — no engine changes.
+
 ## Build boundaries
 
 - `src-tauri/tauri.conf.json` — frontend dist `../dist`, window, bundle, icons.

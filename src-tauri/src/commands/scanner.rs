@@ -19,7 +19,12 @@ pub async fn start_scan(
     target: ScanTarget,
     params: ScanParams,
 ) -> Result<(), String> {
-    state.scanner.start(app, target, params).await
+    let sink = crate::bridge::tauri_event_sink(
+        app,
+        state.traffic.clone(),
+        state.loggers.clone(),
+    );
+    state.scanner.start(sink, target, params).await
 }
 
 #[tauri::command]
@@ -177,7 +182,12 @@ pub async fn start_monitor(
     watches: Vec<MonitorWatch>,
     interval_ms: u32,
 ) -> Result<(), String> {
-    state.monitor.start(app, watches, interval_ms).await
+    let sink = crate::bridge::tauri_event_sink(
+        app,
+        state.traffic.clone(),
+        state.loggers.clone(),
+    );
+    state.monitor.start(sink, watches, interval_ms).await
 }
 
 #[tauri::command]

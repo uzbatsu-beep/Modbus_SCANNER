@@ -148,6 +148,13 @@ pub trait Transport: Send {
 | `state::TagMap` | именованные регистры и масштабирование в проектах |
 | `stores/monitor.ts`, события `monitor:update` | живой опрос и тренды |
 
+## Граница с фреймворком (v1.0)
+
+`scanner/` больше не импортирует Tauri. Ядро испускает события через `EventSink`,
+а сырые обмены и выборки — через трейты `TrafficSink` / `SampleSink`. Единственный
+модуль, знающий про Tauri, — `bridge.rs`: он строит `EventSink` из `AppHandle`.
+Будущий CLI сможет передать `EventSink::null()` или свой emitter без изменений движка.
+
 ## Границы сборки
 
 - `src-tauri/tauri.conf.json` — frontend dist `../dist`, окно, бандл, иконки.

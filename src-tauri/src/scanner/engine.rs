@@ -24,6 +24,7 @@ use crate::transport::udp::UdpTransport;
 use crate::transport::{Transport, TransportError};
 
 use super::strategies::{build_strategy, RegisterReadOutcome, ScanStrategy, WorkItem};
+use super::EventSink;
 use super::types::*;
 
 /// Control messages to the engine task.
@@ -207,7 +208,7 @@ impl ScannerHandle {
     /// Start a new scan. Returns an error if one is already running.
     pub async fn start(
         &self,
-        app: tauri::AppHandle,
+        sink: EventSink,
         target: ScanTarget,
         params: ScanParams,
     ) -> Result<(), String> {
@@ -245,7 +246,7 @@ impl ScannerHandle {
             };
 
             tokio::spawn(engine_task(
-                app,
+                sink,
                 strategy,
                 engine_params,
                 rx,
@@ -268,7 +269,7 @@ impl ScannerHandle {
 
 /// The engine task.
 async fn engine_task(
-    app: tauri::AppHandle,
+    sink: EventSink,
     mut strategy: Box<dyn ScanStrategy + Send>,
     engine: EngineParams,
     mut control_rx: mpsc::Receiver<ControlMsg>,
@@ -290,7 +291,7 @@ async fn engine_task(
     let mut want_stop = false;
 
     let _ = status_tx.send(ScanStatus::Running);
-    emit_event(&app, &ScanEvent::StatusChanged {
+    emit_event(&sink, &ScanEvent::StatusChanged {
         status: ScanStatus::Running,
         message: "scanning started".into(),
     });
@@ -308,7 +309,7 @@ async fn engine_task(
                 ControlMsg::Pause => {
                     let _ = pause_tx.send(true);
                     let _ = status_tx.send(ScanStatus::Paused);
-                    emit_event(&app, &ScanEvent::StatusChanged {
+                    emit_event(&sink, &ScanEvent::StatusChanged {
                         status: ScanStatus::Paused,
                         message: "scanning paused".into(),
                     });
@@ -316,7 +317,7 @@ async fn engine_task(
                 ControlMsg::Resume => {
                     let _ = pause_tx.send(false);
                     let _ = status_tx.send(ScanStatus::Running);
-                    emit_event(&app, &ScanEvent::StatusChanged {
+                    emit_event(&sink, &ScanEvent::StatusChanged {
                         status: ScanStatus::Running,
                         message: "scanning resumed".into(),
                     });
@@ -394,12 +395,12 @@ async fn engine_task(
                     }
 
                     // Each IP probe owns its transport: safe to run concurrently.
-                    let task_app = app.clone();
+                    let task_sink = sink.clone();
                     let task_results = results.clone();
                     ip_tasks.spawn(async move {
                         let mut unused_serial = None;
                         execute_probe(
-                            &task_app,
+                            &task_sink,
                             &mut unused_serial,
                             &target,
                             function,
@@ -413,7 +414,7 @@ async fn engine_task(
                     // Serial probes must stay strictly sequential: one bus, one transport.
                     ensure_serial_settings(&mut serial_transport, &mut serial_signature, &target).await;
                     let outcome = execute_probe(
-                        &app,
+                        &sink,
                         &mut serial_transport,
                         &target,
                         function,
@@ -426,20 +427,20 @@ async fn engine_task(
                     apply_probe_outcome(&mut strategy, &mut pending, outcome, &mut want_stop, stop_on_found);
                 }
                 done += 1;
-                emit_progress(&app, *status_tx.borrow(), total, done, &results);
+                emit_progress(&sink, *status_tx.borrow(), total, done, &results);
             }
             item @ WorkItem::RegisterRead { .. } => {
                 if let WorkItem::RegisterRead { target, .. } = &item {
                     ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
                 }
-                let outcome = execute_work(&app, &item, &mut serial_transport, &results, engine).await;
+                let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine).await;
                 if let Some(outcome) = outcome {
                     for follow in strategy.on_register_read(&item, outcome) {
                         pending.push_back(follow);
                     }
                 }
                 done += 1;
-                emit_progress(&app, *status_tx.borrow(), total, done, &results);
+                emit_progress(&sink, *status_tx.borrow(), total, done, &results);
             }
         }
 
@@ -461,7 +462,7 @@ async fn engine_task(
         if let WorkItem::RegisterRead { target, .. } = &item {
             ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
         }
-        let outcome = execute_work(&app, &item, &mut serial_transport, &results, engine).await;
+        let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine).await;
         if let Some(outcome) = outcome {
             for follow in strategy.on_register_read(&item, outcome) {
                 pending.push_back(follow);
@@ -482,7 +483,7 @@ async fn engine_task(
     let _ = status_tx.send(status);
 
     let r = results.read();
-    emit_event(&app, &ScanEvent::Finished {
+    emit_event(&sink, &ScanEvent::Finished {
         total: done,
         found: r.records.len() as u64,
         errors: r.stats.timeouts + r.stats.transport_errors,
@@ -674,7 +675,7 @@ mod mbap_tests {
 #[allow(clippy::too_many_arguments)]
 #[allow(unused_assignments)]
 async fn execute_probe(
-    app: &tauri::AppHandle,
+    sink: &EventSink,
     serial_transport: &mut Option<SerialTransport>,
     target: &DeviceTarget,
     function: u8,
@@ -772,7 +773,7 @@ async fn execute_probe(
             Err(_) => "error",
         };
         log_traffic(
-            app,
+            sink,
             target,
             Some(function),
             &adu,
@@ -792,7 +793,7 @@ async fn execute_probe(
                         let is_exception = matches!(result, ProbeResult::Exception { .. });
                         if is_found {
                             note_ip_status(
-                                app,
+                                sink,
                                 results,
                                 target,
                                 IpTargetClass::ValidModbus,
@@ -807,7 +808,7 @@ async fn execute_probe(
                             } else {
                                 IpTargetClass::Timeout
                             };
-                            note_ip_status(app, results, target, class, false, false, false);
+                            note_ip_status(sink, results, target, class, false, false, false);
                         }
 
                         let key = format!(
@@ -852,19 +853,19 @@ async fn execute_probe(
 
                         if is_found {
                             if let Some(rec) = record {
-                                emit_event(app, &ScanEvent::DeviceFound { record: rec });
+                                emit_event(sink, &ScanEvent::DeviceFound { record: rec });
                             }
                             // P2-05: ask the device who it is (best-effort).
-                            identify_device(app, serial_transport, target, results, &key, engine).await;
+                            identify_device(sink, serial_transport, target, results, &key, engine).await;
                             // The register plan is scheduled by the engine (it owns
                             // the strategy and the shared serial transport).
-                            emit_probe_completed(app, &key, function, &result);
+                            emit_probe_completed(sink, &key, function, &result);
                             return ProbeOutcome {
                                 is_found: true,
                                 target: target.clone(),
                             };
                         }
-                        emit_probe_completed(app, &key, function, &result);
+                        emit_probe_completed(sink, &key, function, &result);
                         return ProbeOutcome {
                             is_found: false,
                             target: target.clone(),
@@ -876,7 +877,7 @@ async fn execute_probe(
                         } else {
                             IpTargetClass::Timeout
                         };
-                        note_ip_status(app, results, target, class, false, false, true);
+                        note_ip_status(sink, results, target, class, false, false, true);
                         last_err = Some(e);
                     }
                 }
@@ -892,7 +893,7 @@ async fn execute_probe(
                 } else {
                     IpTargetClass::Timeout
                 };
-                note_ip_status(app, results, target, class, false, false, timed_out);
+                note_ip_status(sink, results, target, class, false, false, timed_out);
                 last_err = Some(e);
             }
         }
@@ -926,7 +927,7 @@ async fn execute_probe(
             message: e.to_string(),
         },
     };
-    emit_probe_completed(app, &key, function, &result);
+    emit_probe_completed(sink, &key, function, &result);
     ProbeOutcome {
         is_found: false,
         target: target.clone(),
@@ -934,7 +935,7 @@ async fn execute_probe(
 }
 
 async fn execute_work(
-    app: &tauri::AppHandle,
+    sink: &EventSink,
     item: &WorkItem,
     serial_transport: &mut Option<SerialTransport>,
     results: &Arc<RwLock<ScanResults>>,
@@ -944,7 +945,7 @@ async fn execute_work(
         results.write().stats.requests_sent += 1;
         Some(
             execute_register_read(
-                app,
+                sink,
                 serial_transport,
                 target,
                 *function,
@@ -963,7 +964,7 @@ async fn execute_work(
 
 #[allow(clippy::too_many_arguments)]
 async fn execute_register_read(
-    app: &tauri::AppHandle,
+    sink: &EventSink,
     serial_transport: &mut Option<SerialTransport>,
     target: &DeviceTarget,
     function: u8,
@@ -1015,7 +1016,7 @@ async fn execute_register_read(
         Err(_) => "error",
     };
     log_traffic(
-        app,
+        sink,
         target,
         Some(function),
         &adu,
@@ -1107,7 +1108,7 @@ async fn execute_register_read(
             rec.last_seen_ms = now_ms();
             let rec_clone = rec.clone();
             drop(r);
-            emit_event(app, &ScanEvent::DeviceUpdated { record: rec_clone });
+            emit_event(sink, &ScanEvent::DeviceUpdated { record: rec_clone });
             RegisterReadOutcome::Ok {
                 values: values.clone(),
             }
@@ -1149,7 +1150,7 @@ fn classify_ip_error(err: &TransportError) -> IpTargetClass {
 /// Record and (on change) emit the classification of one IP endpoint.
 #[allow(clippy::too_many_arguments)]
 fn note_ip_status(
-    app: &tauri::AppHandle,
+    sink: &EventSink,
     results: &Arc<RwLock<ScanResults>>,
     target: &DeviceTarget,
     class: IpTargetClass,
@@ -1203,13 +1204,13 @@ fn note_ip_status(
         (previous != status.class, status.clone())
     };
     if changed {
-        emit_event(app, &ScanEvent::IpTargetClassified { status: snapshot });
+        emit_event(sink, &ScanEvent::IpTargetClassified { status: snapshot });
     }
 }
 
 /// Try FC43/MEI14 identification once a device is known to answer.
 async fn identify_device(
-    app: &tauri::AppHandle,
+    sink: &EventSink,
     serial_transport: &mut Option<SerialTransport>,
     target: &DeviceTarget,
     results: &Arc<RwLock<ScanResults>>,
@@ -1260,7 +1261,7 @@ async fn identify_device(
         Err(_) => "error",
     };
     log_traffic(
-        app,
+        sink,
         target,
         Some(0x2B),
         &adu,
@@ -1295,7 +1296,7 @@ async fn identify_device(
         }
     };
     if let Some(record) = record {
-        emit_event(app, &ScanEvent::DeviceUpdated { record });
+        emit_event(sink, &ScanEvent::DeviceUpdated { record });
     }
 }
 
@@ -1339,7 +1340,7 @@ fn kind_short(kind: TransportKind) -> &'static str {
 
 /// Append one raw exchange to the traffic log and stream it to the UI.
 fn log_traffic(
-    app: &tauri::AppHandle,
+    sink: &EventSink,
     target: &DeviceTarget,
     function: Option<u8>,
     tx: &[u8],
@@ -1347,10 +1348,6 @@ fn log_traffic(
     rtt_us: u128,
     status: &str,
 ) {
-    use tauri::{Emitter, Manager};
-    let Some(state) = app.try_state::<crate::state::AppState>() else {
-        return;
-    };
     let record = TrafficRecord {
         id: 0,
         timestamp_ms: now_ms(),
@@ -1363,14 +1360,16 @@ fn log_traffic(
         rtt_us,
         status: status.to_string(),
     };
-    state.traffic.push(record.clone());
-    let _ = app.emit("traffic:record", record);
+    sink.traffic(record.clone());
+    if let Ok(value) = serde_json::to_value(&record) {
+        sink.emit("traffic:record", value);
+    }
 }
 
 /// Emit one `probe_completed` event per finished work item.
-fn emit_probe_completed(app: &tauri::AppHandle, key: &str, function: u8, result: &ProbeResult) {
+fn emit_probe_completed(sink: &EventSink, key: &str, function: u8, result: &ProbeResult) {
     emit_event(
-        app,
+        sink,
         &ScanEvent::ProbeCompleted {
             device_key: key.to_string(),
             function,
@@ -1379,21 +1378,19 @@ fn emit_probe_completed(app: &tauri::AppHandle, key: &str, function: u8, result:
     );
 }
 
-fn emit_event(app: &tauri::AppHandle, event: &ScanEvent) {
-    use tauri::Emitter;
-    if let Err(e) = app.emit("scan:event", event) {
-        tracing::warn!("failed to emit scan event: {e}");
+fn emit_event(sink: &EventSink, event: &ScanEvent) {
+    if let Ok(value) = serde_json::to_value(event) {
+        sink.emit("scan:event", value);
     }
 }
 
 fn emit_progress(
-    app: &tauri::AppHandle,
+    sink: &EventSink,
     status: ScanStatus,
     total: u64,
     done: u64,
     results: &Arc<RwLock<ScanResults>>,
 ) {
-    use tauri::Emitter;
     let r = results.read();
     let progress = ScanProgress {
         status,
@@ -1404,5 +1401,7 @@ fn emit_progress(
         errors: r.stats.timeouts + r.stats.transport_errors,
         elapsed_ms: r.stats.elapsed_ms(),
     };
-    let _ = app.emit("scan:progress", &progress);
+    if let Ok(value) = serde_json::to_value(&progress) {
+        sink.emit("scan:progress", value);
+    }
 }

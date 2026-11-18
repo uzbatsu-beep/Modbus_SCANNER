@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use parking_lot::RwLock;
-use tauri::Emitter;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::modbus::common::TransportKind;
@@ -24,6 +23,7 @@ use crate::transport::Transport;
 use super::engine::{
     build_adu, ensure_serial_settings, next_transaction_id, verify_adu, EngineParams,
 };
+use super::EventSink;
 use super::types::{
     now_ms, MonitorSample, MonitorUpdate, MonitorValueState, MonitorWatch, ScanParams,
 };
@@ -63,7 +63,7 @@ impl MonitorHandle {
     /// Start (or restart) monitoring with the given watches and interval.
     pub async fn start(
         &self,
-        app: tauri::AppHandle,
+        sink: EventSink,
         watches: Vec<MonitorWatch>,
         interval_ms: u32,
     ) -> Result<(), String> {
@@ -102,7 +102,7 @@ impl MonitorHandle {
             defaults.retries = 0;
             let engine = EngineParams::from_scan_params(&defaults);
 
-            tokio::spawn(monitor_task(app, watches, interval_ms, rx, self.values.clone(), engine));
+            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine));
             Ok(())
         }
     }
@@ -117,7 +117,7 @@ impl MonitorHandle {
 }
 
 async fn monitor_task(
-    app: tauri::AppHandle,
+    sink: EventSink,
     watches: Vec<MonitorWatch>,
     interval_ms: u32,
     mut control_rx: mpsc::Receiver<ControlMsg>,
@@ -272,16 +272,14 @@ async fn monitor_task(
             items
         };
         // P3-07: feed all file loggers with this cycle's samples.
-        {
-            use tauri::Manager;
-            if let Some(state) = app.try_state::<crate::state::AppState>() {
-                state.loggers.write(&snapshot);
-            }
-        }
-        let _ = app.emit("monitor:update", &MonitorUpdate {
+        sink.samples(&snapshot);
+        let update = MonitorUpdate {
             values: snapshot,
             cycle_ms: interval_ms as u64,
-        });
+        };
+        if let Ok(value) = serde_json::to_value(&update) {
+            sink.emit("monitor:update", value);
+        }
     }
 
     if let Some(mut t) = serial_transport.take() {
