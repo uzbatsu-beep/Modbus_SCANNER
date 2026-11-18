@@ -59,7 +59,8 @@ traffic log, quiet mode, IP concurrency, CLI, projects/history/diff, safe auditi
 (adaptive Quick/Balanced/Deep register scan), P2-04 ✅ done (IP target classes),
 P2-05 ✅ done (FC43/MEI14 device identification), P2-06 ✅ delivered together
 with P2-02, P2-08 ✅ done (per-device export), MBAP transaction-id validation
-and TCP/UDP ADU format selectors ✅ done. Remaining items are still open.
+and TCP/UDP ADU format selectors ✅ done, `probe_completed` events with a
+per-probe log ✅ done. v0.2 is complete.
 
 **Goal:** solve the main field-engineer pain — “the device is there, the docs are not”.
 

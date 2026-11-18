@@ -43,7 +43,7 @@
 - [x] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
 - [ ] Single-device deep scan for TCP/UDP endpoints
 - [ ] Export per-device results from the detail pane
-- [ ] Emit `probe_completed` events and per-probe log entries
+- [x] Emit `probe_completed` events and per-probe log entries
 
 ## Later — v0.3+ (instrumentation)
 
@@ -100,16 +100,13 @@ P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_conc
 
 **Известные пробелы:** план регистров в `single_device` работает только для
 последовательных целей (для TCP/UDP используйте `register_scan`);
-`probe_completed`
-зарезервировано, но не испускается; светлая тема и полная локализация не реализованы.
+светлая тема и полная локализация не реализованы.
 
-## Ближайшие шаги (v0.2)
+## v0.2 — завершён
 
-Осталось: события `probe_completed` и журнал по каждому зонду.
-
-Выполнено в этой итерации: валидация transaction id MBAP, выбор формата ADU
-TCP (`mbap` / `rtu`) и UDP (`rtu` / `mbap`), глубокое сканирование TCP/UDP через
-`register_scan`, экспорт по устройству.
+Все пункты выполнены: свип настроек, адаптивный скан регистров, классификация
+IP-целей, FC43-идентификация, экспорт по устройству, валидация transaction id,
+выбор формата ADU для TCP/UDP и события `probe_completed` с журналом зондов.
 
 ## Позже (v0.3+)
 

@@ -169,9 +169,12 @@
 { kind: "device_found", record: DeviceRecord }
 { kind: "device_updated", record: DeviceRecord }
 { kind: "ip_target_classified", status: IpTargetStatus }
-{ kind: "probe_completed", device_key, function, result: ProbeResult } // зарезервировано
+{ kind: "probe_completed", device_key, function, result: ProbeResult }
 { kind: "finished", total, found, errors, elapsed_ms }
 ```
+
+`probe_completed` отправляется один раз на каждый завершённый зонд (включая
+таймауты и транспортные ошибки); фронтенд пишет одну строку в журнал событий.
 
 `DeviceRecord`:
 

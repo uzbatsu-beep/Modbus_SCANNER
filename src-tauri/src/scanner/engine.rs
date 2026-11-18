@@ -844,11 +844,13 @@ async fn execute_probe(
                             identify_device(app, serial_transport, target, results, &key, engine).await;
                             // The register plan is scheduled by the engine (it owns
                             // the strategy and the shared serial transport).
+                            emit_probe_completed(app, &key, function, &result);
                             return ProbeOutcome {
                                 is_found: true,
                                 target: target.clone(),
                             };
                         }
+                        emit_probe_completed(app, &key, function, &result);
                         return ProbeOutcome {
                             is_found: false,
                             target: target.clone(),
@@ -896,6 +898,21 @@ async fn execute_probe(
             Some(_) => r.stats.transport_errors += 1,
         }
     }
+    let key = format!(
+        "{}:{}:{}:{}",
+        kind_short(target.kind),
+        target.endpoint,
+        target.port.map(|p| p.to_string()).unwrap_or_default(),
+        target.unit_id
+    );
+    let result = match &last_err {
+        Some(TransportError::Timeout(_)) | None => ProbeResult::NoResponse { function },
+        Some(e) => ProbeResult::TransportError {
+            function,
+            message: e.to_string(),
+        },
+    };
+    emit_probe_completed(app, &key, function, &result);
     ProbeOutcome {
         is_found: false,
         target: target.clone(),
@@ -1273,6 +1290,18 @@ fn kind_short(kind: TransportKind) -> &'static str {
         TransportKind::Tcp => "tcp",
         TransportKind::Udp => "udp",
     }
+}
+
+/// Emit one `probe_completed` event per finished work item.
+fn emit_probe_completed(app: &tauri::AppHandle, key: &str, function: u8, result: &ProbeResult) {
+    emit_event(
+        app,
+        &ScanEvent::ProbeCompleted {
+            device_key: key.to_string(),
+            function,
+            result: result.clone(),
+        },
+    );
 }
 
 fn emit_event(app: &tauri::AppHandle, event: &ScanEvent) {

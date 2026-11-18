@@ -4,7 +4,13 @@
 
 import { defineStore } from "pinia";
 import { api, onScanEvent, onScanProgress } from "@/api/mod";
-import type { ScanEvent, ScanParams, ScanProgress, ScanStatus } from "@/types/ipc";
+import type {
+  ProbeResult,
+  ScanEvent,
+  ScanParams,
+  ScanProgress,
+  ScanStatus,
+} from "@/types/ipc";
 
 export interface LogEntry {
   time: Date;
@@ -60,6 +66,9 @@ export const useScannerStore = defineStore("scanner", {
         case "ip_target_classified":
           this.refreshDevicesSafe();
           break;
+        case "probe_completed":
+          this.logProbe(e.device_key, e.function, e.result);
+          break;
         case "finished":
           this.status = "finished";
           this.addLog(
@@ -68,6 +77,30 @@ export const useScannerStore = defineStore("scanner", {
           );
           break;
       }
+    },
+
+    /** One line per completed discovery probe (P2-09). */
+    logProbe(deviceKey: string, functionCode: number, result: ProbeResult) {
+      const fc = functionCode.toString(16).padStart(2, "0").toUpperCase();
+      const level: LogEntry["level"] =
+        result.status === "ok"
+          ? "ok"
+          : result.status === "exception"
+            ? "warn"
+            : result.status === "transport_error"
+              ? "error"
+              : "info";
+      const rtt =
+        "rtt_us" in result && result.rtt_us
+          ? ` ${(result.rtt_us / 1000).toFixed(1)}ms`
+          : "";
+      let detail = "";
+      if (result.status === "exception") {
+        detail = ` exc ${result.code.toString(16).toUpperCase()}`;
+      } else if (result.status === "transport_error") {
+        detail = ` ${result.message}`;
+      }
+      this.addLog(level, `probe ${deviceKey} FC${fc} ${result.status}${detail}${rtt}`);
     },
 
     refreshDevicesSafe() {

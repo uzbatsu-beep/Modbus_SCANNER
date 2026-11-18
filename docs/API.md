@@ -170,9 +170,12 @@ Discriminated union on `kind`:
 { kind: "device_found", record: DeviceRecord }
 { kind: "device_updated", record: DeviceRecord }
 { kind: "ip_target_classified", status: IpTargetStatus }
-{ kind: "probe_completed", device_key, function, result: ProbeResult } // reserved
+{ kind: "probe_completed", device_key, function, result: ProbeResult }
 { kind: "finished", total, found, errors, elapsed_ms }
 ```
+
+`probe_completed` is emitted once per finished discovery probe (including
+timeouts and transport errors) and the frontend writes one line to the event log.
 
 `DeviceRecord`:
 
