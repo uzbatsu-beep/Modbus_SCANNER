@@ -2,7 +2,12 @@
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "@/api/mod";
-import type { ScanParams, ScanTarget } from "@/types/ipc";
+import type {
+  ParitySerde,
+  ScanParams,
+  ScanTarget,
+  SerialFraming,
+} from "@/types/ipc";
 import { BAUD_RATES } from "@/types/ipc";
 import { useScannerStore } from "@/stores/scanner";
 import { useSerialStore } from "@/stores/serial";
@@ -29,12 +34,32 @@ const form = reactive({
 const testing = ref(false);
 const testResult = ref<string | null>(null);
 
+// P2-01: automatic serial-settings sweep.
+const autoSweep = ref(false);
+const selectedBauds = ref<number[]>([9600, 2400, 19200, 4800, 38400, 57600, 115200, 1200]);
+const selectedParities = ref<ParitySerde[]>(["none", "even", "odd"]);
+const parityOptions: ParitySerde[] = ["none", "even", "odd"];
+
+function toggleBaud(baud: number) {
+  const i = selectedBauds.value.indexOf(baud);
+  if (i >= 0) selectedBauds.value.splice(i, 1);
+  else selectedBauds.value.push(baud);
+}
+
+function toggleParity(parity: ParitySerde) {
+  const i = selectedParities.value.indexOf(parity);
+  if (i >= 0) selectedParities.value.splice(i, 1);
+  else selectedParities.value.push(parity);
+}
+
 const canStart = computed(
   () =>
     form.port_name.length > 0 &&
     form.unit_from >= 0 &&
     form.unit_to <= 247 &&
     form.unit_from <= form.unit_to &&
+    (!autoSweep.value ||
+      (selectedBauds.value.length > 0 && selectedParities.value.length > 0)) &&
     scanner.canStart
 );
 
@@ -74,6 +99,28 @@ async function testPort() {
 }
 
 function start() {
+  if (autoSweep.value) {
+    const framings: SerialFraming[] = selectedParities.value.map((parity) => ({
+      data_bits: "eight",
+      parity,
+      stop_bits: "one",
+    }));
+    const target: ScanTarget = {
+      type: "serial_auto",
+      sweep: {
+        port_name: form.port_name,
+        mode: form.mode,
+        baud_rates: [...selectedBauds.value],
+        framings,
+        discovery_unit_ids: [1, 2, 3, 4, 5, 10, 20, 100, 247],
+        unit_from: form.unit_from,
+        unit_to: form.unit_to,
+      },
+    };
+    emit("start", target);
+    return;
+  }
+
   const target: ScanTarget = {
     type: "unit_id_range",
     from: form.unit_from,
@@ -117,23 +164,62 @@ function start() {
     </div>
 
     <div class="form-row">
+      <label>Авто-поиск настроек</label>
+      <label class="check">
+        <input type="checkbox" v-model="autoSweep" :disabled="scanner.isRunning" />
+        свип baud / чётности (если настройки неизвестны)
+      </label>
+      <span v-if="autoSweep" class="hint">
+        Сначала опрашиваются 1, 2, 3, 4, 5, 10, 20, 100, 247 на каждом сочетании;
+        после первого корректного ответа сканируется весь диапазон unit ID.
+      </span>
+    </div>
+
+    <div v-if="autoSweep" class="form-row sweep-options">
+      <label>Baud</label>
+      <label v-for="b in BAUD_RATES" :key="b" class="check">
+        <input
+          type="checkbox"
+          :checked="selectedBauds.includes(b)"
+          :disabled="scanner.isRunning"
+          @change="toggleBaud(b)"
+        />
+        {{ b }}
+      </label>
+    </div>
+
+    <div v-if="autoSweep" class="form-row sweep-options">
+      <label>Чётность</label>
+      <label v-for="p in parityOptions" :key="p" class="check">
+        <input
+          type="checkbox"
+          :checked="selectedParities.includes(p)"
+          :disabled="scanner.isRunning"
+          @change="toggleParity(p)"
+        />
+        {{ p === "none" ? "N (8N1)" : p === "even" ? "E (8E1)" : "O (8O1)" }}
+      </label>
+      <span class="hint">рекомендуется таймаут 200–300 мс для свипа</span>
+    </div>
+
+    <div class="form-row" :class="{ dimmed: autoSweep }">
       <label>Скорость / Baud</label>
-      <select v-model.number="form.baud_rate" :disabled="scanner.isRunning">
+      <select v-model.number="form.baud_rate" :disabled="scanner.isRunning || autoSweep">
         <option v-for="b in BAUD_RATES" :key="b" :value="b">{{ b }}</option>
       </select>
       <label class="short">Биты</label>
-      <select v-model="form.data_bits" :disabled="scanner.isRunning">
+      <select v-model="form.data_bits" :disabled="scanner.isRunning || autoSweep">
         <option value="eight">8</option>
         <option value="seven">7</option>
       </select>
       <label class="short">Чётность</label>
-      <select v-model="form.parity" :disabled="scanner.isRunning">
+      <select v-model="form.parity" :disabled="scanner.isRunning || autoSweep">
         <option value="none">N</option>
         <option value="even">E</option>
         <option value="odd">O</option>
       </select>
       <label class="short">Стоп</label>
-      <select v-model="form.stop_bits" :disabled="scanner.isRunning">
+      <select v-model="form.stop_bits" :disabled="scanner.isRunning || autoSweep">
         <option value="one">1</option>
         <option value="two">2</option>
       </select>
@@ -150,7 +236,12 @@ function start() {
     <div class="form-row">
       <label />
       <button class="primary" :disabled="!canStart" @click="start">
-        ▶ Сканировать шину ({{ form.unit_to - form.unit_from + 1 }} адресов)
+        <template v-if="autoSweep">
+          ▶ Свип настроек + {{ form.unit_to - form.unit_from + 1 }} адресов
+        </template>
+        <template v-else>
+          ▶ Сканировать шину ({{ form.unit_to - form.unit_from + 1 }} адресов)
+        </template>
       </button>
     </div>
   </div>
@@ -170,5 +261,22 @@ function start() {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--fg-dim);
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: auto !important;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dimmed {
+  opacity: 0.5;
+}
+
+.sweep-options {
+  flex-wrap: wrap;
 }
 </style>

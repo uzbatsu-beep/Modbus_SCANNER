@@ -221,6 +221,9 @@ async fn engine_task(
     let total = strategy.total();
     let mut done: u64 = 0;
     let mut serial_transport: Option<SerialTransport> = None;
+    // Serial settings currently held by `serial_transport`; a sweep changes
+    // them, so the port must be reopened when this signature changes.
+    let mut serial_signature: Option<String> = None;
     // Register-plan work discovered during probes, executed by the engine so
     // that serial reads reuse the single open port.
     let mut pending: std::collections::VecDeque<WorkItem> = std::collections::VecDeque::new();
@@ -350,6 +353,7 @@ async fn engine_task(
                     });
                 } else {
                     // Serial probes must stay strictly sequential: one bus, one transport.
+                    ensure_serial_settings(&mut serial_transport, &mut serial_signature, &target).await;
                     let outcome = execute_probe(
                         &app,
                         &mut serial_transport,
@@ -367,6 +371,9 @@ async fn engine_task(
                 emit_progress(&app, *status_tx.borrow(), total, done, &results);
             }
             item @ WorkItem::RegisterRead { .. } => {
+                if let WorkItem::RegisterRead { target, .. } = &item {
+                    ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
+                }
                 execute_work(&app, item, &mut serial_transport, &results, engine).await;
                 done += 1;
                 emit_progress(&app, *status_tx.borrow(), total, done, &results);
@@ -388,6 +395,9 @@ async fn engine_task(
     }
     // Execute any register work collected from the last probes.
     while let Some(item) = pending.pop_front() {
+        if let WorkItem::RegisterRead { target, .. } = &item {
+            ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
+        }
         execute_work(&app, item, &mut serial_transport, &results, engine).await;
     }
 
@@ -845,6 +855,35 @@ async fn execute_register_read(
             let _ = e;
             Outcome::Failed
         }
+    }
+}
+
+/// Settings currently required by a serial work item (None for IP targets).
+fn serial_signature(target: &DeviceTarget) -> Option<String> {
+    let sp = target.serial.as_ref()?;
+    Some(format!(
+        "{}|{}|{:?}|{:?}|{:?}|{:?}",
+        sp.port_name,
+        sp.baud_rate,
+        target.serial_mode,
+        sp.data_bits,
+        sp.parity,
+        sp.stop_bits
+    ))
+}
+
+/// Reopen the shared serial port when the sweep moves to different settings.
+async fn ensure_serial_settings(
+    transport: &mut Option<SerialTransport>,
+    signature: &mut Option<String>,
+    target: &DeviceTarget,
+) {
+    let next = serial_signature(target);
+    if next != *signature {
+        if let Some(mut old) = transport.take() {
+            let _ = old.close().await;
+        }
+        *signature = next;
     }
 }
 

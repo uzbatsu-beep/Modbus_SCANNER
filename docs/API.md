@@ -55,10 +55,20 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 `ScanTarget` variants:
 
 ```ts
-// serial bus
+// serial bus, known settings
 { type: "unit_id_range", from: number, to: number,
   port: { port_name, baud_rate, data_bits, parity, stop_bits },
   mode: "rtu" | "ascii" }
+
+// serial bus, unknown settings (P2-01): two-phase sweep
+{ type: "serial_auto",
+  sweep: {
+    port_name: string, mode: "rtu" | "ascii",
+    baud_rates: number[],                 // priority order
+    framings: Array<{ data_bits, parity, stop_bits }>, // priority order
+    discovery_unit_ids: number[],         // few ids used in phase 1
+    unit_from: number, unit_to: number    // full range for phase 2
+  } }
 
 // IP range (from may be CIDR; to = null for single/CIDR)
 { type: "ip_range", from: string, to: string | null,

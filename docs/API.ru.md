@@ -55,10 +55,20 @@
 Варианты `ScanTarget`:
 
 ```ts
-// последовательная шина
+// последовательная шина с известными настройками
 { type: "unit_id_range", from: number, to: number,
   port: { port_name, baud_rate, data_bits, parity, stop_bits },
   mode: "rtu" | "ascii" }
+
+// последовательная шина с неизвестными настройками (P2-01): двухфазный свип
+{ type: "serial_auto",
+  sweep: {
+    port_name: string, mode: "rtu" | "ascii",
+    baud_rates: number[],                 // в порядке приоритета
+    framings: Array<{ data_bits, parity, stop_bits }>, // в порядке приоритета
+    discovery_unit_ids: number[],         // несколько id для фазы 1
+    unit_from: number, unit_to: number    // полный диапазон для фазы 2
+  } }
 
 // диапазон IP (from может быть CIDR; to = null для одного адреса/подсети)
 { type: "ip_range", from: string, to: string | null,

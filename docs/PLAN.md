@@ -54,8 +54,9 @@ traffic log, quiet mode, IP concurrency, CLI, projects/history/diff, safe auditi
 
 ## 4. v0.2 — Field Discovery (P0)
 
-**Status:** P2-02 ✅ done (all four `ScanParams` fields effective, bounded IP pool),
-P2-06 ✅ delivered together with P2-02. Remaining items are still open.
+**Status:** P2-01 ✅ done (two-phase serial sweep with early exit), P2-02 ✅ done
+(all four `ScanParams` fields effective, bounded IP pool), P2-06 ✅ delivered
+together with P2-02. Remaining items are still open.
 
 **Goal:** solve the main field-engineer pain — “the device is there, the docs are not”.
 

@@ -36,7 +36,7 @@
 
 - [x] Wire `ScanParams` through the engine: per-request timeout, retries, inter-request gap
 - [x] Bounded-concurrency IP worker pool (`ip_concurrency`) with a transport per target
-- [ ] Baud-rate sweep strategy: try all standard rates/parities on a bus
+- [x] Baud-rate sweep strategy: two-phase `serial_auto` (few ids across all settings, then full range on the matched one)
 - [ ] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
 - [ ] Single-device deep scan for TCP/UDP endpoints
 - [ ] Export per-device results from the detail pane
@@ -72,10 +72,15 @@ CRC/LRC, исключения); транспорты serial/TCP/UDP; движо�
 экспорт и сохранение настроек; проверки сборки и тесты протокола (см. DEVELOPMENT
 про особенности Windows-gnu).
 
-**Выполнено в Unreleased:** P2-02 — параметры `timeout_ms`, `retries`,
-`request_gap_ms`, `ip_concurrency` теперь влияют на движок (единый `EngineParams`,
-ограничения значений; serial — последовательно, TCP/UDP — в ограниченном пуле).
-Заодно исправлено чтение плана регистров на serial-шине с переиспользованием порта.
+**Выполнено в Unreleased:** P2-01 — двухфазный авто-свип `serial_auto`: сначала
+несколько unit id на всех сочетаниях baud/чётности, после первого корректного
+ответа — полный диапазон на найденных настройках. Скорость/чётность меняются с
+переоткрытием общего последовательного порта.
+
+P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_concurrency`
+теперь влияют на движок (единый `EngineParams`, ограничения значений; serial —
+последовательно, TCP/UDP — в ограниченном пуле). Заодно исправлено чтение плана
+регистров на serial-шине с переиспользованием порта.
 
 **Известные пробелы:** план регистров работает только для последовательных целей;
 экспорт из панели устройства экспортирует всю сессию; `probe_completed`
@@ -83,7 +88,7 @@ CRC/LRC, исключения); транспорты serial/TCP/UDP; движо�
 
 ## Ближайшие шаги (v0.2)
 
-Стратегия перебора скоростей/чётности; проверка transaction id
+Проверка transaction id
 MBAP и выбор формата ADU для UDP/TCP; глубокое сканирование TCP/UDP; экспорт по
 устройству; события `probe_completed`.
 

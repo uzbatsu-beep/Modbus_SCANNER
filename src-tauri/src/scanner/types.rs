@@ -35,12 +35,65 @@ pub enum ScanTarget {
         port: u16,
         kind: IpTransportKind,
     },
+    /// Serial: unknown baud/framing — sweep settings, then scan unit IDs.
+    SerialAuto {
+        sweep: SerialSweepParams,
+    },
     /// Single device, deep register map scan.
     SingleDevice {
         target: DeviceTarget,
         /// Register ranges to probe per function code.
         register_plan: Vec<RegisterRange>,
     },
+}
+
+/// Framing (data bits / parity / stop bits) for a serial sweep.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SerialFraming {
+    pub data_bits: DataBitsSerde,
+    pub parity: ParitySerde,
+    pub stop_bits: StopBitsSerde,
+}
+
+/// Parameters for a two-phase serial settings sweep (P2-01).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerialSweepParams {
+    pub port_name: String,
+    pub mode: SerialMode,
+    /// Baud rates in priority order (e.g. 9600, 2400, 19200 ...).
+    pub baud_rates: Vec<u32>,
+    /// Framings in priority order (e.g. 8N1, 8E1, 8O1).
+    pub framings: Vec<SerialFraming>,
+    /// Few unit ids probed while looking for the correct settings.
+    pub discovery_unit_ids: Vec<u8>,
+    /// Unit-id range scanned after the settings are locked.
+    pub unit_from: u8,
+    pub unit_to: u8,
+}
+
+impl SerialSweepParams {
+    /// Field-practice defaults: 8N1 → 8E1 → 8O1 over common bauds.
+    pub fn defaults(port_name: String, mode: SerialMode, unit_from: u8, unit_to: u8) -> Self {
+        use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
+        let framing = |parity| SerialFraming {
+            data_bits: DataBitsSerde::Eight,
+            parity,
+            stop_bits: StopBitsSerde::One,
+        };
+        Self {
+            port_name,
+            mode,
+            baud_rates: vec![9600, 2400, 19200, 4800, 38400, 57600, 115200, 1200],
+            framings: vec![
+                framing(ParitySerde::None),
+                framing(ParitySerde::Even),
+                framing(ParitySerde::Odd),
+            ],
+            discovery_unit_ids: vec![1, 2, 3, 4, 5, 10, 20, 100, 247],
+            unit_from,
+            unit_to,
+        }
+    }
 }
 
 /// Serial port parameters (IPC form).

@@ -2,16 +2,20 @@
 //!
 //! A strategy produces a stream of [`WorkItem`]s; the engine executes them and
 //! feeds results back. Strategies:
-//! - [`UnitIdStrategy`]  - serial bus: one transport, unit ids from..to
-//! - [`IpRangeStrategy`] - network: one unit id (or a small set), IP range
-//! - [`RegisterStrategy`]- single device: register map walk
+//! - [`UnitIdStrategy`]    - serial bus: one transport, unit ids from..to
+//! - [`BaudSweepStrategy`] - serial bus with unknown settings: two-phase sweep
+//! - [`IpRangeStrategy`]   - network: unit ids, IP range
+//! - register plan         - extra reads for a found device
 
 use std::net::Ipv4Addr;
 
 use crate::modbus::common::SerialMode;
 use crate::modbus::frame::request;
 
-use super::types::{DeviceTarget, ProbeResult, RegisterRange, ScanParams, ScanTarget};
+use super::types::{
+    DeviceTarget, ProbeResult, RegisterRange, ScanParams, ScanTarget, SerialFraming,
+    SerialSweepParams,
+};
 
 /// One unit of scan work.
 #[derive(Debug, Clone)]
@@ -157,6 +161,197 @@ impl ScanStrategy for UnitIdStrategy {
 
     fn stop_on_found(&self) -> bool {
         self.params.stop_on_first
+    }
+}
+
+/// Two-phase serial sweep (P2-01).
+///
+/// Phase 1 probes a handful of likely unit ids across all baud/framing
+/// combinations. As soon as one answers with a valid Modbus frame, that
+/// setting is locked and phase 2 scans the full unit-id range on it.
+/// This avoids waiting a full timeout for every (baud, framing, id) triple.
+pub struct BaudSweepStrategy {
+    sweep: SerialSweepParams,
+    params: ScanParams,
+    settings: Vec<(u32, SerialFraming)>,
+    full_unit_ids: Vec<u8>,
+    /// Phase 1 cursor.
+    setting_pos: usize,
+    id_pos: usize,
+    fc_pos: usize,
+    /// Set to the matched setting once phase 1 succeeds.
+    locked_setting: Option<usize>,
+    /// Phase 2 cursor.
+    full_id_pos: usize,
+    full_fc_pos: usize,
+}
+
+impl BaudSweepStrategy {
+    /// Framing-major order: 8N1 over all bauds, then 8E1, then 8O1 — as
+    /// recommended by field guides (9600 8N1 → 2400 8N1 → 19200 8N1 → 8E1...).
+    pub fn settings_from(sweep: &SerialSweepParams) -> Vec<(u32, SerialFraming)> {
+        let mut out = Vec::with_capacity(sweep.framings.len() * sweep.baud_rates.len());
+        for framing in &sweep.framings {
+            for &baud in &sweep.baud_rates {
+                out.push((baud, *framing));
+            }
+        }
+        out
+    }
+
+    pub fn new(sweep: SerialSweepParams, params: ScanParams) -> Self {
+        let settings = Self::settings_from(&sweep);
+        let full_unit_ids = if sweep.unit_from <= sweep.unit_to {
+            (sweep.unit_from..=sweep.unit_to).collect()
+        } else {
+            (sweep.unit_to..=sweep.unit_from).rev().collect()
+        };
+        Self {
+            sweep,
+            params,
+            settings,
+            full_unit_ids,
+            setting_pos: 0,
+            id_pos: 0,
+            fc_pos: 0,
+            locked_setting: None,
+            full_id_pos: 0,
+            full_fc_pos: 0,
+        }
+    }
+
+    fn target_for(&self, setting: (u32, SerialFraming), unit_id: u8) -> DeviceTarget {
+        let (baud, framing) = setting;
+        DeviceTarget {
+            kind: match self.sweep.mode {
+                SerialMode::Rtu => crate::modbus::common::TransportKind::Rtu,
+                SerialMode::Ascii => crate::modbus::common::TransportKind::Ascii,
+            },
+            endpoint: self.sweep.port_name.clone(),
+            port: None,
+            unit_id,
+            serial: Some(super::types::SerialPortParams {
+                port_name: self.sweep.port_name.clone(),
+                baud_rate: baud,
+                data_bits: framing.data_bits,
+                parity: framing.parity,
+                stop_bits: framing.stop_bits,
+            }),
+            serial_mode: Some(self.sweep.mode),
+        }
+    }
+}
+
+impl ScanStrategy for BaudSweepStrategy {
+    fn total(&self) -> u64 {
+        let fcs = self.params.probe_functions.len() as u64;
+        (self.settings.len() as u64) * (self.sweep.discovery_unit_ids.len() as u64) * fcs
+            + (self.full_unit_ids.len() as u64) * fcs
+    }
+
+    fn next_item(&mut self) -> Option<WorkItem> {
+        // Phase 2: full unit-id range on the locked setting.
+        if let Some(idx) = self.locked_setting {
+            loop {
+                if self.full_id_pos >= self.full_unit_ids.len() {
+                    return None;
+                }
+                let unit_id = self.full_unit_ids[self.full_id_pos];
+                let function = *self.params.probe_functions.get(self.full_fc_pos)?;
+                self.full_fc_pos += 1;
+                if self.full_fc_pos >= self.params.probe_functions.len() {
+                    self.full_fc_pos = 0;
+                    self.full_id_pos += 1;
+                }
+                if let Some(pdu) = probe_pdu(function) {
+                    return Some(WorkItem::Probe {
+                        target: self.target_for(self.settings[idx], unit_id),
+                        function,
+                        pdu,
+                    });
+                }
+            }
+        }
+
+        // Phase 1: few likely ids across all settings.
+        loop {
+            if self.setting_pos >= self.settings.len() {
+                return None;
+            }
+            if self.id_pos >= self.sweep.discovery_unit_ids.len() {
+                self.setting_pos += 1;
+                self.id_pos = 0;
+                self.fc_pos = 0;
+                continue;
+            }
+            let unit_id = self.sweep.discovery_unit_ids[self.id_pos];
+            let function = *self.params.probe_functions.get(self.fc_pos)?;
+            self.fc_pos += 1;
+            if self.fc_pos >= self.params.probe_functions.len() {
+                self.fc_pos = 0;
+                self.id_pos += 1;
+            }
+            if let Some(pdu) = probe_pdu(function) {
+                return Some(WorkItem::Probe {
+                    target: self.target_for(self.settings[self.setting_pos], unit_id),
+                    function,
+                    pdu,
+                });
+            }
+        }
+    }
+
+    fn on_device_found(&mut self, target: &DeviceTarget) -> Vec<WorkItem> {
+        // Lock the setting that produced the first valid answer.
+        if self.locked_setting.is_none() {
+            self.locked_setting = Some(self.setting_pos);
+        }
+        if self.params.register_plan.is_empty() {
+            return Vec::new();
+        }
+        self.params
+            .register_plan
+            .clone()
+            .into_iter()
+            .filter_map(|r| register_work(target, &r))
+            .collect()
+    }
+
+    fn stop_on_found(&self) -> bool {
+        self.params.stop_on_first
+    }
+}
+
+#[cfg(test)]
+mod baud_sweep_tests {
+    use super::*;
+
+    #[test]
+    fn settings_are_framing_major() {
+        let mut sweep = SerialSweepParams::defaults("COM1".into(), SerialMode::Rtu, 1, 10);
+        sweep.baud_rates = vec![9600, 2400];
+        sweep.framings.truncate(2);
+        let settings = BaudSweepStrategy::settings_from(&sweep);
+        assert_eq!(settings.len(), 4);
+        assert_eq!(settings[0].0, 9600);
+        assert_eq!(settings[1].0, 2400);
+        assert_ne!(settings[1].1.parity, settings[2].1.parity);
+    }
+
+    #[test]
+    fn locks_setting_after_first_answer() {
+        let sweep = SerialSweepParams::defaults("COM1".into(), SerialMode::Rtu, 1, 3);
+        let mut strategy = BaudSweepStrategy::new(sweep, ScanParams::default());
+        let first = strategy.next_item().unwrap();
+        if let WorkItem::Probe { target, .. } = &first {
+            strategy.on_device_found(target);
+        }
+        assert_eq!(strategy.locked_setting, Some(0));
+        // Phase 2 starts at the full range, not the next sweep combination.
+        let second = strategy.next_item().unwrap();
+        if let WorkItem::Probe { target, .. } = second {
+            assert_eq!(target.unit_id, 1);
+        }
     }
 }
 
@@ -323,6 +518,12 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
             port,
             mode,
         } => Ok(Box::new(UnitIdStrategy::new(port, mode, from, to, params))),
+        ScanTarget::SerialAuto { sweep } => {
+            if sweep.baud_rates.is_empty() || sweep.framings.is_empty() || sweep.discovery_unit_ids.is_empty() {
+                return Err("baud rates, framings and discovery unit ids must not be empty".into());
+            }
+            Ok(Box::new(BaudSweepStrategy::new(sweep, params)))
+        }
         ScanTarget::IpRange {
             from,
             to,

@@ -38,6 +38,33 @@ export interface UnitIdRange {
   mode: SerialMode;
 }
 
+/** One baud/framing combination for an automatic serial sweep. */
+export interface SerialFraming {
+  data_bits: DataBitsSerde;
+  parity: ParitySerde;
+  stop_bits: StopBitsSerde;
+}
+
+/** P2-01: two-phase sweep of serial settings, then unit-id scan. */
+export interface SerialSweepParams {
+  port_name: string;
+  mode: SerialMode;
+  /** Priority order, e.g. [9600, 2400, 19200, ...]. */
+  baud_rates: number[];
+  /** Priority order, e.g. 8N1, 8E1, 8O1. */
+  framings: SerialFraming[];
+  /** Few ids probed while looking for the right settings. */
+  discovery_unit_ids: number[];
+  /** Full range scanned after the settings are locked. */
+  unit_from: number;
+  unit_to: number;
+}
+
+export interface SerialAuto {
+  type: "serial_auto";
+  sweep: SerialSweepParams;
+}
+
 export interface IpRange {
   type: "ip_range";
   /** "192.168.1.1" or CIDR "192.168.1.0/24" */
@@ -53,7 +80,7 @@ export interface SingleDevice {
   register_plan: RegisterRange[];
 }
 
-export type ScanTarget = UnitIdRange | IpRange | SingleDevice;
+export type ScanTarget = UnitIdRange | SerialAuto | IpRange | SingleDevice;
 
 export interface DeviceTarget {
   kind: TransportKind;

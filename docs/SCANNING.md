@@ -11,11 +11,25 @@ configured probe FC (default: 03, 04, 01, 02). One `SerialTransport` is opened
 lazily and reused for the entire scan — this preserves the bus arbitration and
 the t3.5 gap between frames.
 
-Typical usage:
-- known baud rate: set it explicitly, e.g. 9600 8N1;
-- unknown baud rate: run the scan repeatedly for each common rate
-  (1200…115200) — per-baud presets are on the ROADMAP;
-- unknown parity: try 8N1, then 8E1, then 8O1.
+Use this when the serial settings are known.
+
+### 1b. Serial bus with unknown settings (`serial_auto`, P2-01)
+
+Enable “Авто-поиск настроек” in the serial form. The engine performs a **two-phase
+sweep**:
+
+1. **Phase 1 — settings detection.** For each framing (8N1 → 8E1 → 8O1) and
+   each baud rate in priority order (9600 → 2400 → 19200 → 4800 → 38400 →
+   57600 → 115200 → 1200), it probes only a few likely unit ids:
+   1, 2, 3, 4, 5, 10, 20, 100, 247. A frame with a valid CRC/LRC — including a
+   Modbus exception — counts as an answer.
+2. **Phase 2 — full scan.** The matching baud/framing is locked, the shared
+   serial port is reopened with those settings, and the complete unit-id range
+   is scanned. Other settings are never tried once a device answered.
+
+The UI lets you limit which baud rates and parities participate. With all
+defaults the worst case is 8 × 3 × 9 = 216 short probes; a response timeout of
+200–300 ms is recommended for sweep scans.
 
 Unit id 0 is broadcast: devices do not answer, so do not include it unless you
 intentionally test broadcast behaviour.
