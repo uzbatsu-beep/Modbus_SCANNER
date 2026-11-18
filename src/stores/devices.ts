@@ -4,11 +4,12 @@
 
 import { defineStore } from "pinia";
 import { api } from "@/api/mod";
-import type { DeviceRecord } from "@/types/ipc";
+import type { DeviceRecord, IpTargetStatus } from "@/types/ipc";
 
 export const useDevicesStore = defineStore("devices", {
   state: () => ({
     records: [] as DeviceRecord[],
+    ipTargets: [] as IpTargetStatus[],
     selectedKey: null as string | null,
     loading: false,
   }),
@@ -24,6 +25,7 @@ export const useDevicesStore = defineStore("devices", {
       try {
         const res = await api.scanner.getResults();
         this.records = res.records;
+        this.ipTargets = res.ip_targets ?? [];
         // drop selection if the record disappeared
         if (this.selectedKey && !this.records.some((r) => r.key === this.selectedKey)) {
           this.selectedKey = this.records[0]?.key ?? null;
@@ -40,6 +42,7 @@ export const useDevicesStore = defineStore("devices", {
     async clear() {
       await api.scanner.clearResults();
       this.records = [];
+      this.ipTargets = [];
       this.selectedKey = null;
     },
   },

@@ -178,10 +178,31 @@ export interface ScanProgress {
   elapsed_ms: number;
 }
 
+export type IpTargetClass =
+  | "valid_modbus"
+  | "port_open_no_modbus"
+  | "connection_refused"
+  | "timeout"
+  | "unreachable"
+  | "unknown";
+
+export interface IpTargetStatus {
+  endpoint: string;
+  port: number;
+  class: IpTargetClass;
+  unit_ids_probed: number[];
+  responses_ok: number;
+  responses_exception: number;
+  timeouts: number;
+  transport_errors: number;
+  last_seen_ms: number;
+}
+
 export type ScanEvent =
   | { kind: "status_changed"; status: ScanStatus; message: string }
   | { kind: "device_found"; record: DeviceRecord }
   | { kind: "device_updated"; record: DeviceRecord }
+  | { kind: "ip_target_classified"; status: IpTargetStatus }
   | { kind: "probe_completed"; device_key: string; function: number; result: ProbeResult }
   | { kind: "finished"; total: number; found: number; errors: number; elapsed_ms: number };
 
@@ -197,6 +218,7 @@ export interface ScanStats {
 
 export interface ScanResults {
   records: DeviceRecord[];
+  ip_targets: IpTargetStatus[];
   stats: ScanStats;
 }
 

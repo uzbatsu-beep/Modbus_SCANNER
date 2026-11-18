@@ -48,6 +48,24 @@ TCP = MBAP-framed request; UDP = RTU-style ADU in one datagram (no response
 means no device). `TcpTransport` uses a fresh connection per probe, which keeps
 the engine simple and tolerates devices that close sockets aggressively.
 
+### 2b. IP target classes (P2-04)
+
+Every `ip:port` gets a classification in `ScanResults.ip_targets` (also visible
+in the Results tab):
+
+| Class | Meaning |
+|-------|---------|
+| `valid_modbus` | At least one valid Modbus frame (data or exception) |
+| `port_open_no_modbus` | TCP handshake succeeded, but nothing answered in Modbus |
+| `connection_refused` | TCP connection actively refused |
+| `timeout` | No answer within the configured timeout |
+| `unreachable` | Host/network unreachable |
+
+Classes are ranked and never downgrade while unit ids are probed behind one IP.
+A refused/unreachable/timeout target does **not** create a fake device record;
+it only appears in the classification table. For UDP there is no handshake, so
+the only positive class is `valid_modbus` and silence is reported as `timeout`.
+
 ### 3. Single device (`single_device`)
 
 One endpoint + explicit unit id, with a `register_plan` of ranges to read.

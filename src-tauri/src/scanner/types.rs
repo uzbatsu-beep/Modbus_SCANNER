@@ -329,6 +329,10 @@ pub enum ScanEvent {
         function: u8,
         result: ProbeResult,
     },
+    /// IP target was classified during discovery (P2-04).
+    IpTargetClassified {
+        status: IpTargetStatus,
+    },
     Finished {
         total: u64,
         found: u64,
@@ -345,10 +349,58 @@ pub fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
+/// What we learned about one scanned IP endpoint (P2-04).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IpTargetClass {
+    /// At least one valid Modbus answer (data or exception).
+    ValidModbus,
+    /// TCP connection succeeded, but nothing spoke Modbus.
+    PortOpenNoModbus,
+    /// TCP connection was actively refused.
+    ConnectionRefused,
+    /// No answer within the configured timeout.
+    Timeout,
+    /// Host/network unreachable.
+    Unreachable,
+    /// Not probed yet.
+    Unknown,
+}
+
+impl IpTargetClass {
+    /// Higher rank wins when several unit ids are probed behind one IP.
+    pub fn rank(self) -> u8 {
+        match self {
+            IpTargetClass::ValidModbus => 5,
+            IpTargetClass::PortOpenNoModbus => 4,
+            IpTargetClass::ConnectionRefused => 3,
+            IpTargetClass::Timeout => 2,
+            IpTargetClass::Unreachable => 1,
+            IpTargetClass::Unknown => 0,
+        }
+    }
+}
+
+/// Aggregated classification for one `ip:port` endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IpTargetStatus {
+    pub endpoint: String,
+    pub port: u16,
+    pub class: IpTargetClass,
+    pub unit_ids_probed: Vec<u8>,
+    pub responses_ok: u32,
+    pub responses_exception: u32,
+    pub timeouts: u32,
+    pub transport_errors: u32,
+    pub last_seen_ms: u64,
+}
+
 /// Result of the whole scan session (returned by `get_scan_results`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScanResults {
     pub records: Vec<DeviceRecord>,
+    #[serde(default)]
+    pub ip_targets: Vec<IpTargetStatus>,
     pub stats: ScanStats,
 }
 

@@ -61,6 +61,40 @@ impl EngineParams {
 }
 
 #[cfg(test)]
+mod ip_class_tests {
+    use super::*;
+
+    #[test]
+    fn ranking_prefers_positive_evidence() {
+        assert!(IpTargetClass::ValidModbus.rank() > IpTargetClass::PortOpenNoModbus.rank());
+        assert!(IpTargetClass::PortOpenNoModbus.rank() > IpTargetClass::ConnectionRefused.rank());
+        assert!(IpTargetClass::ConnectionRefused.rank() > IpTargetClass::Timeout.rank());
+        assert!(IpTargetClass::Timeout.rank() > IpTargetClass::Unreachable.rank());
+    }
+
+    #[test]
+    fn maps_io_errors() {
+        use std::io::ErrorKind;
+        assert_eq!(
+            classify_ip_error(&TransportError::Io(ErrorKind::ConnectionRefused.into())),
+            IpTargetClass::ConnectionRefused
+        );
+        assert_eq!(
+            classify_ip_error(&TransportError::Io(ErrorKind::HostUnreachable.into())),
+            IpTargetClass::Unreachable
+        );
+        assert_eq!(
+            classify_ip_error(&TransportError::Io(ErrorKind::TimedOut.into())),
+            IpTargetClass::Timeout
+        );
+        assert_eq!(
+            classify_ip_error(&TransportError::Timeout(Duration::from_millis(500))),
+            IpTargetClass::Timeout
+        );
+    }
+}
+
+#[cfg(test)]
 mod engine_params_tests {
     use super::*;
 
@@ -180,6 +214,7 @@ impl ScannerHandle {
 
             *self.results.write() = ScanResults {
                 records: Vec::new(),
+                ip_targets: Vec::new(),
                 stats: ScanStats {
                     started_ms: Some(now_ms()),
                     ..Default::default()
@@ -567,6 +602,9 @@ async fn execute_probe(
 
     loop {
         let started = Instant::now();
+        // P2-04: did the TCP handshake succeed? A connected socket that never
+        // speaks Modbus is different from a refused/unreachable endpoint.
+        let mut tcp_connected = false;
         let res: Result<Vec<u8>, TransportError> = match target.kind {
             TransportKind::Rtu | TransportKind::Ascii => {
                 let mode = match target.serial_mode {
@@ -618,13 +656,16 @@ async fn execute_probe(
             })
             .await
             {
-                Ok(mut t) => match t.transact(&adu, timeout, 8).await {
-                    Ok(resp) => {
-                        let _ = t.close().await;
-                        Ok(resp)
+                Ok(mut t) => {
+                    tcp_connected = true;
+                    match t.transact(&adu, timeout, 8).await {
+                        Ok(resp) => {
+                            let _ = t.close().await;
+                            Ok(resp)
+                        }
+                        Err(e) => Err(e),
                     }
-                    Err(e) => Err(e),
-                },
+                }
                 Err(e) => Err(e),
             },
             TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
@@ -640,6 +681,27 @@ async fn execute_probe(
                     Ok(p) => {
                         let result = super::strategies::classify_response(function, &p.to_bytes(), rtt);
                         let is_found = matches!(result, ProbeResult::Ok { .. } | ProbeResult::Exception { .. });
+                        let is_ok = matches!(result, ProbeResult::Ok { .. });
+                        let is_exception = matches!(result, ProbeResult::Exception { .. });
+                        if is_found {
+                            note_ip_status(
+                                app,
+                                results,
+                                target,
+                                IpTargetClass::ValidModbus,
+                                is_ok,
+                                is_exception,
+                                false,
+                            );
+                        } else {
+                            // Connected, answered, but not valid Modbus data.
+                            let class = if target.kind == TransportKind::Tcp {
+                                IpTargetClass::PortOpenNoModbus
+                            } else {
+                                IpTargetClass::Timeout
+                            };
+                            note_ip_status(app, results, target, class, false, false, false);
+                        }
 
                         // Update results inside a closed scope: the write guard
                         // must not live across the await below.
@@ -696,11 +758,28 @@ async fn execute_probe(
                         };
                     }
                     Err(e) => {
+                        let class = if target.kind == TransportKind::Tcp {
+                            IpTargetClass::PortOpenNoModbus
+                        } else {
+                            IpTargetClass::Timeout
+                        };
+                        note_ip_status(app, results, target, class, false, false, true);
                         last_err = Some(e);
                     }
                 }
             }
             Err(e) => {
+                let timed_out = matches!(e, TransportError::Timeout(_));
+                let class = if target.kind == TransportKind::Tcp {
+                    if tcp_connected {
+                        IpTargetClass::PortOpenNoModbus
+                    } else {
+                        classify_ip_error(&e)
+                    }
+                } else {
+                    IpTargetClass::Timeout
+                };
+                note_ip_status(app, results, target, class, false, false, timed_out);
                 last_err = Some(e);
             }
         }
@@ -895,6 +974,83 @@ async fn execute_register_read(
             let _ = e;
             RegisterReadOutcome::Error
         }
+    }
+}
+
+/// Classify a transport failure observed while connecting to an IP target.
+fn classify_ip_error(err: &TransportError) -> IpTargetClass {
+    match err {
+        TransportError::Timeout(_) => IpTargetClass::Timeout,
+        TransportError::Io(io) => match io.kind() {
+            std::io::ErrorKind::ConnectionRefused => IpTargetClass::ConnectionRefused,
+            std::io::ErrorKind::HostUnreachable | std::io::ErrorKind::NetworkUnreachable => {
+                IpTargetClass::Unreachable
+            }
+            std::io::ErrorKind::TimedOut => IpTargetClass::Timeout,
+            _ => IpTargetClass::Timeout,
+        },
+        _ => IpTargetClass::Timeout,
+    }
+}
+
+/// Record and (on change) emit the classification of one IP endpoint.
+#[allow(clippy::too_many_arguments)]
+fn note_ip_status(
+    app: &tauri::AppHandle,
+    results: &Arc<RwLock<ScanResults>>,
+    target: &DeviceTarget,
+    class: IpTargetClass,
+    ok: bool,
+    exception: bool,
+    timed_out: bool,
+) {
+    if !matches!(target.kind, TransportKind::Tcp | TransportKind::Udp) {
+        return;
+    }
+    let port = target.port.unwrap_or(502);
+    let (changed, snapshot) = {
+        let mut r = results.write();
+        let idx = match r.ip_targets.iter().position(|s| s.endpoint == target.endpoint && s.port == port) {
+            Some(i) => i,
+            None => {
+                r.ip_targets.push(IpTargetStatus {
+                    endpoint: target.endpoint.clone(),
+                    port,
+                    class: IpTargetClass::Unknown,
+                    unit_ids_probed: Vec::new(),
+                    responses_ok: 0,
+                    responses_exception: 0,
+                    timeouts: 0,
+                    transport_errors: 0,
+                    last_seen_ms: now_ms(),
+                });
+                r.ip_targets.len() - 1
+            }
+        };
+        let status = &mut r.ip_targets[idx];
+        let previous = status.class;
+        if class.rank() > status.class.rank() {
+            status.class = class;
+        }
+        if !status.unit_ids_probed.contains(&target.unit_id) {
+            status.unit_ids_probed.push(target.unit_id);
+        }
+        if ok {
+            status.responses_ok += 1;
+        }
+        if exception {
+            status.responses_exception += 1;
+        }
+        if timed_out {
+            status.timeouts += 1;
+        } else if !ok && !exception {
+            status.transport_errors += 1;
+        }
+        status.last_seen_ms = now_ms();
+        (previous != status.class, status.clone())
+    };
+    if changed {
+        emit_event(app, &ScanEvent::IpTargetClassified { status: snapshot });
     }
 }
 

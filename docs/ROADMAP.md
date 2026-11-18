@@ -38,6 +38,7 @@
 - [x] Bounded-concurrency IP worker pool (`ip_concurrency`) with a transport per target
 - [x] Baud-rate sweep strategy: two-phase `serial_auto` (few ids across all settings, then full range on the matched one)
 - [x] Adaptive register map (`register_scan`): Quick/Balanced/Deep, exception-aware splitting, timeout guard
+- [x] IP target classification: valid Modbus / port open / refused / timeout / unreachable
 - [ ] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
 - [ ] Single-device deep scan for TCP/UDP endpoints
 - [ ] Export per-device results from the detail pane
@@ -80,6 +81,9 @@ CRC/LRC, исключения); транспорты serial/TCP/UDP; движо�
 
 P2-03 — адаптивная карта регистров `register_scan` (Quick/Balanced/Deep, сплит
 неудачных блоков, исключения 01/03 → стоп, 3 таймаута → стоп).
+
+P2-04 — классификация IP-целей: валидный Modbus / порт открыт, не Modbus /
+отказ / таймаут / недоступен; отображается отдельной таблицей в результатах.
 
 P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_concurrency`
 теперь влияют на движок (единый `EngineParams`, ограничения значений; serial —

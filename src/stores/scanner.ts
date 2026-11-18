@@ -57,6 +57,7 @@ export const useScannerStore = defineStore("scanner", {
           this.refreshDevicesSafe();
           break;
         case "device_updated":
+        case "ip_target_classified":
           this.refreshDevicesSafe();
           break;
         case "finished":

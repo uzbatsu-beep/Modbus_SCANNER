@@ -167,6 +167,7 @@ Discriminated union on `kind`:
 { kind: "status_changed", status: ScanStatus, message: string }
 { kind: "device_found", record: DeviceRecord }
 { kind: "device_updated", record: DeviceRecord }
+{ kind: "ip_target_classified", status: IpTargetStatus }
 { kind: "probe_completed", device_key, function, result: ProbeResult } // reserved
 { kind: "finished", total, found, errors, elapsed_ms }
 ```
@@ -191,6 +192,24 @@ Discriminated union on `kind`:
 ```
 
 `RegisterValue`: `{ function, address, raw, as_hex, rtt_us }`.
+
+### IP target classification (P2-04)
+
+`ScanResults.ip_targets: IpTargetStatus[]` — one entry per scanned `ip:port`:
+
+```ts
+{ endpoint: string; port: number;
+  class: "valid_modbus" | "port_open_no_modbus" | "connection_refused"
+       | "timeout" | "unreachable" | "unknown";
+  unit_ids_probed: number[];
+  responses_ok: number; responses_exception: number;
+  timeouts: number; transport_errors: number;
+  last_seen_ms: number }
+```
+
+The class never downgrades: a positive answer beats an open port, which beats
+refused / timeout / unreachable. An open TCP socket with no valid Modbus answer
+is reported as `port_open_no_modbus`, not as a device.
 
 ## Frontend usage example
 
