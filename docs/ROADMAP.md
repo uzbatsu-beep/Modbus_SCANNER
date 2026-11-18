@@ -50,7 +50,7 @@
 - [ ] Serial-only diagnostics: FC08 (Diagnostics), FC07/0B/0C, device ID FC2B/0x2B
 - [ ] Register map sweep: contiguous-range detection with configurable step
 - [ ] Value decoding presets (float32, uint32, int16, scaled values, bitfields)
-- [ ] Scan profiles / templates: saved targets + register plans
+- [x] Scan profiles / templates: saved targets + register plans (projects, P3-04)
 - [ ] Session compare (diff two scans)
 - [ ] CSV/XLSX export with decoded columns
 - [ ] Full i18n (RU/EN) and light theme
@@ -112,7 +112,7 @@ IP-целей, FC43-идентификация, экспорт по устрой
 
 Диагностические функции (FC08/07/0B/0C), автоматический поиск
 непрерывных диапазонов регистров, пресеты декодирования (float32, uint32, bitfields),
-профили сканирования, сравнение сессий, полная локализация и светлая тема,
+проекты со снимками сканов (P3-04), сравнение сессий, полная локализация и светлая тема,
 генерация TS-типов из Rust, тесты движка с mock-транспортом, CI для Linux/macOS.
 
 ## Вне текущего объёма

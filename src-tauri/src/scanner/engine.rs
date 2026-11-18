@@ -199,6 +199,11 @@ impl ScannerHandle {
         *r = ScanResults::default();
     }
 
+    /// Replace results from a loaded project (P3-04).
+    pub fn set_results(&self, results: ScanResults) {
+        *self.results.write() = results;
+    }
+
     /// Start a new scan. Returns an error if one is already running.
     pub async fn start(
         &self,

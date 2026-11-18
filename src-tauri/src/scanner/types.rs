@@ -430,6 +430,26 @@ pub struct IpTargetStatus {
     pub last_seen_ms: u64,
 }
 
+/// One saved scan snapshot inside a project (P3-04).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanSnapshot {
+    pub timestamp_ms: u64,
+    pub label: String,
+    pub results: ScanResults,
+}
+
+/// A portable project: devices, tag map and scan history in one file.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Project {
+    pub name: String,
+    pub version: u32,
+    pub created_ms: u64,
+    pub updated_ms: u64,
+    pub results: ScanResults,
+    pub tags: Vec<TagDefinition>,
+    pub history: Vec<ScanSnapshot>,
+}
+
 /// Result of the whole scan session (returned by `get_scan_results`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ScanResults {

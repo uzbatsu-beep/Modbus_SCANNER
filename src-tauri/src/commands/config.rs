@@ -11,7 +11,7 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::state::{AppState, Config};
 
-fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
+pub fn config_path(app: &AppHandle) -> Result<PathBuf, String> {
     let dir = app
         .path()
         .app_config_dir()
@@ -24,19 +24,21 @@ pub fn get_config(state: State<'_, AppState>) -> Result<Config, String> {
     Ok(state.config.lock().clone())
 }
 
-#[tauri::command]
-pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: Config) -> Result<(), String> {
-    // Update in-memory state.
-    *state.config.lock() = config.clone();
-
-    // Persist.
-    let path = config_path(&app)?;
+/// Persist a config to disk (shared with project loading).
+pub fn persist_config(app: &AppHandle, config: &Config) -> Result<(), String> {
+    let path = config_path(app)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    let data = serde_json::to_vec_pretty(&config).map_err(|e| e.to_string())?;
+    let data = serde_json::to_vec_pretty(config).map_err(|e| e.to_string())?;
     std::fs::write(&path, data).map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn save_config(app: AppHandle, state: State<'_, AppState>, config: Config) -> Result<(), String> {
+    *state.config.lock() = config.clone();
+    persist_config(&app, &config)
 }
 
 #[tauri::command]

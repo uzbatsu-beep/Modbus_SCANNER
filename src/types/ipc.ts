@@ -269,6 +269,22 @@ export type ScanEvent =
   | { kind: "probe_completed"; device_key: string; function: number; result: ProbeResult }
   | { kind: "finished"; total: number; found: number; errors: number; elapsed_ms: number };
 
+export interface ScanSnapshot {
+  timestamp_ms: number;
+  label: string;
+  results: ScanResults;
+}
+
+export interface Project {
+  name: string;
+  version: number;
+  created_ms: number;
+  updated_ms: number;
+  results: ScanResults;
+  tags: TagDefinition[];
+  history: ScanSnapshot[];
+}
+
 export interface ScanStats {
   requests_sent: number;
   responses_ok: number;

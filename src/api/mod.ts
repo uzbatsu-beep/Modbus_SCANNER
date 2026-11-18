@@ -13,6 +13,7 @@ import type {
   DecodedValue,
   ExportFormat,
   ManualResponse,
+  Project,
   ReadRequest,
   RawFrameRequest,
   ScanEvent,
@@ -62,6 +63,9 @@ export const api = {
       invoke<number>("export_results", { path, format }),
     exportDevice: (key: string, path: string, format: ExportFormat) =>
       invoke<boolean>("export_device", { key, path, format }),
+    saveProject: (path: string, name: string) =>
+      invoke<string>("save_project", { path, name }),
+    loadProject: (path: string) => invoke<Project>("load_project", { path }),
   },
 
   modbus: {

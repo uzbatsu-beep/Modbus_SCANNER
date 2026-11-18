@@ -52,6 +52,8 @@
 | `clear_results` | — | `void` | Очищает записи и статистику |
 | `export_results` | `{ path: string, format: "csv"\|"json"\|"xml" }` | `number` | Пишет файл со всей сессией, возвращает число устройств |
 | `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: экспортирует только выбранное устройство (зонды, регистры, FC43-идентификацию); ошибка, если ключ неизвестен |
+| `save_project` | `{ path: string, name: string }` | `string` (путь) | P3-04: пишет устройства + теги + историю сканов в один JSON; добавляет снимок (макс. 20) |
+| `load_project` | `{ path: string }` | `Project` | P3-04: восстанавливает результаты и теги, синхронизирует `config.json` |
 
 Варианты `ScanTarget`:
 
@@ -210,6 +212,10 @@ interface DeviceIdentification {
 ```
 
 `RegisterValue`: `{ function, address, raw, as_hex, rtt_us }`.
+
+`Project` (P3-04): `{ name, version, created_ms, updated_ms,
+results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, где
+`ScanSnapshot = { timestamp_ms, label, results }`.
 
 ### Классификация IP-целей (P2-04)
 

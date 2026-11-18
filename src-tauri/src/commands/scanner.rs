@@ -6,7 +6,8 @@ use tauri::{AppHandle, State};
 
 use crate::scanner::engine::{ControlMsg, ScannerHandle};
 use crate::scanner::types::{
-    DeviceRecord, ProbeResult, ScanParams, ScanProgress, ScanResults, ScanStatus, ScanTarget,
+    now_ms, DeviceRecord, ProbeResult, Project, ScanParams, ScanProgress, ScanResults,
+    ScanSnapshot, ScanStatus, ScanTarget,
 };
 use crate::state::AppState;
 
@@ -87,6 +88,77 @@ pub async fn export_results(
 
     let _ = app;
     Ok(count)
+}
+
+/// Save the current session, tag map and scan history into one project file (P3-04).
+#[tauri::command]
+pub async fn save_project(
+    state: State<'_, AppState>,
+    path: String,
+    name: String,
+) -> Result<String, String> {
+    let results = state.scanner.results();
+    let tags = state.config.lock().tags.clone();
+    let now = now_ms();
+    let file = PathBuf::from(&path);
+
+    // Keep the existing history when overwriting a project file.
+    let existing: Option<Project> = if file.exists() {
+        let data = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
+        serde_json::from_slice(&data).ok()
+    } else {
+        None
+    };
+    let created_ms = existing.as_ref().map(|p| p.created_ms).unwrap_or(now);
+    let mut history: Vec<ScanSnapshot> = existing.map(|p| p.history).unwrap_or_default();
+
+    let mut snapshot_results = results.clone();
+    if snapshot_results.stats.finished_ms.is_none() {
+        snapshot_results.stats.finished_ms = Some(now);
+    }
+    history.push(ScanSnapshot {
+        timestamp_ms: now,
+        label: format!("{} — {}", name, results.stats.requests_sent),
+        results: snapshot_results,
+    });
+    if history.len() > 20 {
+        history.drain(..history.len() - 20);
+    }
+
+    let project = Project {
+        name,
+        version: 1,
+        created_ms,
+        updated_ms: now,
+        results,
+        tags,
+        history,
+    };
+    let data = serde_json::to_vec_pretty(&project).map_err(|e| e.to_string())?;
+    tokio::fs::write(&file, data).await.map_err(|e| e.to_string())?;
+    Ok(path)
+}
+
+/// Load a project: results, tag map and history; also syncs config.json.
+#[tauri::command]
+pub async fn load_project(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    path: String,
+) -> Result<Project, String> {
+    let data = tokio::fs::read(PathBuf::from(&path))
+        .await
+        .map_err(|e| e.to_string())?;
+    let project: Project = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+
+    state.scanner.set_results(project.results.clone());
+    {
+        let mut config = state.config.lock();
+        config.tags = project.tags.clone();
+    }
+    let config = state.config.lock().clone();
+    crate::commands::config::persist_config(&app, &config)?;
+    Ok(project)
 }
 
 /// Export a single selected device (P2-08) in the chosen format.

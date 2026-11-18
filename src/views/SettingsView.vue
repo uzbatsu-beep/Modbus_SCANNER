@@ -2,8 +2,10 @@
 import { reactive, ref } from "vue";
 
 import { api } from "@/api/mod";
+import type { Project } from "@/types/ipc";
 import { useSettingsStore } from "@/stores/settings";
 import { useScannerStore } from "@/stores/scanner";
+import { useDevicesStore } from "@/stores/devices";
 
 const settings = useSettingsStore();
 const scanner = useScannerStore();
@@ -17,6 +19,35 @@ const local = reactive({
 
 const saving = ref(false);
 const msg = ref<string | null>(null);
+
+const devices = useDevicesStore();
+const project = reactive({ name: "Modbus scan", path: "modbus-project.json" });
+const loadedProject = ref<Project | null>(null);
+const projectMsg = ref<string | null>(null);
+
+async function saveProject() {
+  projectMsg.value = null;
+  try {
+    await api.scanner.saveProject(project.path.trim(), project.name.trim() || "Modbus scan");
+    projectMsg.value = "проект сохранён";
+  } catch (e) {
+    projectMsg.value = `ошибка: ${e}`;
+  }
+}
+
+async function loadProject() {
+  projectMsg.value = null;
+  try {
+    const p = await api.scanner.loadProject(project.path.trim());
+    loadedProject.value = p;
+    project.name = p.name;
+    await settings.load();
+    await devices.refresh();
+    projectMsg.value = `загружено устройств: ${p.results.records.length}, тегов: ${p.tags.length}, снимков: ${p.history.length}`;
+  } catch (e) {
+    projectMsg.value = `ошибка: ${e}`;
+  }
+}
 const appInfo = ref<{ name: string; version: string; debug: boolean } | null>(null);
 
 api.system.getAppInfo().then((i) => (appInfo.value = i)).catch(() => {});
@@ -80,6 +111,35 @@ function clearLog() {
       <div class="form-row">
         <label>Каталог по умолчанию</label>
         <input v-model="local.export_dir" placeholder="Documents/modbus-scan" class="wide" />
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">Проект / Project (устройства + теги + история)</div>
+
+      <div class="form-row">
+        <label>Название</label>
+        <input v-model="project.name" placeholder="Modbus scan" />
+      </div>
+
+      <div class="form-row">
+        <label>Файл проекта</label>
+        <input v-model="project.path" class="wide" placeholder="modbus-project.json" />
+      </div>
+
+      <div class="form-row">
+        <label />
+        <button :disabled="!project.path.trim()" @click="saveProject">Сохранить проект</button>
+        <button :disabled="!project.path.trim()" @click="loadProject">Загрузить проект</button>
+        <span v-if="projectMsg" class="msg">{{ projectMsg }}</span>
+      </div>
+
+      <div v-if="loadedProject" class="form-row">
+        <label>Загружен</label>
+        <span class="mono">
+          {{ loadedProject.name }} · {{ loadedProject.results.records.length }} устройств ·
+          {{ loadedProject.tags.length }} тегов · {{ loadedProject.history.length }} снимков
+        </span>
       </div>
     </div>
 
