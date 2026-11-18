@@ -33,6 +33,66 @@ pub enum ControlMsg {
     Stop,
 }
 
+/// Effective timing/limits derived from [`ScanParams`].
+///
+/// All values are clamped once at scan start, so the engine task and its workers
+/// use identical settings for every request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EngineParams {
+    /// Response/connect timeout for a single request.
+    pub timeout: Duration,
+    /// Additional attempts after the first one (0 = no retries).
+    pub retries: u32,
+    /// Delay between consecutive work items.
+    pub request_gap: Duration,
+    /// Max in-flight IP probes (serial work is always sequential).
+    pub ip_concurrency: usize,
+}
+
+impl EngineParams {
+    pub fn from_scan_params(p: &ScanParams) -> Self {
+        Self {
+            timeout: Duration::from_millis(p.timeout_ms.clamp(50, 10_000) as u64),
+            retries: p.retries.min(5),
+            request_gap: Duration::from_millis(p.request_gap_ms.min(1_000) as u64),
+            ip_concurrency: (p.ip_concurrency.clamp(1, 256)) as usize,
+        }
+    }
+}
+
+#[cfg(test)]
+mod engine_params_tests {
+    use super::*;
+
+    #[test]
+    fn maps_params_with_clamps() {
+        let mut p = ScanParams::default();
+        p.timeout_ms = 1_200;
+        p.retries = 2;
+        p.request_gap_ms = 25;
+        p.ip_concurrency = 16;
+        let e = EngineParams::from_scan_params(&p);
+        assert_eq!(e.timeout, Duration::from_millis(1_200));
+        assert_eq!(e.retries, 2);
+        assert_eq!(e.request_gap, Duration::from_millis(25));
+        assert_eq!(e.ip_concurrency, 16);
+    }
+
+    #[test]
+    fn clamps_out_of_range_values() {
+        let mut p = ScanParams::default();
+        p.timeout_ms = 0;
+        p.retries = 99;
+        p.request_gap_ms = 99_999;
+        p.ip_concurrency = 0;
+        let e = EngineParams::from_scan_params(&p);
+        assert_eq!(e.timeout, Duration::from_millis(50));
+        assert_eq!(e.retries, 5);
+        assert_eq!(e.request_gap, Duration::from_millis(1_000));
+        assert_eq!(e.ip_concurrency, 1);
+    }
+}
+
 /// Shared engine state handle.
 pub struct ScannerHandle {
     /// Control channel to the running task (None when idle).
@@ -111,6 +171,7 @@ impl ScannerHandle {
             let _ = self.status_tx.send(ScanStatus::Preparing);
             let _ = status_tx;
 
+            let engine_params = EngineParams::from_scan_params(&params);
             let strategy = build_strategy(target, params)
                 .map_err(|e| {
                     let _ = self.status_tx.send(ScanStatus::Failed);
@@ -128,6 +189,7 @@ impl ScannerHandle {
             tokio::spawn(engine_task(
                 app,
                 strategy,
+                engine_params,
                 rx,
                 (pause_tx, pause_rx),
                 results,
@@ -150,6 +212,7 @@ impl ScannerHandle {
 async fn engine_task(
     app: tauri::AppHandle,
     mut strategy: Box<dyn ScanStrategy + Send>,
+    engine: EngineParams,
     mut control_rx: mpsc::Receiver<ControlMsg>,
     (pause_tx, mut pause_rx): (watch::Sender<bool>, watch::Receiver<bool>),
     results: Arc<RwLock<ScanResults>>,
@@ -158,6 +221,11 @@ async fn engine_task(
     let total = strategy.total();
     let mut done: u64 = 0;
     let mut serial_transport: Option<SerialTransport> = None;
+    // Register-plan work discovered during probes, executed by the engine so
+    // that serial reads reuse the single open port.
+    let mut pending: std::collections::VecDeque<WorkItem> = std::collections::VecDeque::new();
+    // In-flight IP probes, bounded by `engine.ip_concurrency`.
+    let mut ip_tasks: tokio::task::JoinSet<ProbeOutcome> = tokio::task::JoinSet::new();
     let mut want_stop = false;
 
     let _ = status_tx.send(ScanStatus::Running);
@@ -166,14 +234,15 @@ async fn engine_task(
         message: "scanning started".into(),
     });
 
-    'main: while !want_stop {
+    'main: loop {
         // Handle control messages (non-blocking).
         while let Ok(msg) = control_rx.try_recv() {
             match msg {
                 ControlMsg::Stop => {
                     want_stop = true;
+                    ip_tasks.abort_all();
                     let _ = status_tx.send(ScanStatus::Stopped);
-                    continue 'main;
+                    break 'main;
                 }
                 ControlMsg::Pause => {
                     let _ = pause_tx.send(true);
@@ -194,65 +263,132 @@ async fn engine_task(
             }
         }
 
-        // Wait while paused.
+        // Collect finished IP probes.
+        while let Some(finished) = ip_tasks.try_join_next() {
+            match finished {
+                Ok(outcome) => {
+                    let stop_on_found = strategy.stop_on_found();
+                    apply_probe_outcome(&mut strategy, &mut pending, outcome, &mut want_stop, stop_on_found);
+                    if want_stop {
+                        break;
+                    }
+                }
+                Err(e) if !e.is_cancelled() => tracing::warn!("IP probe task failed: {e}"),
+                Err(_) => {}
+            }
+        }
+        if want_stop {
+            break;
+        }
+
+        // Wait while paused (already running IP probes finish).
         if *pause_rx.borrow() {
             tokio::select! {
                 _ = pause_rx.changed() => {},
                 msg = control_rx.recv() => {
                     if let Some(ControlMsg::Stop) = msg {
                         want_stop = true;
+                        ip_tasks.abort_all();
                         let _ = status_tx.send(ScanStatus::Stopped);
-                        continue 'main;
+                        break;
                     }
                 }
             }
             continue;
         }
 
-        let item = strategy.next_item();
-        let item = match item {
+        // Next item: register work first, then the strategy's probes.
+        let item = match pending.pop_front() {
             Some(i) => i,
-            None => break,
+            None => match strategy.next_item() {
+                Some(i) => i,
+                None => break,
+            },
         };
 
-        // Execute.
-        let outcome = match &item {
+        match item {
             WorkItem::Probe { target, function, pdu } => {
-                results.write().stats.requests_sent += 1;
-                execute_probe(
-                    &app,
-                    &mut serial_transport,
-                    target,
-                    *function,
-                    pdu,
-                    &results,
-                    &mut strategy,
-                    &mut done,
-                )
-                .await
-            }
-            WorkItem::RegisterRead { target, function, start, quantity, pdu } => {
-                results.write().stats.requests_sent += 1;
-                execute_register_read(
-                    &app,
-                    &mut serial_transport,
-                    target,
-                    *function,
-                    *start,
-                    *quantity,
-                    pdu,
-                    &results,
-                )
-                .await
-            }
-        };
+                if matches!(target.kind, TransportKind::Tcp | TransportKind::Udp) {
+                    // Respect the cap strictly: wait for a free slot before spawning.
+                    while ip_tasks.len() >= engine.ip_concurrency && !want_stop {
+                        match ip_tasks.join_next().await {
+                            Some(Ok(outcome)) => {
+                                let stop_on_found = strategy.stop_on_found();
+                                apply_probe_outcome(
+                                    &mut strategy,
+                                    &mut pending,
+                                    outcome,
+                                    &mut want_stop,
+                                    stop_on_found,
+                                );
+                            }
+                            Some(Err(e)) if !e.is_cancelled() => {
+                                tracing::warn!("IP probe task failed: {e}");
+                            }
+                            _ => {}
+                        }
+                    }
+                    if want_stop {
+                        break;
+                    }
 
-        if outcome == Outcome::DeviceFound && strategy.stop_on_found() {
-            break;
+                    // Each IP probe owns its transport: safe to run concurrently.
+                    let task_app = app.clone();
+                    let task_results = results.clone();
+                    ip_tasks.spawn(async move {
+                        let mut unused_serial = None;
+                        execute_probe(
+                            &task_app,
+                            &mut unused_serial,
+                            &target,
+                            function,
+                            &pdu,
+                            &task_results,
+                            engine,
+                        )
+                        .await
+                    });
+                } else {
+                    // Serial probes must stay strictly sequential: one bus, one transport.
+                    let outcome = execute_probe(
+                        &app,
+                        &mut serial_transport,
+                        &target,
+                        function,
+                        &pdu,
+                        &results,
+                        engine,
+                    )
+                    .await;
+                    let stop_on_found = strategy.stop_on_found();
+                    apply_probe_outcome(&mut strategy, &mut pending, outcome, &mut want_stop, stop_on_found);
+                }
+                done += 1;
+                emit_progress(&app, *status_tx.borrow(), total, done, &results);
+            }
+            item @ WorkItem::RegisterRead { .. } => {
+                execute_work(&app, item, &mut serial_transport, &results, engine).await;
+                done += 1;
+                emit_progress(&app, *status_tx.borrow(), total, done, &results);
+            }
         }
 
-        done += 1;
-        emit_progress(&app, *status_tx.borrow(), total, done, &results);
+        // Inter-request gap from ScanParams (applies to all work items).
+        if !engine.request_gap.is_zero() {
+            tokio::time::sleep(engine.request_gap).await;
+        }
+    }
+
+    // Wait for the remaining in-flight probes (already counted in `done`).
+    while let Some(finished) = ip_tasks.join_next().await {
+        if let Ok(outcome) = finished {
+            let stop_on_found = strategy.stop_on_found();
+            apply_probe_outcome(&mut strategy, &mut pending, outcome, &mut want_stop, stop_on_found);
+        }
+    }
+    // Execute any register work collected from the last probes.
+    while let Some(item) = pending.pop_front() {
+        execute_work(&app, item, &mut serial_transport, &results, engine).await;
     }
 
     // Cleanup.
@@ -277,11 +413,37 @@ async fn engine_task(
     let _ = status_tx;
 }
 
+/// Schedule the register plan for a found device and honour `stop_on_first`.
+fn apply_probe_outcome(
+    strategy: &mut Box<dyn ScanStrategy + Send>,
+    pending: &mut std::collections::VecDeque<WorkItem>,
+    outcome: ProbeOutcome,
+    want_stop: &mut bool,
+    stop_on_found: bool,
+) {
+    if outcome.is_found {
+        for work in strategy.on_device_found(&outcome.target) {
+            pending.push_back(work);
+        }
+        if stop_on_found {
+            *want_stop = true;
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Outcome {
     Ok,
-    DeviceFound,
     Failed,
+}
+
+/// What a completed probe hands back to the engine.
+#[derive(Debug)]
+struct ProbeOutcome {
+    /// True when the device answered (data or exception).
+    is_found: bool,
+    /// Kept so the engine can schedule the register plan for a found device.
+    target: DeviceTarget,
 }
 
 /// Build the ADU for a target kind + raw PDU.
@@ -373,14 +535,14 @@ async fn execute_probe(
     function: u8,
     pdu: &[u8],
     results: &Arc<RwLock<ScanResults>>,
-    strategy: &mut Box<dyn ScanStrategy + Send>,
-    done: &mut u64,
-) -> Outcome {
+    engine: EngineParams,
+) -> ProbeOutcome {
+    results.write().stats.requests_sent += 1;
     let adu = build_adu(target.kind, target.unit_id, pdu);
 
     let mut attempts = 0u32;
-    let retries = 1u32; // from params
-    let timeout = Duration::from_millis(800);
+    let retries = engine.retries;
+    let timeout = engine.timeout;
     let mut last_err: Option<TransportError> = None;
 
     loop {
@@ -501,16 +663,17 @@ async fn execute_probe(
                             if let Some(rec) = record {
                                 emit_event(app, &ScanEvent::DeviceFound { record: rec });
                             }
-                            // Register plan for the found device.
-                            for w in strategy.on_device_found(target) {
-                                let r2 = results.clone();
-                                let app2 = app.clone();
-                                let mut st = None;
-                                execute_work(app2, w, &mut st, &r2).await;
-                            }
-                            return Outcome::DeviceFound;
+                            // The register plan is scheduled by the engine (it owns
+                            // the strategy and the shared serial transport).
+                            return ProbeOutcome {
+                                is_found: true,
+                                target: target.clone(),
+                            };
                         }
-                        return Outcome::Ok;
+                        return ProbeOutcome {
+                            is_found: false,
+                            target: target.clone(),
+                        };
                     }
                     Err(e) => {
                         last_err = Some(e);
@@ -537,19 +700,33 @@ async fn execute_probe(
             Some(_) => r.stats.transport_errors += 1,
         }
     }
-    let _ = done;
-    Outcome::Failed
+    ProbeOutcome {
+        is_found: false,
+        target: target.clone(),
+    }
 }
 
 async fn execute_work(
-    app: tauri::AppHandle,
+    app: &tauri::AppHandle,
     item: WorkItem,
     serial_transport: &mut Option<SerialTransport>,
     results: &Arc<RwLock<ScanResults>>,
+    engine: EngineParams,
 ) {
     if let WorkItem::RegisterRead { target, function, start, quantity, pdu } = &item {
         results.write().stats.requests_sent += 1;
-        let _ = execute_register_read(&app, serial_transport, target, *function, *start, *quantity, pdu, results).await;
+        let _ = execute_register_read(
+            app,
+            serial_transport,
+            target,
+            *function,
+            *start,
+            *quantity,
+            pdu,
+            results,
+            engine,
+        )
+        .await;
     }
 }
 
@@ -563,9 +740,10 @@ async fn execute_register_read(
     quantity: u16,
     pdu: &[u8],
     results: &Arc<RwLock<ScanResults>>,
+    engine: EngineParams,
 ) -> Outcome {
     let adu = build_adu(target.kind, target.unit_id, pdu);
-    let timeout = Duration::from_millis(800);
+    let timeout = engine.timeout;
 
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => {

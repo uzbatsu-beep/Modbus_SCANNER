@@ -51,10 +51,11 @@ Each found device gets its `registers` map filled with the results.
 | `register_plan` | `[]` | Ranges to read on each found device |
 | `ip_concurrency` | 32 | Planned max in-flight IP probes |
 
-**Implementation note:** `timeout_ms`, `request_gap_ms`, `retries` and
-`ip_concurrency` currently have fixed effective values in the engine (800 ms,
-no gap, 1 retry, sequential). They are already exposed in the UI and IPC
-contract; see [ROADMAP.md](ROADMAP.md) for the wiring work.
+**Implementation note:** all four parameters are effective: the engine derives
+one `EngineParams` set at scan start (timeout clamped to 50–10000 ms, retries
+≤ 5, gap ≤ 1000 ms, IP concurrency 1–256). Serial probes stay strictly
+sequential; TCP/UDP probes run in a bounded worker pool. The request gap is
+applied after every work item; Pause stops scheduling new work.
 
 ## Timing recommendations
 

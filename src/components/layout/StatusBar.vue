@@ -21,7 +21,10 @@ const errors = computed(() => scanner.progress?.errors ?? 0);
 const elapsed = computed(() => (scanner.progress?.elapsed_ms ?? 0) / 1000);
 const done = computed(() => scanner.progress?.done ?? 0);
 const total = computed(() => scanner.progress?.total ?? 0);
-const pct = computed(() => (total.value > 0 ? Math.round((done.value / total.value) * 100) : 0));
+// Register-plan work is not part of the strategy's initial `total`, so cap it.
+const pct = computed(() =>
+  total.value > 0 ? Math.min(100, Math.round((done.value / total.value) * 100)) : 0
+);
 </script>
 
 <template>

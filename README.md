@@ -93,8 +93,9 @@ cargo test --lib         # protocol unit tests
 ## Status
 
 This is an early MVP: the protocol layer, transports, scanner engine and UI are
-implemented and the project compiles; some scan parameters (per-request gap,
-IP concurrency) are still being wired into the engine — see [ROADMAP](docs/ROADMAP.md).
+implemented and the project compiles. Scan parameters (timeout, retries, gap and
+IP concurrency) are effective in the engine as of the unreleased v0.2 work —
+see [ROADMAP](docs/ROADMAP.md) and [PLAN](docs/PLAN.md).
 
 ## License
 

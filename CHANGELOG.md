@@ -11,11 +11,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- Register-plan reads after a serial probe now reuse the shared serial port instead of an unopened one
 - Vite `@` alias (frontend build failed in CI with "Rollup failed to resolve @/App.vue")
 - CI backend jobs now create a `dist/` placeholder before `cargo check` (generate_context!)
 - CI Node.js version bumped to 22
 
 ### Added
+- P2-02: `ScanParams` are now effective — per-request timeout, retries, inter-request gap and bounded IP concurrency (serial stays sequential)
 - Market/community/academic research report and prioritized development plan (EN/RU: docs/RESEARCH.md, docs/RESEARCH.ru.md, docs/PLAN.md, docs/PLAN.ru.md)
 - GNU GPL v3.0 license, repository metadata, CI badge, issue/PR templates
 

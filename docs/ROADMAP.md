@@ -18,10 +18,12 @@
 - [x] Export CSV / JSON / XML, config persistence
 - [x] `cargo check`, `npm run typecheck`, protocol unit tests (see DEVELOPMENT for Windows-gnu caveat)
 
+**In progress (Unreleased):**
+- [x] P2-02: `timeout_ms`, `retries`, `request_gap_ms`, `ip_concurrency` are now
+  effective (single `EngineParams`, clamped; serial sequential, TCP/UDP in a
+  bounded pool). Also fixes register-plan reads on a serial bus reusing the port.
+
 **Known gaps:**
-- Scan params `request_gap_ms`, `ip_concurrency`, per-request `timeout_ms` and `retries`
-  are exposed in the UI but have fixed effective values in the engine
-- IP targets are scanned sequentially; no bounded-concurrency worker pool yet
 - Register plan only works for serial targets in `single_device`; TCP/UDP deep scan
   needs a proper target builder
 - Export from the device detail pane exports the whole session, not the selected device
@@ -32,8 +34,8 @@
 
 ## Next — v0.2 (core scanning)
 
-- [ ] Wire `ScanParams` through the engine: per-request timeout, retries, inter-request gap
-- [ ] Bounded-concurrency IP worker pool (`ip_concurrency`) with a transport per target
+- [x] Wire `ScanParams` through the engine: per-request timeout, retries, inter-request gap
+- [x] Bounded-concurrency IP worker pool (`ip_concurrency`) with a transport per target
 - [ ] Baud-rate sweep strategy: try all standard rates/parities on a bus
 - [ ] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
 - [ ] Single-device deep scan for TCP/UDP endpoints
@@ -70,16 +72,18 @@ CRC/LRC, исключения); транспорты serial/TCP/UDP; движо�
 экспорт и сохранение настроек; проверки сборки и тесты протокола (см. DEVELOPMENT
 про особенности Windows-gnu).
 
-**Известные пробелы:** параметры `request_gap_ms`, `ip_concurrency`, таймаут и
-ретраи пока не влияют на движок; IP-цели сканируются последовательно; план
-регистров работает только для последовательных целей; экспорт из панели устройства
-экспортирует всю сессию; `probe_completed` зарезервировано, но не испускается;
-светлая тема и полная локализация не реализованы.
+**Выполнено в Unreleased:** P2-02 — параметры `timeout_ms`, `retries`,
+`request_gap_ms`, `ip_concurrency` теперь влияют на движок (единый `EngineParams`,
+ограничения значений; serial — последовательно, TCP/UDP — в ограниченном пуле).
+Заодно исправлено чтение плана регистров на serial-шине с переиспользованием порта.
+
+**Известные пробелы:** план регистров работает только для последовательных целей;
+экспорт из панели устройства экспортирует всю сессию; `probe_completed`
+зарезервировано, но не испускается; светлая тема и полная локализация не реализованы.
 
 ## Ближайшие шаги (v0.2)
 
-Подключить параметры сканирования к движку; пул воркеров с ограничением
-параллелизма для IP; стратегия перебора скоростей/чётности; проверка transaction id
+Стратегия перебора скоростей/чётности; проверка transaction id
 MBAP и выбор формата ADU для UDP/TCP; глубокое сканирование TCP/UDP; экспорт по
 устройству; события `probe_completed`.
 
