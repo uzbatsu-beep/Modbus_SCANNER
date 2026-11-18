@@ -26,7 +26,7 @@
 **Known gaps:**
 - `single_device` register plan is still serial-only; for TCP/UDP use the new
   `register_scan` target
-- Export from the device detail pane exports the whole session, not the selected device
+- [x] Export from the device detail pane exports only the selected device (`export_device`)
 - `ModbusError` variants from a raw TCP MBAP frame are not verified against the
   transaction id yet
 - `probe_completed` event is reserved but never emitted
@@ -89,6 +89,10 @@ P2-04 — классификация IP-целей: валидный Modbus / п
 P2-05 — базовая идентификация FC43/MEI14: VendorName / ProductCode / Revision,
 отображается в карточке устройства; управляется флагом `identify_devices`.
 
+P2-08 — экспорт выбранного устройства (`export_device`): CSV/JSON/XML с зондами,
+картой регистров и идентификацией FC43; общий экспорт сессии остался в
+`export_results`.
+
 P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_concurrency`
 теперь влияют на движок (единый `EngineParams`, ограничения значений; serial —
 последовательно, TCP/UDP — в ограниченном пуле). Заодно исправлено чтение плана
@@ -96,7 +100,7 @@ P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_conc
 
 **Известные пробелы:** план регистров в `single_device` работает только для
 последовательных целей (для TCP/UDP используйте `register_scan`);
-экспорт из панели устройства экспортирует всю сессию; `probe_completed`
+`probe_completed`
 зарезервировано, но не испускается; светлая тема и полная локализация не реализованы.
 
 ## Ближайшие шаги (v0.2)

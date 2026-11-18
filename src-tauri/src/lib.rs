@@ -53,6 +53,7 @@ pub fn run() {
             commands::scanner::get_scan_results,
             commands::scanner::clear_results,
             commands::scanner::export_results,
+            commands::scanner::export_device,
             // modbus
             commands::modbus_cmd::read_registers,
             commands::modbus_cmd::write_registers,

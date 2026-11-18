@@ -40,11 +40,12 @@ async function exportResults() {
   exporting.value = true;
   exportMsg.value = null;
   try {
-    const defaultName = `modbus-scan-${new Date().toISOString().replace(/[:.]/g, "-")}.${fmt.value}`;
+    const safeKey = dev.value.key.replace(/[^a-zA-Z0-9_-]+/g, "_");
+    const defaultName = `modbus-device-${safeKey}-${new Date().toISOString().replace(/[:.]/g, "-")}.${fmt.value}`;
     const path = prompt("Путь для сохранения файла:", defaultName);
     if (!path) return;
-    const count = await api.scanner.exportResults(path, fmt.value);
-    exportMsg.value = `экспортировано записей: ${count}`;
+    await api.scanner.exportDevice(dev.value.key, path, fmt.value);
+    exportMsg.value = `устройство экспортировано: ${dev.value.key}`;
   } catch (e) {
     exportMsg.value = `ошибка: ${e}`;
   } finally {

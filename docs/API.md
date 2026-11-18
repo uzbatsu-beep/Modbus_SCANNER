@@ -50,7 +50,8 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | `get_scan_progress` | — | `ScanProgress` | Latest progress snapshot |
 | `get_scan_results` | — | `ScanResults` | Full results snapshot |
 | `clear_results` | — | `void` | Clears records and stats |
-| `export_results` | `{ path: string, format: "csv"\|"json"\|"xml" }` | `number` | Writes file; returns device count |
+| `export_results` | `{ path: string, format: "csv"\|"json"\|"xml" }` | `number` | Writes file with the whole session; returns device count |
+| `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: exports only the selected `DeviceRecord` (probes, registers, FC43 identity); `false`/error if key is unknown |
 
 `ScanTarget` variants:
 

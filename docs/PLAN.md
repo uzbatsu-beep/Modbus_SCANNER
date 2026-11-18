@@ -58,7 +58,7 @@ traffic log, quiet mode, IP concurrency, CLI, projects/history/diff, safe auditi
 (all four `ScanParams` fields effective, bounded IP pool), P2-03 ✅ done
 (adaptive Quick/Balanced/Deep register scan), P2-04 ✅ done (IP target classes),
 P2-05 ✅ done (FC43/MEI14 device identification), P2-06 ✅ delivered together
-with P2-02. Remaining items are still open.
+with P2-02, P2-08 ✅ done (per-device export). Remaining items are still open.
 
 **Goal:** solve the main field-engineer pain — “the device is there, the docs are not”.
 

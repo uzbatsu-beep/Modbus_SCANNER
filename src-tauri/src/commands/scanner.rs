@@ -5,7 +5,9 @@ use std::path::PathBuf;
 use tauri::{AppHandle, State};
 
 use crate::scanner::engine::{ControlMsg, ScannerHandle};
-use crate::scanner::types::{ScanParams, ScanProgress, ScanResults, ScanStatus, ScanTarget};
+use crate::scanner::types::{
+    DeviceRecord, ProbeResult, ScanParams, ScanProgress, ScanResults, ScanStatus, ScanTarget,
+};
 use crate::state::AppState;
 
 #[tauri::command]
@@ -85,6 +87,170 @@ pub async fn export_results(
 
     let _ = app;
     Ok(count)
+}
+
+/// Export a single selected device (P2-08) in the chosen format.
+#[tauri::command]
+pub async fn export_device(
+    state: State<'_, AppState>,
+    key: String,
+    path: String,
+    format: ExportFormat,
+) -> Result<bool, String> {
+    let results = state.scanner.results();
+    let record = results
+        .records
+        .iter()
+        .find(|r| r.key == key)
+        .cloned()
+        .ok_or_else(|| format!("device not found: {key}"))?;
+
+    let data = match format {
+        ExportFormat::Csv => device_to_csv(&record).map_err(|e| e.to_string())?,
+        ExportFormat::Json => serde_json::to_vec_pretty(&record).map_err(|e| e.to_string())?,
+        ExportFormat::Xml => device_to_xml(&record).map_err(|e| e.to_string())?,
+    };
+    tokio::fs::write(PathBuf::from(&path), data).await.map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+fn csv_cell(value: &str) -> String {
+    if value.contains([';', '"', '\n', '\r']) {
+        format!("\"{}\"", value.replace('"', "\"\""))
+    } else {
+        value.to_string()
+    }
+}
+
+fn device_identity(rec: &DeviceRecord) -> (String, String, String) {
+    match &rec.device_identification {
+        Some(id) => (
+            id.vendor_name().unwrap_or("").to_string(),
+            id.product_code().unwrap_or("").to_string(),
+            id.revision().unwrap_or("").to_string(),
+        ),
+        None => (String::new(), String::new(), String::new()),
+    }
+}
+
+fn device_to_csv(rec: &DeviceRecord) -> Result<Vec<u8>, String> {
+    use std::fmt::Write;
+    let (vendor, product, revision) = device_identity(rec);
+    let mut w = String::new();
+    writeln!(
+        w,
+        "section;key;transport;endpoint;port;unit_id;vendor;product;revision;function;address;status;value;raw_hex;rtt_us"
+    )
+    .map_err(|e| e.to_string())?;
+
+    let mut probes: Vec<_> = rec.probes.iter().collect();
+    probes.sort_by_key(|(fc, _)| **fc);
+    for (fc, probe) in probes {
+        let (status, value, raw, rtt) = match probe {
+            ProbeResult::Ok { values, raw_hex, rtt_us, .. } => (
+                "ok",
+                values.iter().map(|v| format!("{v:04x}")).collect::<Vec<_>>().join(" "),
+                raw_hex.clone(),
+                *rtt_us,
+            ),
+            ProbeResult::Exception { code, message, rtt_us, .. } => {
+                ("exception", format!("{code:#04x} {message}"), String::new(), *rtt_us)
+            }
+            ProbeResult::NoResponse { .. } => ("no_response", String::new(), String::new(), 0),
+            ProbeResult::TransportError { message, .. } => {
+                ("transport_error", message.clone(), String::new(), 0)
+            }
+        };
+        writeln!(
+            w,
+            "{};{};{};{};{};{};{};{};{};{:#04x};;{};{};{};{}",
+            "probe",
+            csv_cell(&rec.key),
+            format!("{:?}", rec.target.kind).to_lowercase(),
+            csv_cell(&rec.target.endpoint),
+            rec.target.port.map(|p| p.to_string()).unwrap_or_default(),
+            rec.target.unit_id,
+            csv_cell(&vendor),
+            csv_cell(&product),
+            csv_cell(&revision),
+            fc,
+            status,
+            csv_cell(&value),
+            csv_cell(&raw),
+            rtt,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let mut regs: Vec<_> = rec.registers.values().collect();
+    regs.sort_by_key(|r| (r.function, r.address));
+    for reg in regs {
+        writeln!(
+            w,
+            "{};{};{};{};{};{};{};{};{};{:#04x};{};ok;{};{};{}",
+            "register",
+            csv_cell(&rec.key),
+            format!("{:?}", rec.target.kind).to_lowercase(),
+            csv_cell(&rec.target.endpoint),
+            rec.target.port.map(|p| p.to_string()).unwrap_or_default(),
+            rec.target.unit_id,
+            csv_cell(&vendor),
+            csv_cell(&product),
+            csv_cell(&revision),
+            reg.function,
+            reg.address,
+            reg.raw,
+            reg.as_hex,
+            reg.rtt_us,
+        )
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(w.into_bytes())
+}
+
+fn device_to_xml(rec: &DeviceRecord) -> Result<Vec<u8>, String> {
+    fn escape(s: &str) -> String {
+        s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;")
+    }
+    let (vendor, product, revision) = device_identity(rec);
+    let mut w = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<device ");
+    w.push_str(&format!(
+        "key=\"{}\" transport=\"{}\" endpoint=\"{}\" port=\"{}\" unit_id=\"{}\" vendor=\"{}\" product=\"{}\" revision=\"{}\">\n",
+        escape(&rec.key),
+        escape(&format!("{:?}", rec.target.kind).to_lowercase()),
+        escape(&rec.target.endpoint),
+        rec.target.port.map(|p| p.to_string()).unwrap_or_default(),
+        rec.target.unit_id,
+        escape(&vendor),
+        escape(&product),
+        escape(&revision),
+    ));
+
+    let mut probes: Vec<_> = rec.probes.iter().collect();
+    probes.sort_by_key(|(fc, _)| **fc);
+    for (fc, probe) in probes {
+        let status = match probe {
+            ProbeResult::Ok { .. } => "ok",
+            ProbeResult::Exception { .. } => "exception",
+            ProbeResult::NoResponse { .. } => "no_response",
+            ProbeResult::TransportError { .. } => "transport_error",
+        };
+        w.push_str(&format!(
+            "  <probe function=\"{fc:#04x}\" status=\"{status}\">{}</probe>\n",
+            escape(&format!("{probe:?}"))
+        ));
+    }
+
+    let mut regs: Vec<_> = rec.registers.values().collect();
+    regs.sort_by_key(|r| (r.function, r.address));
+    for reg in regs {
+        w.push_str(&format!(
+            "  <register function=\"{:#04x}\" address=\"{}\" raw=\"{}\" hex=\"{}\" rtt_us=\"{}\"/>\n",
+            reg.function, reg.address, reg.raw, reg.as_hex, reg.rtt_us
+        ));
+    }
+    w.push_str("</device>\n");
+    Ok(w.into_bytes())
 }
 
 fn results_to_csv(results: &ScanResults) -> Result<Vec<u8>, String> {

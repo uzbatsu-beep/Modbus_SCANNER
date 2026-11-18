@@ -50,7 +50,8 @@
 | `get_scan_progress` | — | `ScanProgress` | Последний снимок прогресса |
 | `get_scan_results` | — | `ScanResults` | Полный снимок результатов |
 | `clear_results` | — | `void` | Очищает записи и статистику |
-| `export_results` | `{ path: string, format: "csv"\|"json"\|"xml" }` | `number` | Пишет файл, возвращает число устройств |
+| `export_results` | `{ path: string, format: "csv"\|"json"\|"xml" }` | `number` | Пишет файл со всей сессией, возвращает число устройств |
+| `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: экспортирует только выбранное устройство (зонды, регистры, FC43-идентификацию); ошибка, если ключ неизвестен |
 
 Варианты `ScanTarget`:
 

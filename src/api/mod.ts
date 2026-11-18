@@ -57,6 +57,8 @@ export const api = {
     clearResults: () => invoke<void>("clear_results"),
     exportResults: (path: string, format: ExportFormat) =>
       invoke<number>("export_results", { path, format }),
+    exportDevice: (key: string, path: string, format: ExportFormat) =>
+      invoke<boolean>("export_device", { key, path, format }),
   },
 
   modbus: {
