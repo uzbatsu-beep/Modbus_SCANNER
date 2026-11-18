@@ -134,6 +134,10 @@ export interface ScanParams {
   ip_concurrency: number;
   /** Try FC43/MEI14 identification after a device answers. */
   identify_devices?: boolean;
+  /** TCP wire format: standard MBAP or raw RTU over TCP. */
+  tcp_framing?: "mbap" | "rtu";
+  /** MBAP framing for UDP instead of the default RTU-style ADU. */
+  udp_mbap?: boolean;
 }
 
 export type ProbeResult =

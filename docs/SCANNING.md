@@ -108,6 +108,8 @@ the function's spec limit (125 registers or 2000 coils).
 | `register_plan` | `[]` | Ranges to read on each found device |
 | `ip_concurrency` | 32 | Max in-flight IP probes |
 | `identify_devices` | true | Try FC43/MEI14 identity after a device answers |
+| `tcp_framing` | `mbap` | TCP wire format: `mbap` or `rtu` (RTU over TCP) |
+| `udp_mbap` | false | Use MBAP framing for UDP instead of RTU-style ADU |
 
 **Implementation note:** all four parameters are effective: the engine derives
 one `EngineParams` set at scan start (timeout clamped to 50–10000 ms, retries

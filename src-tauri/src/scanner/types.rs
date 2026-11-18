@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::modbus::common::TransportKind;
+use crate::transport::tcp::TcpFraming;
 use crate::modbus::frame::DeviceIdentification;
 use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
 
@@ -198,6 +199,12 @@ pub struct ScanParams {
     /// Try FC43/MEI14 identification after a device answers (P2-05).
     #[serde(default = "default_identify_devices")]
     pub identify_devices: bool,
+    /// TCP wire format: standard MBAP or raw RTU over TCP.
+    #[serde(default)]
+    pub tcp_framing: TcpFraming,
+    /// Use MBAP framing for UDP instead of the default RTU-style ADU.
+    #[serde(default)]
+    pub udp_mbap: bool,
 }
 
 fn default_identify_devices() -> bool {
@@ -215,6 +222,8 @@ impl Default for ScanParams {
             register_plan: Vec::new(),
             ip_concurrency: 32,
             identify_devices: true,
+            tcp_framing: TcpFraming::Mbap,
+            udp_mbap: false,
         }
     }
 }

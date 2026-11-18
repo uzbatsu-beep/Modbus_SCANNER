@@ -76,9 +76,12 @@ a 1-second silence rule applies in the field.
 
 All fields big-endian. `length` = number of bytes *after* it (unit id + PDU),
 so a read-single-register request has `length = 1 + 5 = 6`.
-The server echoes the transaction id (the scanner matches requests to responses
-by it); protocol id must be 0; TCP port 502 is standard (installations often
-use 503, 1502, 802). Unit id is used for routing through gateways; direct TCP
+The scanner generates an increasing transaction id per request and **validates
+that the response echoes it** (a mismatch is a `TransactionIdMismatch` error,
+never a device record). Protocol id must be 0; TCP port 502 is standard
+(installations often use 503, 1502, 802). Besides standard MBAP, the scanner can
+send a raw RTU ADU over TCP (`tcp_framing = "rtu"`, common with serial gateways);
+in that mode there is no MBAP header to validate. Unit id is used for routing through gateways; direct TCP
 devices commonly answer only on unit 1, 0 or 255.
 
 ### UDP
@@ -90,8 +93,9 @@ in the field:
 2. **RTU-style ADU** (slave id + PDU + CRC).
 
 `UdpTransport` treats one datagram as one ADU. No response within the timeout
-is the normal negative result. The scanner currently builds RTU-style ADUs for
-UDP (see ROADMAP for MBAP-over-UDP selection).
+is the normal negative result. By default the scanner builds RTU-style ADUs for UDP;
+with `udp_mbap = true` it uses the MBAP form instead and applies the same
+transaction-id validation as TCP.
 
 ## 4. Function codes used by the scanner
 

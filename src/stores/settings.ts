@@ -18,6 +18,8 @@ const DEFAULT_CONFIG: Config = {
     register_plan: [],
     ip_concurrency: 32,
     identify_devices: true,
+    tcp_framing: "mbap",
+    udp_mbap: false,
   },
   last_serial: null,
   last_tcp_host: null,

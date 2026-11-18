@@ -9,6 +9,7 @@
 //!   frontend as Tauri events (`scan:progress`, `scan:event`).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -18,7 +19,7 @@ use tokio::sync::{mpsc, watch, Mutex};
 use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
 use crate::modbus::frame::{parse_device_identification, read_device_identification, Pdu};
 use crate::transport::serial::{SerialPortConfig, SerialTransport};
-use crate::transport::tcp::TcpTransport;
+use crate::transport::tcp::{TcpFraming, TcpTransport};
 use crate::transport::udp::UdpTransport;
 use crate::transport::{Transport, TransportError};
 
@@ -49,6 +50,10 @@ pub struct EngineParams {
     pub ip_concurrency: usize,
     /// Whether to attempt FC43/MEI14 identification after a device answers.
     pub identify_devices: bool,
+    /// TCP wire format (MBAP or RTU over TCP).
+    pub tcp_framing: TcpFraming,
+    /// MBAP framing for UDP instead of the default RTU-style ADU.
+    pub udp_mbap: bool,
 }
 
 impl EngineParams {
@@ -59,6 +64,8 @@ impl EngineParams {
             request_gap: Duration::from_millis(p.request_gap_ms.min(1_000) as u64),
             ip_concurrency: (p.ip_concurrency.clamp(1, 256)) as usize,
             identify_devices: p.identify_devices,
+            tcp_framing: p.tcp_framing,
+            udp_mbap: p.udp_mbap,
         }
     }
 }
@@ -108,12 +115,16 @@ mod engine_params_tests {
         p.retries = 2;
         p.request_gap_ms = 25;
         p.ip_concurrency = 16;
+        p.tcp_framing = TcpFraming::Rtu;
+        p.udp_mbap = true;
         let e = EngineParams::from_scan_params(&p);
         assert_eq!(e.timeout, Duration::from_millis(1_200));
         assert_eq!(e.retries, 2);
         assert_eq!(e.request_gap, Duration::from_millis(25));
         assert_eq!(e.ip_concurrency, 16);
         assert!(e.identify_devices);
+        assert_eq!(e.tcp_framing, TcpFraming::Rtu);
+        assert!(e.udp_mbap);
     }
 
     #[test]
@@ -129,6 +140,8 @@ mod engine_params_tests {
         assert_eq!(e.request_gap, Duration::from_millis(1_000));
         assert_eq!(e.ip_concurrency, 1);
         assert!(e.identify_devices);
+        assert_eq!(e.tcp_framing, TcpFraming::Mbap);
+        assert!(!e.udp_mbap);
     }
 }
 
@@ -506,41 +519,100 @@ struct ProbeOutcome {
     target: DeviceTarget,
 }
 
-/// Build the ADU for a target kind + raw PDU.
-fn build_adu(kind: TransportKind, unit_id: u8, pdu: &[u8]) -> Vec<u8> {
+/// Next MBAP transaction id (shared by all concurrent IP probes).
+fn next_transaction_id() -> u16 {
+    static NEXT: AtomicU16 = AtomicU16::new(1);
+    NEXT.fetch_add(1, Ordering::Relaxed)
+}
+
+fn mbap_frame(unit_id: u8, pdu: &[u8], transaction_id: u16) -> Vec<u8> {
+    let mut frame = Vec::with_capacity(7 + pdu.len());
+    frame.extend_from_slice(&transaction_id.to_be_bytes());
+    frame.extend_from_slice(&0u16.to_be_bytes()); // protocol id
+    frame.extend_from_slice(&((1 + pdu.len()) as u16).to_be_bytes());
+    frame.push(unit_id);
+    frame.extend_from_slice(pdu);
+    frame
+}
+
+/// Verify an MBAP response: transaction id, protocol id, length, unit id.
+fn verify_mbap(adu: &[u8], expected_unit: u8, expected_tx: u16) -> Result<Pdu, TransportError> {
+    if adu.len() < 8 {
+        return Err(TransportError::Modbus(ModbusError::TooShort(adu.len())));
+    }
+    let transaction_id = u16::from_be_bytes([adu[0], adu[1]]);
+    if transaction_id != expected_tx {
+        return Err(TransportError::Modbus(ModbusError::TransactionIdMismatch {
+            expected: expected_tx,
+            actual: transaction_id,
+        }));
+    }
+    let protocol_id = u16::from_be_bytes([adu[2], adu[3]]);
+    if protocol_id != 0 {
+        return Err(TransportError::Other(format!("bad protocol id {protocol_id}")));
+    }
+    let length = u16::from_be_bytes([adu[4], adu[5]]) as usize;
+    if adu.len() != 6 + length {
+        return Err(TransportError::Modbus(ModbusError::InvalidFrame(format!(
+            "MBAP length {length} but {} bytes received",
+            adu.len() - 6
+        ))));
+    }
+    let unit_id = adu[6];
+    if unit_id != expected_unit {
+        return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
+            expected: expected_unit,
+            actual: unit_id,
+        }));
+    }
+    Pdu::from_bytes(&adu[7..]).map_err(TransportError::Modbus)
+}
+
+/// Build the wire ADU, honouring the selected TCP/UDP framing.
+fn build_adu(kind: TransportKind, unit_id: u8, pdu: &[u8], engine: EngineParams, tx: u16) -> Vec<u8> {
     match kind {
         TransportKind::Rtu => crate::modbus::rtu::encode(UnitId(unit_id), pdu),
         TransportKind::Ascii => crate::modbus::ascii::encode(UnitId(unit_id), pdu),
         TransportKind::Tcp => {
-            // MBAP + PDU, transaction id 0 (client matches at the transport layer)
-            let mut frame = Vec::with_capacity(7 + pdu.len());
-            frame.extend_from_slice(&0u16.to_be_bytes());
-            frame.extend_from_slice(&0u16.to_be_bytes());
-            frame.extend_from_slice(&((1 + pdu.len()) as u16).to_be_bytes());
-            frame.push(unit_id);
-            frame.extend_from_slice(pdu);
-            frame
+            if engine.tcp_framing == TcpFraming::Rtu {
+                crate::modbus::rtu::encode(UnitId(unit_id), pdu)
+            } else {
+                mbap_frame(unit_id, pdu, tx)
+            }
         }
         TransportKind::Udp => {
-            // RTU-style ADU over UDP
-            crate::modbus::rtu::encode(UnitId(unit_id), pdu)
+            if engine.udp_mbap {
+                mbap_frame(unit_id, pdu, tx)
+            } else {
+                crate::modbus::rtu::encode(UnitId(unit_id), pdu)
+            }
         }
     }
 }
 
-/// Verify a response ADU against the request.
-fn verify_adu(kind: TransportKind, expected_unit: u8, expected_fc: u8, adu: &[u8]) -> Result<Pdu, TransportError> {
+/// Decode a raw RTU ADU and verify the unit id.
+fn verify_rtu(adu: &[u8], expected_unit: u8) -> Result<Pdu, TransportError> {
+    let frame = crate::modbus::rtu::decode(adu).map_err(TransportError::Modbus)?;
+    if frame.unit_id.0 != expected_unit {
+        return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
+            expected: expected_unit,
+            actual: frame.unit_id.0,
+        }));
+    }
+    Ok(frame.pdu)
+}
+
+/// Verify a response ADU against the request (including transaction id for MBAP).
+fn verify_adu(
+    kind: TransportKind,
+    expected_unit: u8,
+    expected_fc: u8,
+    adu: &[u8],
+    expected_tx: u16,
+    engine: EngineParams,
+) -> Result<Pdu, TransportError> {
     let pdu = match kind {
-        TransportKind::Rtu => {
-            let f = crate::modbus::rtu::decode(adu).map_err(TransportError::Modbus)?;
-            if f.unit_id.0 != expected_unit {
-                return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
-                    expected: expected_unit,
-                    actual: f.unit_id.0,
-                }));
-            }
-            f.pdu
-        }
+        TransportKind::Rtu => verify_rtu(adu, expected_unit)?,
         TransportKind::Ascii => {
             let f = crate::modbus::ascii::decode(adu).map_err(TransportError::Modbus)?;
             if f.unit_id.0 != expected_unit {
@@ -552,27 +624,18 @@ fn verify_adu(kind: TransportKind, expected_unit: u8, expected_fc: u8, adu: &[u8
             f.pdu
         }
         TransportKind::Tcp => {
-            if adu.len() < 8 {
-                return Err(TransportError::Modbus(ModbusError::TooShort(adu.len())));
+            if engine.tcp_framing == TcpFraming::Rtu {
+                verify_rtu(adu, expected_unit)?
+            } else {
+                verify_mbap(adu, expected_unit, expected_tx)?
             }
-            let unit_id = adu[6];
-            if unit_id != expected_unit {
-                return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
-                    expected: expected_unit,
-                    actual: unit_id,
-                }));
-            }
-            Pdu::from_bytes(&adu[7..]).map_err(TransportError::Modbus)?
         }
         TransportKind::Udp => {
-            let f = crate::modbus::rtu::decode(adu).map_err(TransportError::Modbus)?;
-            if f.unit_id.0 != expected_unit {
-                return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
-                    expected: expected_unit,
-                    actual: f.unit_id.0,
-                }));
+            if engine.udp_mbap {
+                verify_mbap(adu, expected_unit, expected_tx)?
+            } else {
+                verify_rtu(adu, expected_unit)?
             }
-            f.pdu
         }
     };
 
@@ -584,6 +647,29 @@ fn verify_adu(kind: TransportKind, expected_unit: u8, expected_fc: u8, adu: &[u8
         return Err(TransportError::Modbus(ModbusError::UnexpectedFunction(fc)));
     }
     Ok(pdu)
+}
+
+#[cfg(test)]
+mod mbap_tests {
+    use super::*;
+
+    #[test]
+    fn validates_transaction_id() {
+        let pdu = [0x03, 0x02, 0x00, 0x2A];
+        let frame = mbap_frame(1, &pdu, 0x1234);
+        assert!(verify_mbap(&frame, 1, 0x1234).is_ok());
+        assert!(matches!(
+            verify_mbap(&frame, 1, 0x4321),
+            Err(TransportError::Modbus(ModbusError::TransactionIdMismatch { .. }))
+        ));
+    }
+
+    #[test]
+    fn rejects_bad_length() {
+        let mut frame = mbap_frame(1, &[0x03, 0x00], 7);
+        frame[5] = 99;
+        assert!(verify_mbap(&frame, 1, 7).is_err());
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -598,7 +684,8 @@ async fn execute_probe(
     engine: EngineParams,
 ) -> ProbeOutcome {
     results.write().stats.requests_sent += 1;
-    let adu = build_adu(target.kind, target.unit_id, pdu);
+    let transaction_id = next_transaction_id();
+    let adu = build_adu(target.kind, target.unit_id, pdu, engine, transaction_id);
 
     let mut attempts = 0u32;
     let retries = engine.retries;
@@ -658,6 +745,7 @@ async fn execute_probe(
                 host: target.endpoint.clone(),
                 port: target.port.unwrap_or(502),
                 connect_timeout: timeout,
+                framing: engine.tcp_framing,
             })
             .await
             {
@@ -682,7 +770,7 @@ async fn execute_probe(
         match res {
             Ok(resp) => {
                 let rtt = started.elapsed().as_micros();
-                match verify_adu(target.kind, target.unit_id, function, &resp) {
+                match verify_adu(target.kind, target.unit_id, function, &resp, transaction_id, engine) {
                     Ok(p) => {
                         let result = super::strategies::classify_response(function, &p.to_bytes(), rtt);
                         let is_found = matches!(result, ProbeResult::Ok { .. } | ProbeResult::Exception { .. });
@@ -854,7 +942,8 @@ async fn execute_register_read(
     results: &Arc<RwLock<ScanResults>>,
     engine: EngineParams,
 ) -> RegisterReadOutcome {
-    let adu = build_adu(target.kind, target.unit_id, pdu);
+    let transaction_id = next_transaction_id();
+    let adu = build_adu(target.kind, target.unit_id, pdu, engine, transaction_id);
     let timeout = engine.timeout;
     let started = Instant::now();
 
@@ -870,6 +959,7 @@ async fn execute_register_read(
             host: target.endpoint.clone(),
             port: target.port.unwrap_or(502),
             connect_timeout: timeout,
+            framing: engine.tcp_framing,
         })
         .await
         {
@@ -907,7 +997,14 @@ async fn execute_register_read(
     };
 
     let rtt = started.elapsed().as_micros();
-    match verify_adu(target.kind, target.unit_id, function, &resp) {
+    match verify_adu(
+        target.kind,
+        target.unit_id,
+        function,
+        &resp,
+        transaction_id,
+        engine,
+    ) {
         Ok(p) if !p.is_exception() => {
             let data = match &p {
                 Pdu::Response { data, .. } => data.clone(),
@@ -1076,10 +1173,13 @@ async fn identify_device(
     if !engine.identify_devices {
         return;
     }
+    let transaction_id = next_transaction_id();
     let adu = build_adu(
         target.kind,
         target.unit_id,
         &read_device_identification(1, 0),
+        engine,
+        transaction_id,
     );
     let timeout = engine.timeout;
     let res: Result<Vec<u8>, TransportError> = match target.kind {
@@ -1091,6 +1191,7 @@ async fn identify_device(
             host: target.endpoint.clone(),
             port: target.port.unwrap_or(502),
             connect_timeout: timeout,
+            framing: engine.tcp_framing,
         })
         .await
         {
@@ -1110,7 +1211,7 @@ async fn identify_device(
         Ok(r) => r,
         Err(_) => return,
     };
-    let pdu = match verify_adu(target.kind, target.unit_id, 0x2B, &resp) {
+    let pdu = match verify_adu(target.kind, target.unit_id, 0x2B, &resp, transaction_id, engine) {
         Ok(p) if !p.is_exception() => p,
         _ => return,
     };

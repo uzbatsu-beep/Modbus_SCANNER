@@ -149,6 +149,7 @@ async fn manual_transact(
                     host: target.endpoint.clone(),
                     port: target.port.unwrap_or(502),
                     connect_timeout: timeout,
+                    framing: crate::transport::tcp::TcpFraming::Mbap,
                 })
                 .await?;
                 let res = t.transact(&adu, timeout, expected_hint).await;

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { computed } from "vue";
+
 import type { ScanParams } from "@/types/ipc";
 import { FC, FC_NAMES } from "@/types/ipc";
 import { useScannerStore } from "@/stores/scanner";
@@ -8,6 +10,13 @@ const params = defineModel<ScanParams>({ required: true });
 const scanner = useScannerStore();
 
 const READ_FCS = [FC.READ_COILS, FC.READ_DISCRETE_INPUTS, FC.READ_HOLDING_REGISTERS, FC.READ_INPUT_REGISTERS];
+
+const tcpFraming = computed({
+  get: (): "mbap" | "rtu" => params.value.tcp_framing ?? "mbap",
+  set: (v: "mbap" | "rtu") => {
+    params.value.tcp_framing = v;
+  },
+});
 
 function toggleProbe(fc: number) {
   const i = params.value.probe_functions.indexOf(fc);
@@ -53,6 +62,17 @@ function toggleProbe(fc: number) {
       <label class="short">FC43 идентификация</label>
       <input type="checkbox" v-model="params.identify_devices" :disabled="scanner.isRunning" />
       <span class="hint">запрос Vendor / Product / Revision после ответа устройства</span>
+    </div>
+
+    <div class="form-row">
+      <label>Формат ADU (TCP)</label>
+      <select v-model="tcpFraming" :disabled="scanner.isRunning">
+        <option value="mbap">MBAP (стандартный Modbus TCP)</option>
+        <option value="rtu">RTU over TCP (сырой кадр + CRC)</option>
+      </select>
+      <label class="short">MBAP для UDP</label>
+      <input type="checkbox" v-model="params.udp_mbap" :disabled="scanner.isRunning" />
+      <span class="hint">иначе UDP передаёт RTU-кадр</span>
     </div>
 
     <div class="hint">

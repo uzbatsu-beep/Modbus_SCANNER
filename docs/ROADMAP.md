@@ -40,7 +40,7 @@
 - [x] Adaptive register map (`register_scan`): Quick/Balanced/Deep, exception-aware splitting, timeout guard
 - [x] IP target classification: valid Modbus / port open / refused / timeout / unreachable
 - [x] FC43/MEI14 basic device identification (VendorName, ProductCode, Revision)
-- [ ] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
+- [x] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
 - [ ] Single-device deep scan for TCP/UDP endpoints
 - [ ] Export per-device results from the detail pane
 - [ ] Emit `probe_completed` events and per-probe log entries
@@ -105,13 +105,15 @@ P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_conc
 
 ## Ближайшие шаги (v0.2)
 
-Проверка transaction id
-MBAP и выбор формата ADU для UDP/TCP; глубокое сканирование TCP/UDP; экспорт по
-устройству; события `probe_completed`.
+Осталось: события `probe_completed` и журнал по каждому зонду.
+
+Выполнено в этой итерации: валидация transaction id MBAP, выбор формата ADU
+TCP (`mbap` / `rtu`) и UDP (`rtu` / `mbap`), глубокое сканирование TCP/UDP через
+`register_scan`, экспорт по устройству.
 
 ## Позже (v0.3+)
 
-Диагностические функции (FC08/07/0B/0C, идентификация 2B), автоматический поиск
+Диагностические функции (FC08/07/0B/0C), автоматический поиск
 непрерывных диапазонов регистров, пресеты декодирования (float32, uint32, bitfields),
 профили сканирования, сравнение сессий, полная локализация и светлая тема,
 генерация TS-типов из Rust, тесты движка с mock-транспортом, CI для Linux/macOS.
