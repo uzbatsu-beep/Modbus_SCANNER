@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 
 import { api } from "@/api/mod";
 import type { ExportFormat } from "@/types/ipc";
 import { FC_NAMES } from "@/types/ipc";
 import { useDevicesStore } from "@/stores/devices";
+import RegisterInspector from "@/components/results/RegisterInspector.vue";
 
 const devices = useDevicesStore();
 
@@ -23,6 +24,36 @@ const exporting = ref(false);
 const exportMsg = ref<string | null>(null);
 
 const dev = computed(() => devices.selected);
+
+// Up to two registers can be selected for the interactive decoder.
+const selectedAddresses = ref<number[]>([]);
+watch(
+  () => dev.value?.key,
+  () => {
+    selectedAddresses.value = [];
+  }
+);
+
+function toggleAddress(address: number) {
+  const i = selectedAddresses.value.indexOf(address);
+  if (i >= 0) {
+    selectedAddresses.value.splice(i, 1);
+    return;
+  }
+  if (selectedAddresses.value.length >= 2) selectedAddresses.value.shift();
+  selectedAddresses.value.push(address);
+}
+
+const selectedValues = computed(() => {
+  if (!dev.value) return [];
+  const byAddress = new Map(
+    Object.values(dev.value.registers).map((r) => [r.address, r.raw])
+  );
+  return selectedAddresses.value
+    .slice()
+    .sort((a, b) => a - b)
+    .map((a) => byAddress.get(a) ?? 0);
+});
 
 const registers = computed(() => {
   if (!dev.value) return [];
@@ -130,11 +161,18 @@ async function exportResults() {
         <div v-if="registers.length === 0" class="empty">Карта регистров не сканировалась</div>
         <table v-else class="data regs">
           <thead>
-            <tr><th>FC</th><th>Адрес</th><th>Hex</th><th>Dec</th><th>Bin</th></tr>
+            <tr><th colspan="2">Выбор</th><th>Адрес</th><th>Hex</th><th>Dec</th><th>Bin</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in registers" :key="`${r.function}:${r.address}`">
               <td>{{ r.function.toString(16).padStart(2, "0").toUpperCase() }}</td>
+              <td>
+                <input
+                  type="checkbox"
+                  :checked="selectedAddresses.includes(r.address)"
+                  @change="toggleAddress(r.address)"
+                />
+              </td>
               <td>{{ r.address.toString(16).padStart(4, "0").toUpperCase() }} ({{ r.address }})</td>
               <td>{{ r.as_hex.toUpperCase() }}</td>
               <td>{{ r.raw }}</td>
@@ -143,6 +181,13 @@ async function exportResults() {
           </tbody>
         </table>
       </div>
+
+      <RegisterInspector
+        v-if="registers.length"
+        :record="dev"
+        :values="selectedValues"
+        :addresses="selectedAddresses.slice().sort((a, b) => a - b)"
+      />
 
       <div class="section export">
         <div class="section-title">Экспорт устройства</div>

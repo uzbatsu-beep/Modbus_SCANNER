@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::scanner::types::ScanParams;
+use crate::scanner::types::{ScanParams, TagDefinition};
 
 /// Shared application state, injected into Tauri as managed state.
 pub struct AppState {
@@ -32,6 +32,9 @@ pub struct Config {
     /// Export settings.
     pub export_dir: Option<String>,
     pub export_format: String,
+    /// Named register tags (P3-03), persisted with the configuration.
+    #[serde(default)]
+    pub tags: Vec<TagDefinition>,
 }
 
 impl Default for Config {
@@ -47,6 +50,7 @@ impl Default for Config {
             last_udp_port: Some(502),
             export_dir: None,
             export_format: "csv".into(),
+            tags: Vec::new(),
         }
     }
 }

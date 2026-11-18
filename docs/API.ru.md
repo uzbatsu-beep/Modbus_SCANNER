@@ -113,6 +113,12 @@
 **`write_registers`** — `{ req: WriteRequest }`, та же форма с
 `function: 5|6|16` и `values: number[]`.
 
+**`inspect_registers`** — `{ values: number[] }` → `DecodeResult`: все
+интерпретации (INT16/UINT16/INT32/UINT32/FLOAT32/ASCII × ABCD/BADC/CDAB/DCBA)
+и помеченные гипотезы float. **`decode_register`** —
+`{ values: number[], spec: DecodeSpec }` → `DecodedValue | null` (для именованных
+тегов; `DecodeSpec` = `{ data_type, byte_order, multiplier?, divider?, offset? }`).
+
 **`send_raw_frame`** — `{ req: RawFrameRequest }`
 
 ```ts
@@ -144,7 +150,7 @@
 
 Поля `Config`: `language`, `theme`, `scan_params`, `last_serial`,
 `last_tcp_host`, `last_tcp_port`, `last_udp_host`, `last_udp_port`,
-`export_dir`, `export_format`.
+`export_dir`, `export_format`, `tags` (именованные теги регистров, P3-03).
 
 ## События
 

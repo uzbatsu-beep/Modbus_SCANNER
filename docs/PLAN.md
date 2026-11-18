@@ -62,6 +62,10 @@ with P2-02, P2-08 ✅ done (per-device export), MBAP transaction-id validation
 and TCP/UDP ADU format selectors ✅ done, `probe_completed` events with a
 per-probe log ✅ done. v0.2 is complete.
 
+**v0.3 started:** P3-01 ✅ (decoder: int/uint/float32/ASCII × 4 byte orders),
+P3-02 ✅ (labelled float hypotheses), P3-03 ✅ (named tags with scaling, stored
+in config). P3-04+ (projects, live monitor, logs, diff, i18n) are still open.
+
 **Goal:** solve the main field-engineer pain — “the device is there, the docs are not”.
 
 | ID | Task | Priority | Rationale (source) | Effort |

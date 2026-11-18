@@ -28,6 +28,7 @@ const DEFAULT_CONFIG: Config = {
   last_udp_port: 502,
   export_dir: null,
   export_format: "csv",
+  tags: [],
 };
 
 export const useSettingsStore = defineStore("settings", {

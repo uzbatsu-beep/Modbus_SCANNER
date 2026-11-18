@@ -8,6 +8,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 
 import type {
   Config,
+  DecodeResult,
+  DecodeSpec,
+  DecodedValue,
   ExportFormat,
   ManualResponse,
   ReadRequest,
@@ -65,6 +68,10 @@ export const api = {
     read: (req: ReadRequest) => invoke<ManualResponse>("read_registers", { req }),
     write: (req: WriteRequest) => invoke<ManualResponse>("write_registers", { req }),
     sendRaw: (req: RawFrameRequest) => invoke<ManualResponse>("send_raw_frame", { req }),
+    inspectRegisters: (values: number[]) =>
+      invoke<DecodeResult>("inspect_registers", { values }),
+    decodeRegister: (values: number[], spec: DecodeSpec) =>
+      invoke<DecodedValue | null>("decode_register", { values, spec }),
   },
 
   config: {

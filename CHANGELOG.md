@@ -17,6 +17,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI Node.js version bumped to 22
 
 ### Added
+- P3-01/02/03: register decoder (INT/UINT/FLOAT32/ASCII, ABCD/BADC/CDAB/DCBA), labelled float hypotheses and named tags with scaling persisted in config
 - `probe_completed` events for every finished probe (including timeouts/errors) and per-probe log lines in the UI — v0.2 complete
 - MBAP transaction-id validation; TCP ADU selector (`mbap` / `rtu` over TCP) and UDP MBAP mode
 - P2-08: `export_device` command — export only the selected device to CSV/JSON/XML (probes, register map, FC43 identity)

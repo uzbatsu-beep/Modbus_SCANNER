@@ -153,6 +153,22 @@ endian `u16` values.
 
 The UI shows registers as hex, decimal and 16-bit binary.
 
+## 5b. Multi-register values and byte order (P3-01)
+
+Two consecutive registers `w0 w1` (each transmitted big-endian) can form a
+32-bit value in four layouts:
+
+| Name | Assembly |
+|------|----------|
+| ABCD | `(w0 << 16) \\| w1` — standard big-endian |
+| BADC | bytes swapped inside each word |
+| CDAB | words swapped |
+| DCBA | words and bytes swapped |
+
+The inspector shows all interpretations and marks plausible float32 results as
+**hypotheses** (e.g. “possible float32 (ABCD)”), never as facts. Named tags add
+engineering scaling `(raw × multiplier ÷ divider) + offset` and a unit.
+
 ## 6. Exception codes
 
 `ModbusError::from_exception` maps all standard codes:

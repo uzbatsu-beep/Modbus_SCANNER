@@ -9,8 +9,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::modbus::common::TransportKind;
-use crate::transport::tcp::TcpFraming;
+use crate::modbus::decode::DecodeSpec;
 use crate::modbus::frame::DeviceIdentification;
+use crate::transport::tcp::TcpFraming;
 use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
 
 pub use crate::modbus::common::SerialMode;
@@ -259,6 +260,19 @@ pub enum ProbeResult {
         function: u8,
         message: String,
     },
+}
+
+/// A named register tag with decoding/scaling (P3-03).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TagDefinition {
+    pub device_key: String,
+    pub address: u16,
+    pub name: String,
+    pub spec: DecodeSpec,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
 }
 
 /// One discovered device + all its collected data.

@@ -58,6 +58,8 @@ pub fn run() {
             commands::modbus_cmd::read_registers,
             commands::modbus_cmd::write_registers,
             commands::modbus_cmd::send_raw_frame,
+            commands::modbus_cmd::inspect_registers,
+            commands::modbus_cmd::decode_register,
             // config
             commands::config::get_config,
             commands::config::save_config,

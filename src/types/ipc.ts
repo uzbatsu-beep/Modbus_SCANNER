@@ -154,6 +154,40 @@ export interface RegisterValue {
   rtt_us: number;
 }
 
+export type ByteOrder = "abcd" | "badc" | "cdab" | "dcba";
+export type DataType = "int16" | "uint16" | "int32" | "uint32" | "float32" | "ascii";
+
+export interface DecodeSpec {
+  data_type: DataType;
+  byte_order: ByteOrder;
+  multiplier?: number;
+  divider?: number;
+  offset?: number;
+}
+
+export type DecodedValue =
+  | { kind: "integer"; value: number }
+  | { kind: "float"; value: number }
+  | { kind: "text"; value: string };
+
+export interface Interpretation {
+  data_type: DataType;
+  byte_order: ByteOrder;
+  value: DecodedValue;
+}
+
+export interface DecodeSuggestion {
+  data_type: DataType;
+  byte_order: ByteOrder;
+  value: number;
+  reason: string;
+}
+
+export interface DecodeResult {
+  interpretations: Interpretation[];
+  suggestions: DecodeSuggestion[];
+}
+
 export interface DeviceIdObject {
   id: number;
   value: string;
@@ -165,6 +199,15 @@ export interface DeviceIdentification {
   more_follows: boolean;
   next_object_id: number;
   objects: DeviceIdObject[];
+}
+
+export interface TagDefinition {
+  device_key: string;
+  address: number;
+  name: string;
+  spec: DecodeSpec;
+  unit?: string;
+  description?: string;
 }
 
 export interface DeviceRecord {
@@ -328,6 +371,7 @@ export interface Config {
   last_udp_port?: number | null;
   export_dir?: string | null;
   export_format: string;
+  tags?: TagDefinition[];
 }
 
 /** Backend Config.last_serial uses transport::serial::SerialPortConfig. */

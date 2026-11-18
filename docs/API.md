@@ -113,6 +113,12 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 **`write_registers`** — `{ req: WriteRequest }`, same shape with
 `function: 5|6|16` and `values: number[]`.
 
+**`inspect_registers`** — `{ values: number[] }` → `DecodeResult`: all
+interpretations (INT16/UINT16/INT32/UINT32/FLOAT32/ASCII × ABCD/BADC/CDAB/DCBA)
+plus labelled float hypotheses. **`decode_register`** —
+`{ values: number[], spec: DecodeSpec }` → `DecodedValue | null` (used by named
+tags; `DecodeSpec` = `{ data_type, byte_order, multiplier?, divider?, offset? }`).
+
 **`send_raw_frame`** — `{ req: RawFrameRequest }`
 
 ```ts
@@ -144,7 +150,7 @@ All three return `ManualResponse`:
 
 `Config` fields: `language`, `theme`, `scan_params`, `last_serial`,
 `last_tcp_host`, `last_tcp_port`, `last_udp_host`, `last_udp_port`,
-`export_dir`, `export_format`.
+`export_dir`, `export_format`, `tags` (named register tags, P3-03).
 
 ## Events
 

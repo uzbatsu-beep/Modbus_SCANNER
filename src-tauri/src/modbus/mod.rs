@@ -7,5 +7,6 @@
 
 pub mod ascii;
 pub mod common;
+pub mod decode;
 pub mod frame;
 pub mod rtu;

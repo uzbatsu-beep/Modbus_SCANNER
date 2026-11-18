@@ -9,6 +9,9 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
+use crate::modbus::decode::{
+    decode, interpret_all, DecodeResult, DecodeSpec, DecodedValue,
+};
 use crate::modbus::frame::{request, Pdu};
 use crate::transport::serial::{SerialPortConfig, SerialTransport};
 use crate::transport::tcp::TcpTransport;
@@ -261,6 +264,18 @@ fn verify_and_parse(
         return Err(ModbusError::UnexpectedFunction(pdu.function()));
     }
     Ok(pdu)
+}
+
+/// All interpretations and float hints for 1–2 selected raw registers (P3-01/02).
+#[tauri::command]
+pub fn inspect_registers(values: Vec<u16>) -> DecodeResult {
+    interpret_all(&values)
+}
+
+/// Decode with an explicit spec (data type, byte order, scaling) — used by named tags.
+#[tauri::command]
+pub fn decode_register(values: Vec<u16>, spec: DecodeSpec) -> Option<DecodedValue> {
+    decode(&values, &spec)
 }
 
 #[tauri::command]
