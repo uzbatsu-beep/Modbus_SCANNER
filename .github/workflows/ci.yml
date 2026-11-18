@@ -14,7 +14,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - run: npm ci
@@ -32,6 +32,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: dtolnay/rust-toolchain@stable
+
+      # generate_context!() requires the frontendDist path to exist.
+      # A real bundle is produced by the frontend job; this stub is enough for
+      # backend-only checks (dist/ is intentionally gitignored).
+      - name: Prepare frontend dist placeholder
+        run: node -e "require('fs').mkdirSync('dist',{recursive:true});require('fs').writeFileSync('dist/index.html','<!doctype html>')"
 
       - uses: Swatinem/rust-cache@v2
         with:
