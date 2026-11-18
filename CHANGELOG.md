@@ -8,6 +8,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), версионирование —
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Docs
+- Refreshed the development roadmap with v1.0–v2.0 milestones, scoring, KPIs and risks
+
 ## [0.1.1] - 2026-11-19
 
 ### Fixed
