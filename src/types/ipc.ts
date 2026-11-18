@@ -65,6 +65,24 @@ export interface SerialAuto {
   sweep: SerialSweepParams;
 }
 
+export type RegisterScanMode = "quick" | "balanced" | "deep";
+
+/** P2-03: adaptive register/coil map scan on a single device. */
+export interface RegisterScanParams {
+  target: ManualTarget;
+  function: number;
+  start: number;
+  end: number;
+  mode: RegisterScanMode;
+  /** 0 = mode default (100 for Quick/Balanced, 20 for Deep). */
+  batch: number;
+}
+
+export interface RegisterScanTarget {
+  type: "register_scan";
+  scan: RegisterScanParams;
+}
+
 export interface IpRange {
   type: "ip_range";
   /** "192.168.1.1" or CIDR "192.168.1.0/24" */
@@ -80,7 +98,12 @@ export interface SingleDevice {
   register_plan: RegisterRange[];
 }
 
-export type ScanTarget = UnitIdRange | SerialAuto | IpRange | SingleDevice;
+export type ScanTarget =
+  | UnitIdRange
+  | SerialAuto
+  | IpRange
+  | SingleDevice
+  | RegisterScanTarget;
 
 export interface DeviceTarget {
   kind: TransportKind;

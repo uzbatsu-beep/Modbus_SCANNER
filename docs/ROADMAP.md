@@ -24,8 +24,8 @@
   bounded pool). Also fixes register-plan reads on a serial bus reusing the port.
 
 **Known gaps:**
-- Register plan only works for serial targets in `single_device`; TCP/UDP deep scan
-  needs a proper target builder
+- `single_device` register plan is still serial-only; for TCP/UDP use the new
+  `register_scan` target
 - Export from the device detail pane exports the whole session, not the selected device
 - `ModbusError` variants from a raw TCP MBAP frame are not verified against the
   transaction id yet
@@ -37,6 +37,7 @@
 - [x] Wire `ScanParams` through the engine: per-request timeout, retries, inter-request gap
 - [x] Bounded-concurrency IP worker pool (`ip_concurrency`) with a transport per target
 - [x] Baud-rate sweep strategy: two-phase `serial_auto` (few ids across all settings, then full range on the matched one)
+- [x] Adaptive register map (`register_scan`): Quick/Balanced/Deep, exception-aware splitting, timeout guard
 - [ ] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
 - [ ] Single-device deep scan for TCP/UDP endpoints
 - [ ] Export per-device results from the detail pane
@@ -77,12 +78,16 @@ CRC/LRC, исключения); транспорты serial/TCP/UDP; движо�
 ответа — полный диапазон на найденных настройках. Скорость/чётность меняются с
 переоткрытием общего последовательного порта.
 
+P2-03 — адаптивная карта регистров `register_scan` (Quick/Balanced/Deep, сплит
+неудачных блоков, исключения 01/03 → стоп, 3 таймаута → стоп).
+
 P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_concurrency`
 теперь влияют на движок (единый `EngineParams`, ограничения значений; serial —
 последовательно, TCP/UDP — в ограниченном пуле). Заодно исправлено чтение плана
 регистров на serial-шине с переиспользованием порта.
 
-**Известные пробелы:** план регистров работает только для последовательных целей;
+**Известные пробелы:** план регистров в `single_device` работает только для
+последовательных целей (для TCP/UDP используйте `register_scan`);
 экспорт из панели устройства экспортирует всю сессию; `probe_completed`
 зарезервировано, но не испускается; светлая тема и полная локализация не реализованы.
 

@@ -70,6 +70,16 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
     unit_from: number, unit_to: number    // full range for phase 2
   } }
 
+// adaptive register/coil map on one device (P2-03)
+{ type: "register_scan",
+  scan: {
+    target: ManualTarget,
+    function: 1|2|3|4,
+    start: number, end: number,       // inclusive addresses
+    mode: "quick" | "balanced" | "deep",
+    batch: number                      // 0 = mode default
+  } }
+
 // IP range (from may be CIDR; to = null for single/CIDR)
 { type: "ip_range", from: string, to: string | null,
   port: number, kind: "tcp" | "udp" }

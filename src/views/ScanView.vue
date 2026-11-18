@@ -5,6 +5,7 @@ import ScanFormSerial from "@/components/scan/ScanFormSerial.vue";
 import ScanFormIp from "@/components/scan/ScanFormIp.vue";
 import ScanParamsForm from "@/components/scan/ScanParamsForm.vue";
 import ScanControls from "@/components/scan/ScanControls.vue";
+import RegisterScanForm from "@/components/scan/RegisterScanForm.vue";
 import LogPanel from "@/components/common/LogPanel.vue";
 import type { ScanParams, ScanTarget } from "@/types/ipc";
 import { useScannerStore } from "@/stores/scanner";
@@ -35,6 +36,7 @@ async function start(target: ScanTarget) {
       <div class="scan-forms">
         <ScanFormSerial :params="params" @start="start" />
         <ScanFormIp :params="params" @start="start" />
+        <RegisterScanForm @start="start" />
       </div>
       <div class="scan-params">
         <ScanParamsForm v-model="params" />

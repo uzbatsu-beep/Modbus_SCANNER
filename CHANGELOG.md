@@ -17,6 +17,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI Node.js version bumped to 22
 
 ### Added
+- P2-03: adaptive register/coil map (`register_scan`) with Quick/Balanced/Deep strategies, exception-aware block splitting and a three-timeout guard
 - P2-01: two-phase automatic serial-settings sweep (`serial_auto` target) with early exit on the first valid Modbus frame
 - P2-02: `ScanParams` are now effective — per-request timeout, retries, inter-request gap and bounded IP concurrency (serial stays sequential)
 - Market/community/academic research report and prioritized development plan (EN/RU: docs/RESEARCH.md, docs/RESEARCH.ru.md, docs/PLAN.md, docs/PLAN.ru.md)

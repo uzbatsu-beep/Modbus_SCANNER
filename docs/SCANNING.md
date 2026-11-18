@@ -53,6 +53,31 @@ the engine simple and tolerates devices that close sockets aggressively.
 One endpoint + explicit unit id, with a `register_plan` of ranges to read.
 Each found device gets its `registers` map filled with the results.
 
+### 3b. Adaptive register map (`register_scan`, P2-03)
+
+A dedicated mode for “the device answers, but I have no register manual”.
+It reads a whole address range with block requests and adapts to failures:
+
+| Mode | Behaviour |
+|------|-----------|
+| `Quick` | Blocks of `batch` (default 100); a failed block is split into fifths once, then edges are refined to single registers. Fastest on contiguous maps. |
+| `Balanced` (default) | 100 → 20 → 5 → single registers. Good compromise for mixed maps. |
+| `Deep` | Keeps splitting failed blocks until single registers. Finds isolated registers, but issues the most requests. |
+
+Rules shared by all modes:
+
+- exception **0x02** means “this address is absent” → split the block;
+- exception **0x01** (unsupported function) or **0x03** → abort immediately;
+- **timeouts are never split** — retrying sub-blocks would cost a full timeout
+  each; three consecutive timeouts abort the scan;
+- addresses that answered are remembered, so edge refinement never re-reads
+  a known readable register;
+- results are written into the device record even if the device was not found
+  by a previous discovery scan.
+
+The UI field “Размер блока” overrides the mode default; values are clamped to
+the function's spec limit (125 registers or 2000 coils).
+
 ## Scan parameters
 
 | Parameter | Default | Meaning |

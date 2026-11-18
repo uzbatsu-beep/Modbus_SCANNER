@@ -22,7 +22,7 @@ use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
 use crate::transport::{Transport, TransportError};
 
-use super::strategies::{build_strategy, ScanStrategy, WorkItem};
+use super::strategies::{build_strategy, RegisterReadOutcome, ScanStrategy, WorkItem};
 use super::types::*;
 
 /// Control messages to the engine task.
@@ -374,7 +374,12 @@ async fn engine_task(
                 if let WorkItem::RegisterRead { target, .. } = &item {
                     ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
                 }
-                execute_work(&app, item, &mut serial_transport, &results, engine).await;
+                let outcome = execute_work(&app, &item, &mut serial_transport, &results, engine).await;
+                if let Some(outcome) = outcome {
+                    for follow in strategy.on_register_read(&item, outcome) {
+                        pending.push_back(follow);
+                    }
+                }
                 done += 1;
                 emit_progress(&app, *status_tx.borrow(), total, done, &results);
             }
@@ -398,7 +403,12 @@ async fn engine_task(
         if let WorkItem::RegisterRead { target, .. } = &item {
             ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
         }
-        execute_work(&app, item, &mut serial_transport, &results, engine).await;
+        let outcome = execute_work(&app, &item, &mut serial_transport, &results, engine).await;
+        if let Some(outcome) = outcome {
+            for follow in strategy.on_register_read(&item, outcome) {
+                pending.push_back(follow);
+            }
+        }
     }
 
     // Cleanup.
@@ -718,25 +728,29 @@ async fn execute_probe(
 
 async fn execute_work(
     app: &tauri::AppHandle,
-    item: WorkItem,
+    item: &WorkItem,
     serial_transport: &mut Option<SerialTransport>,
     results: &Arc<RwLock<ScanResults>>,
     engine: EngineParams,
-) {
-    if let WorkItem::RegisterRead { target, function, start, quantity, pdu } = &item {
+) -> Option<RegisterReadOutcome> {
+    if let WorkItem::RegisterRead { target, function, start, quantity, pdu } = item {
         results.write().stats.requests_sent += 1;
-        let _ = execute_register_read(
-            app,
-            serial_transport,
-            target,
-            *function,
-            *start,
-            *quantity,
-            pdu,
-            results,
-            engine,
+        Some(
+            execute_register_read(
+                app,
+                serial_transport,
+                target,
+                *function,
+                *start,
+                *quantity,
+                pdu,
+                results,
+                engine,
+            )
+            .await,
         )
-        .await;
+    } else {
+        None
     }
 }
 
@@ -751,14 +765,15 @@ async fn execute_register_read(
     pdu: &[u8],
     results: &Arc<RwLock<ScanResults>>,
     engine: EngineParams,
-) -> Outcome {
+) -> RegisterReadOutcome {
     let adu = build_adu(target.kind, target.unit_id, pdu);
     let timeout = engine.timeout;
+    let started = Instant::now();
 
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => {
             if serial_transport.is_none() {
-                return Outcome::Failed;
+                return RegisterReadOutcome::Error;
             }
             let t = serial_transport.as_mut().unwrap();
             t.transact(&adu, timeout, 3 + (quantity as usize) * 2).await
@@ -788,16 +803,22 @@ async fn execute_register_read(
     let resp = match res {
         Ok(r) => r,
         Err(e) => {
+            let timed_out = matches!(e, TransportError::Timeout(_));
             let mut r = results.write();
-            match e {
-                TransportError::Timeout(_) => r.stats.timeouts += 1,
-                _ => r.stats.transport_errors += 1,
+            if timed_out {
+                r.stats.timeouts += 1;
+            } else {
+                r.stats.transport_errors += 1;
             }
-            return Outcome::Failed;
+            return if timed_out {
+                RegisterReadOutcome::Timeout
+            } else {
+                RegisterReadOutcome::Error
+            };
         }
     };
 
-    let rtt: u128 = 0;
+    let rtt = started.elapsed().as_micros();
     match verify_adu(target.kind, target.unit_id, function, &resp) {
         Ok(p) if !p.is_exception() => {
             let data = match &p {
@@ -822,38 +843,57 @@ async fn execute_register_read(
 
             let mut r = results.write();
             r.stats.responses_ok += 1;
-            if let Some(rec) = r.records.iter_mut().find(|rec| rec.key == key) {
-                for (i, raw) in values.iter().enumerate() {
-                    rec.registers.insert(
-                        format!("{function:02x}:{:04x}", start + i as u16),
-                        RegisterValue {
-                            function,
-                            address: start + i as u16,
-                            raw: *raw,
-                            as_hex: format!("{raw:04x}"),
-                            rtt_us: rtt,
-                        },
-                    );
+            // A register-map scan can target a device that was never discovered;
+            // create the record on demand so its values are not dropped.
+            let idx = match r.records.iter().position(|rec| rec.key == key) {
+                Some(i) => i,
+                None => {
+                    r.records.push(DeviceRecord {
+                        key: key.clone(),
+                        target: target.clone(),
+                        probes: HashMap::new(),
+                        registers: HashMap::new(),
+                        first_seen_ms: now_ms(),
+                        last_seen_ms: now_ms(),
+                    });
+                    r.records.len() - 1
                 }
-                rec.last_seen_ms = now_ms();
-                let rec_clone = rec.clone();
-                drop(r);
-                emit_event(app, &ScanEvent::DeviceUpdated { record: rec_clone });
+            };
+            let rec = &mut r.records[idx];
+            for (i, raw) in values.iter().enumerate() {
+                rec.registers.insert(
+                    format!("{function:02x}:{:04x}", start + i as u16),
+                    RegisterValue {
+                        function,
+                        address: start + i as u16,
+                        raw: *raw,
+                        as_hex: format!("{raw:04x}"),
+                        rtt_us: rtt,
+                    },
+                );
             }
-            Outcome::Ok
+            rec.last_seen_ms = now_ms();
+            let rec_clone = rec.clone();
+            drop(r);
+            emit_event(app, &ScanEvent::DeviceUpdated { record: rec_clone });
+            RegisterReadOutcome::Ok {
+                values: values.clone(),
+            }
         }
         Ok(p) => {
-            if let Pdu::Exception { code: _, .. } = p {
-                let mut r = results.write();
-                r.stats.responses_exception += 1;
-            }
-            Outcome::Ok
+            let code = match p {
+                Pdu::Exception { code, .. } => code,
+                _ => 0x02,
+            };
+            let mut r = results.write();
+            r.stats.responses_exception += 1;
+            RegisterReadOutcome::Exception { code }
         }
         Err(e) => {
             let mut r = results.write();
             r.stats.transport_errors += 1;
             let _ = e;
-            Outcome::Failed
+            RegisterReadOutcome::Error
         }
     }
 }

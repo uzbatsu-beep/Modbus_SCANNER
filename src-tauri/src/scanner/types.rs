@@ -39,6 +39,10 @@ pub enum ScanTarget {
     SerialAuto {
         sweep: SerialSweepParams,
     },
+    /// Adaptive register/coil map scan on one device (P2-03).
+    RegisterScan {
+        scan: RegisterScanParams,
+    },
     /// Single device, deep register map scan.
     SingleDevice {
         target: DeviceTarget,
@@ -104,6 +108,40 @@ pub struct SerialPortParams {
     pub data_bits: DataBitsSerde,
     pub parity: ParitySerde,
     pub stop_bits: StopBitsSerde,
+}
+
+/// Adaptive register-scan strategy (field-practice strategies).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RegisterScanMode {
+    /// Blocks of `batch`; a failed block is split into fifths once, then refined to singles.
+    Quick,
+    /// 100 → 20 → 5, then edge refinement register by register (default).
+    Balanced,
+    /// Split failed blocks all the way down to single registers.
+    Deep,
+}
+
+impl Default for RegisterScanMode {
+    fn default() -> Self {
+        Self::Balanced
+    }
+}
+
+/// Parameters for an adaptive register-map scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterScanParams {
+    pub target: DeviceTarget,
+    /// Function code: 0x01..=0x04.
+    pub function: u8,
+    /// First address (inclusive).
+    pub start: u16,
+    /// Last address (inclusive).
+    pub end: u16,
+    pub mode: RegisterScanMode,
+    /// Initial block size (0 = strategy default).
+    #[serde(default)]
+    pub batch: u16,
 }
 
 /// IP transport kind.

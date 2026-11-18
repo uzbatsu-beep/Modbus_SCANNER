@@ -70,6 +70,16 @@
     unit_from: number, unit_to: number    // полный диапазон для фазы 2
   } }
 
+// адаптивная карта регистров/coil на одном устройстве (P2-03)
+{ type: "register_scan",
+  scan: {
+    target: ManualTarget,
+    function: 1|2|3|4,
+    start: number, end: number,       // включительно
+    mode: "quick" | "balanced" | "deep",
+    batch: number                      // 0 = значение по умолчанию режима
+  } }
+
 // диапазон IP (from может быть CIDR; to = null для одного адреса/подсети)
 { type: "ip_range", from: string, to: string | null,
   port: number, kind: "tcp" | "udp" }

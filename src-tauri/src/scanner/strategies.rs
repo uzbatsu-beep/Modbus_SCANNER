@@ -13,8 +13,8 @@ use crate::modbus::common::SerialMode;
 use crate::modbus::frame::request;
 
 use super::types::{
-    DeviceTarget, ProbeResult, RegisterRange, ScanParams, ScanTarget, SerialFraming,
-    SerialSweepParams,
+    DeviceTarget, ProbeResult, RegisterRange, RegisterScanMode, RegisterScanParams, ScanParams,
+    ScanTarget, SerialFraming, SerialSweepParams,
 };
 
 /// One unit of scan work.
@@ -35,6 +35,19 @@ pub enum WorkItem {
         quantity: u16,
         pdu: Vec<u8>,
     },
+}
+
+/// Outcome of one register/coil block read, fed back to the strategy.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RegisterReadOutcome {
+    /// Block answered with data.
+    Ok { values: Vec<u16> },
+    /// Modbus exception (0x01/0x03 abort the whole scan).
+    Exception { code: u8 },
+    /// No answer after retries — never split, counted toward the abort limit.
+    Timeout,
+    /// Transport-level failure.
+    Error,
 }
 
 /// Probe PDU builder: read N values from address 0 (device presence + access check).
@@ -59,6 +72,12 @@ pub trait ScanStrategy: Send {
     /// Called by the engine when a probe succeeded (device found).
     /// Returns extra work items (e.g. register plan for the found device).
     fn on_device_found(&mut self, _target: &DeviceTarget) -> Vec<WorkItem> {
+        Vec::new()
+    }
+
+    /// Called after a register read completes. Adaptive strategies use this to
+    /// schedule follow-up blocks; others return nothing.
+    fn on_register_read(&mut self, _item: &WorkItem, _outcome: RegisterReadOutcome) -> Vec<WorkItem> {
         Vec::new()
     }
 
@@ -355,6 +374,272 @@ mod baud_sweep_tests {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Block {
+    start: u16,
+    len: u16,
+}
+
+/// Adaptive register-map scan (P2-03).
+///
+/// A readable block is accepted as a whole. A block that answers with exception
+/// 02 is split into fifths (Quick/Balanced/Deep differ in how far they recurse),
+/// then edges are refined register by register. Timeouts are never split and
+/// three consecutive timeouts abort the scan, as does exception 01 (unsupported
+/// function) or 03 (illegal value).
+pub struct RegisterScanStrategy {
+    spec: RegisterScanParams,
+    queue: std::collections::VecDeque<Block>,
+    singles_queued: std::collections::HashSet<u16>,
+    readable: std::collections::HashSet<u16>,
+    timeouts_in_row: u32,
+    aborted: bool,
+}
+
+impl RegisterScanStrategy {
+    fn batch_for(spec: &RegisterScanParams) -> u16 {
+        let max_qty = match crate::modbus::frame::FunctionCode::from_u8(spec.function) {
+            Some(fc) => fc.max_quantity().0,
+            None => 125,
+        };
+        let default = match spec.mode {
+            RegisterScanMode::Quick | RegisterScanMode::Balanced => 100,
+            RegisterScanMode::Deep => 20,
+        };
+        let batch = if spec.batch == 0 { default } else { spec.batch };
+        batch.clamp(1, max_qty)
+    }
+
+    fn enqueue_single(&mut self, addr: u16) {
+        if !self.readable.contains(&addr) && self.singles_queued.insert(addr) {
+            self.queue.push_back(Block { start: addr, len: 1 });
+        }
+    }
+
+    fn enqueue_singles(&mut self, block: Block) {
+        for addr in block.start..=block.start.saturating_add(block.len - 1) {
+            self.enqueue_single(addr);
+        }
+    }
+
+    fn split_into(&mut self, block: Block, parts: u16) {
+        if block.len <= 1 {
+            return;
+        }
+        let parts = parts.min(block.len);
+        let base = block.len / parts;
+        let rem = block.len % parts;
+        let mut cursor = block.start;
+        for i in 0..parts {
+            let len = base + if i < rem { 1 } else { 0 };
+            if len == 0 {
+                continue;
+            }
+            self.queue.push_back(Block { start: cursor, len });
+            cursor += len;
+        }
+    }
+
+    /// Split a failed block according to the selected strategy.
+    fn split_failed(&mut self, block: Block) {
+        match self.spec.mode {
+            // Quick: one split into fifths, then refine edges to single registers.
+            RegisterScanMode::Quick => {
+                if block.len > 5 {
+                    self.split_into(block, 5);
+                } else {
+                    self.enqueue_singles(block);
+                }
+            }
+            // Balanced: 100 → 20 → 5 → single registers.
+            RegisterScanMode::Balanced => {
+                if block.len > 20 {
+                    self.split_into(block, 5);
+                } else if block.len > 5 {
+                    self.split_into(block, 5);
+                } else {
+                    self.enqueue_singles(block);
+                }
+            }
+            // Deep: keep splitting until single registers.
+            RegisterScanMode::Deep => {
+                if block.len > 1 {
+                    self.split_into(block, 5);
+                } else {
+                    self.enqueue_single(block.start);
+                }
+            }
+        }
+    }
+
+    pub fn new(spec: RegisterScanParams, _params: ScanParams) -> Self {
+        let batch = Self::batch_for(&spec);
+        let mut queue = std::collections::VecDeque::new();
+        let mut cursor = spec.start;
+        while cursor <= spec.end {
+            let len = batch.min(spec.end.saturating_sub(cursor) + 1);
+            queue.push_back(Block { start: cursor, len });
+            if cursor == u16::MAX {
+                break;
+            }
+            cursor += len;
+        }
+        Self {
+            spec,
+            queue,
+            singles_queued: std::collections::HashSet::new(),
+            readable: std::collections::HashSet::new(),
+            timeouts_in_row: 0,
+            aborted: false,
+        }
+    }
+}
+
+impl ScanStrategy for RegisterScanStrategy {
+    fn total(&self) -> u64 {
+        // Initial blocks plus the worst-case edge refinement.
+        (self.spec.end.saturating_sub(self.spec.start) as u64) + 2
+    }
+
+    fn next_item(&mut self) -> Option<WorkItem> {
+        if self.aborted {
+            return None;
+        }
+        let block = self.queue.pop_front()?;
+        let range = RegisterRange {
+            function: self.spec.function,
+            start: block.start,
+            quantity: block.len,
+        };
+        register_work(&self.spec.target, &range)
+    }
+
+    fn on_register_read(&mut self, item: &WorkItem, outcome: RegisterReadOutcome) -> Vec<WorkItem> {
+        let (start, quantity) = match item {
+            WorkItem::RegisterRead { start, quantity, .. } => (*start, *quantity),
+            _ => return Vec::new(),
+        };
+        let block = Block { start, len: quantity };
+
+        match outcome {
+            RegisterReadOutcome::Ok { values } => {
+                self.timeouts_in_row = 0;
+                let answered = values.len().min(quantity as usize);
+                for i in 0..answered {
+                    self.readable.insert(start + i as u16);
+                }
+                // Rare: device returned fewer values than requested.
+                if answered < quantity as usize {
+                    let first_missing = start + answered as u16;
+                    let len = quantity - answered as u16;
+                    self.queue.push_back(Block { start: first_missing, len });
+                }
+            }
+            RegisterReadOutcome::Exception { code } => {
+                self.timeouts_in_row = 0;
+                if code == 0x01 || code == 0x03 {
+                    // Function unsupported / illegal value: nothing more to scan.
+                    self.aborted = true;
+                    self.queue.clear();
+                } else {
+                    self.split_failed(block);
+                }
+            }
+            RegisterReadOutcome::Timeout => {
+                self.timeouts_in_row += 1;
+                if self.timeouts_in_row >= 3 {
+                    self.aborted = true;
+                    self.queue.clear();
+                }
+                // Timeouts are never split.
+            }
+            RegisterReadOutcome::Error => {
+                self.timeouts_in_row = 0;
+                self.split_failed(block);
+            }
+        }
+        Vec::new()
+    }
+
+    fn stop_on_found(&self) -> bool {
+        false
+    }
+}
+
+#[cfg(test)]
+mod register_scan_tests {
+    use super::*;
+
+    fn spec(mode: RegisterScanMode, batch: u16) -> RegisterScanParams {
+        RegisterScanParams {
+            target: DeviceTarget {
+                kind: crate::modbus::common::TransportKind::Tcp,
+                endpoint: "127.0.0.1".into(),
+                port: Some(502),
+                unit_id: 1,
+                serial: None,
+                serial_mode: None,
+            },
+            function: 0x03,
+            start: 0,
+            end: 99,
+            mode,
+            batch,
+        }
+    }
+
+    #[test]
+    fn covers_range_with_initial_blocks() {
+        let mut s = RegisterScanStrategy::new(spec(RegisterScanMode::Balanced, 100), ScanParams::default());
+        let item = s.next_item().unwrap();
+        if let WorkItem::RegisterRead { start, quantity, .. } = item {
+            assert_eq!(start, 0);
+            assert_eq!(quantity, 100);
+        }
+        assert!(s.next_item().is_none());
+    }
+
+    #[test]
+    fn failed_block_is_split_into_fifths_then_refined() {
+        let mut s = RegisterScanStrategy::new(spec(RegisterScanMode::Balanced, 100), ScanParams::default());
+        let item = s.next_item().unwrap();
+        s.on_register_read(&item, RegisterReadOutcome::Exception { code: 0x02 });
+        assert_eq!(s.queue.len(), 5);
+        // Each failed fifth of 20 splits again into five blocks of 4.
+        let sub = s.queue.pop_front().unwrap();
+        s.on_register_read(
+            &WorkItem::RegisterRead {
+                target: s.spec.target.clone(),
+                function: 0x03,
+                start: sub.start,
+                quantity: sub.len,
+                pdu: Vec::new(),
+            },
+            RegisterReadOutcome::Exception { code: 0x02 },
+        );
+        assert_eq!(s.queue.len(), 9); // 4 remaining fifths + 5 children
+    }
+
+    #[test]
+    fn aborts_on_illegal_function() {
+        let mut s = RegisterScanStrategy::new(spec(RegisterScanMode::Deep, 20), ScanParams::default());
+        let item = s.next_item().unwrap();
+        s.on_register_read(&item, RegisterReadOutcome::Exception { code: 0x01 });
+        assert!(s.aborted);
+        assert!(s.next_item().is_none());
+    }
+
+    #[test]
+    fn three_timeouts_abort() {
+        let mut s = RegisterScanStrategy::new(spec(RegisterScanMode::Quick, 20), ScanParams::default());
+        for _ in 0..3 {
+            let item = s.next_item().unwrap();
+            s.on_register_read(&item, RegisterReadOutcome::Timeout);
+        }
+        assert!(s.aborted);
+    }
+}
+
 /// IP range scan: IPv4 from..=to (or CIDR), one TCP/UDP port, unit ids.
 pub struct IpRangeStrategy {
     kind: super::types::IpTransportKind,
@@ -523,6 +808,15 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
                 return Err("baud rates, framings and discovery unit ids must not be empty".into());
             }
             Ok(Box::new(BaudSweepStrategy::new(sweep, params)))
+        }
+        ScanTarget::RegisterScan { scan } => {
+            if scan.start > scan.end {
+                return Err("register scan start must not exceed end".into());
+            }
+            if crate::modbus::frame::FunctionCode::from_u8(scan.function).is_none() {
+                return Err(format!("unsupported scan function {:#04x}", scan.function));
+            }
+            Ok(Box::new(RegisterScanStrategy::new(scan, params)))
         }
         ScanTarget::IpRange {
             from,
