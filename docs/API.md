@@ -57,6 +57,9 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: poll registers every 250–10000 ms |
 | `stop_monitor` | — | `void` | Stop live polling |
 | `get_monitor_state` | — | `MonitorValueState[]` | Current min/max/changed values and sample history |
+| `get_traffic_log` | — | `TrafficRecord[]` | P3-06: last 2000 raw exchanges |
+| `clear_traffic_log` | — | `void` | Clear the traffic log |
+| `export_traffic_log` | `{ path: string, format: "csv"\|"json" }` | `number` | Export the log (count of records) |
 
 `ScanTarget` variants:
 
@@ -226,6 +229,12 @@ results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, where
 `{ values: MonitorValueState[], cycle_ms: number }` — emitted once per monitor
 poll cycle. `MonitorValueState` carries `key`, `name`, `unit`, latest `values`,
 `min`/`max`, a `changed` flag and up to 5000 `samples` (one hour window).
+
+### `traffic:record` — `TrafficRecord` (P3-06)
+
+`{ id, timestamp_ms, kind, endpoint, unit_id, function?, tx_hex, rx_hex?, rtt_us,
+status }` — one raw exchange per probe/read, including failed ones. The UI keeps
+the last 2000 records and can filter by function/status and export CSV/JSON.
 
 ### IP target classification (P2-04)
 

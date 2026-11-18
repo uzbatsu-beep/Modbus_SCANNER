@@ -269,6 +269,19 @@ export type ScanEvent =
   | { kind: "probe_completed"; device_key: string; function: number; result: ProbeResult }
   | { kind: "finished"; total: number; found: number; errors: number; elapsed_ms: number };
 
+export interface TrafficRecord {
+  id: number;
+  timestamp_ms: number;
+  kind: TransportKind;
+  endpoint: string;
+  unit_id: number;
+  function?: number | null;
+  tx_hex: string;
+  rx_hex?: string | null;
+  rtt_us: number;
+  status: string;
+}
+
 export interface MonitorWatch {
   key: string;
   target: ManualTarget;

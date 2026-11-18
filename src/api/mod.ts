@@ -27,6 +27,7 @@ import type {
   ScanParams,
   SerialPortInfo,
   TestSerialResult,
+  TrafficRecord,
   WriteRequest,
 } from "@/types/ipc";
 
@@ -73,6 +74,10 @@ export const api = {
       invoke<void>("start_monitor", { watches, interval_ms }),
     stopMonitor: () => invoke<void>("stop_monitor"),
     getMonitorState: () => invoke<MonitorValueState[]>("get_monitor_state"),
+    getTrafficLog: () => invoke<TrafficRecord[]>("get_traffic_log"),
+    clearTrafficLog: () => invoke<void>("clear_traffic_log"),
+    exportTrafficLog: (path: string, format: ExportFormat) =>
+      invoke<number>("export_traffic_log", { path, format }),
   },
 
   monitor: {
@@ -107,4 +112,8 @@ export async function onScanProgress(cb: (p: ScanProgress) => void): Promise<Unl
 
 export async function onScanEvent(cb: (e: ScanEvent) => void): Promise<UnlistenFn> {
   return listen<ScanEvent>("scan:event", (e) => cb(e.payload));
+}
+
+export async function onTrafficRecord(cb: (r: TrafficRecord) => void): Promise<UnlistenFn> {
+  return listen<TrafficRecord>("traffic:record", (e) => cb(e.payload));
 }

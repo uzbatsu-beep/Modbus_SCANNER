@@ -772,6 +772,21 @@ async fn execute_probe(
             },
         };
 
+        let status = match &res {
+            Ok(_) => "ok",
+            Err(TransportError::Timeout(_)) => "timeout",
+            Err(_) => "error",
+        };
+        log_traffic(
+            app,
+            target,
+            Some(function),
+            &adu,
+            res.as_ref().ok(),
+            started.elapsed().as_micros(),
+            status,
+        );
+
         match res {
             Ok(resp) => {
                 let rtt = started.elapsed().as_micros();
@@ -1000,6 +1015,21 @@ async fn execute_register_read(
         },
     };
 
+    let tx_status = match &res {
+        Ok(_) => "ok",
+        Err(TransportError::Timeout(_)) => "timeout",
+        Err(_) => "error",
+    };
+    log_traffic(
+        app,
+        target,
+        Some(function),
+        &adu,
+        res.as_ref().ok(),
+        started.elapsed().as_micros(),
+        tx_status,
+    );
+
     let resp = match res {
         Ok(r) => r,
         Err(e) => {
@@ -1204,6 +1234,7 @@ async fn identify_device(
         transaction_id,
     );
     let timeout = engine.timeout;
+    let started = Instant::now();
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
             Some(t) => t.transact(&adu, timeout, 32).await,
@@ -1229,6 +1260,21 @@ async fn identify_device(
             Err(e) => Err(e),
         },
     };
+    let tx_status = match &res {
+        Ok(_) => "ok",
+        Err(TransportError::Timeout(_)) => "timeout",
+        Err(_) => "error",
+    };
+    log_traffic(
+        app,
+        target,
+        Some(0x2B),
+        &adu,
+        res.as_ref().ok(),
+        started.elapsed().as_micros(),
+        tx_status,
+    );
+
     let resp = match res {
         Ok(r) => r,
         Err(_) => return,
@@ -1295,6 +1341,36 @@ fn kind_short(kind: TransportKind) -> &'static str {
         TransportKind::Tcp => "tcp",
         TransportKind::Udp => "udp",
     }
+}
+
+/// Append one raw exchange to the traffic log and stream it to the UI.
+fn log_traffic(
+    app: &tauri::AppHandle,
+    target: &DeviceTarget,
+    function: Option<u8>,
+    tx: &[u8],
+    rx: Option<&Vec<u8>>,
+    rtt_us: u128,
+    status: &str,
+) {
+    use tauri::{Emitter, Manager};
+    let Some(state) = app.try_state::<crate::state::AppState>() else {
+        return;
+    };
+    let record = TrafficRecord {
+        id: 0,
+        timestamp_ms: now_ms(),
+        kind: target.kind,
+        endpoint: target.endpoint.clone(),
+        unit_id: target.unit_id,
+        function,
+        tx_hex: hex::encode(tx),
+        rx_hex: rx.map(|v| hex::encode(v)),
+        rtt_us,
+        status: status.to_string(),
+    };
+    state.traffic.push(record.clone());
+    let _ = app.emit("traffic:record", record);
 }
 
 /// Emit one `probe_completed` event per finished work item.

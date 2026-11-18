@@ -33,6 +33,7 @@ pub fn run() {
             app.manage(AppState {
                 scanner: scanner::ScannerHandle::new(),
                 monitor: scanner::monitor::MonitorHandle::new(),
+                traffic: state::TrafficLogHandle::new(),
                 config: parking_lot::Mutex::new(state::Config::default()),
             });
             Ok(())
@@ -60,6 +61,9 @@ pub fn run() {
             commands::scanner::start_monitor,
             commands::scanner::stop_monitor,
             commands::scanner::get_monitor_state,
+            commands::scanner::get_traffic_log,
+            commands::scanner::clear_traffic_log,
+            commands::scanner::export_traffic_log,
             // modbus
             commands::modbus_cmd::read_registers,
             commands::modbus_cmd::write_registers,

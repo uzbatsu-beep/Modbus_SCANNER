@@ -57,6 +57,9 @@
 | `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: опрос регистров каждые 250–10000 мс |
 | `stop_monitor` | — | `void` | Остановить опрос |
 | `get_monitor_state` | — | `MonitorValueState[]` | Текущие min/max/изменения и история выборок |
+| `get_traffic_log` | — | `TrafficRecord[]` | P3-06: последние 2000 сырых обменов |
+| `clear_traffic_log` | — | `void` | Очистить журнал трафика |
+| `export_traffic_log` | `{ path: string, format: "csv"\|"json" }` | `number` | Экспорт журнала (число записей) |
 
 Варианты `ScanTarget`:
 
@@ -225,6 +228,12 @@ results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, где
 `{ values: MonitorValueState[], cycle_ms: number }` — отправляется один раз за
 цикл опроса. `MonitorValueState` содержит `key`, `name`, `unit`, последние
 `values`, `min`/`max`, флаг `changed` и до 5000 `samples` (окно один час).
+
+### `traffic:record` — `TrafficRecord` (P3-06)
+
+`{ id, timestamp_ms, kind, endpoint, unit_id, function?, tx_hex, rx_hex?, rtt_us,
+status }` — один сырой обмен на зонд/чтение, включая неудачные. UI хранит
+последние 2000 записей, умеет фильтровать по FC/статусу и экспортировать CSV/JSON.
 
 ### Классификация IP-целей (P2-04)
 

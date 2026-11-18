@@ -1,8 +1,10 @@
 //! Shared application state (IPC-facing configuration store).
 
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use serde::{Deserialize, Serialize};
 
-use crate::scanner::types::{ScanParams, TagDefinition};
+use crate::scanner::types::{now_ms, ScanParams, TagDefinition, TrafficRecord};
 
 /// Shared application state, injected into Tauri as managed state.
 pub struct AppState {
@@ -10,8 +12,50 @@ pub struct AppState {
     pub scanner: crate::scanner::ScannerHandle,
     /// Live register monitor handle
     pub monitor: crate::scanner::monitor::MonitorHandle,
+    /// Raw Modbus traffic log
+    pub traffic: TrafficLogHandle,
     /// Configuration store
     pub config: parking_lot::Mutex<Config>,
+}
+
+/// Bounded raw-traffic log for protocol debugging (P3-06).
+pub struct TrafficLogHandle {
+    records: parking_lot::RwLock<Vec<TrafficRecord>>,
+    next_id: AtomicU64,
+}
+
+impl Default for TrafficLogHandle {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TrafficLogHandle {
+    pub fn new() -> Self {
+        Self {
+            records: parking_lot::RwLock::new(Vec::new()),
+            next_id: AtomicU64::new(1),
+        }
+    }
+
+    pub fn push(&self, mut record: TrafficRecord) {
+        record.id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        record.timestamp_ms = now_ms();
+        let mut records = self.records.write();
+        records.push(record);
+        let overflow = records.len().saturating_sub(2000);
+        if overflow > 0 {
+            records.drain(..overflow);
+        }
+    }
+
+    pub fn snapshot(&self) -> Vec<TrafficRecord> {
+        self.records.read().clone()
+    }
+
+    pub fn clear(&self) {
+        self.records.write().clear();
+    }
 }
 
 /// Application configuration, persisted via `config` commands.

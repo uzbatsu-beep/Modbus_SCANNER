@@ -430,6 +430,24 @@ pub struct IpTargetStatus {
     pub last_seen_ms: u64,
 }
 
+/// One raw Modbus exchange for protocol debugging (P3-06).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrafficRecord {
+    pub id: u64,
+    pub timestamp_ms: u64,
+    pub kind: TransportKind,
+    pub endpoint: String,
+    pub unit_id: u8,
+    /// Function code when known (0x2B for identification).
+    pub function: Option<u8>,
+    pub tx_hex: String,
+    /// Raw response ADU, if any.
+    pub rx_hex: Option<String>,
+    pub rtt_us: u128,
+    /// `ok`, `timeout`, `error`, `invalid_response`...
+    pub status: String,
+}
+
 /// One register address watched by the live monitor (P3-05).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonitorWatch {

@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 use crate::scanner::engine::{ControlMsg, ScannerHandle};
 use crate::scanner::types::{
     now_ms, DeviceRecord, MonitorValueState, MonitorWatch, ProbeResult, Project, ScanParams,
-    ScanProgress, ScanResults, ScanSnapshot, ScanStatus, ScanTarget,
+    ScanProgress, ScanResults, ScanSnapshot, ScanStatus, ScanTarget, TrafficRecord,
 };
 use crate::state::AppState;
 
@@ -87,6 +87,58 @@ pub async fn export_results(
     tokio::fs::write(&path, data).await.map_err(|e| e.to_string())?;
 
     let _ = app;
+    Ok(count)
+}
+
+/// Raw TX/RX log for protocol debugging (P3-06).
+#[tauri::command]
+pub fn get_traffic_log(state: State<'_, AppState>) -> Vec<TrafficRecord> {
+    state.traffic.snapshot()
+}
+
+#[tauri::command]
+pub fn clear_traffic_log(state: State<'_, AppState>) -> Result<(), String> {
+    state.traffic.clear();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn export_traffic_log(
+    state: State<'_, AppState>,
+    path: String,
+    format: ExportFormat,
+) -> Result<usize, String> {
+    let records = state.traffic.snapshot();
+    let data = match format {
+        ExportFormat::Json => serde_json::to_vec_pretty(&records).map_err(|e| e.to_string())?,
+        ExportFormat::Csv => {
+            use std::fmt::Write;
+            let mut w = String::from(
+                "id;timestamp_ms;kind;endpoint;unit_id;function;rtt_us;status;tx_hex;rx_hex\n",
+            );
+            for r in &records {
+                writeln!(
+                    w,
+                    "{};{};{};{};{};{};{};{};{};{}",
+                    r.id,
+                    r.timestamp_ms,
+                    format!("{:?}", r.kind).to_lowercase(),
+                    r.endpoint,
+                    r.unit_id,
+                    r.function.map(|f| format!("{f:#04x}")).unwrap_or_default(),
+                    r.rtt_us,
+                    r.status,
+                    r.tx_hex,
+                    r.rx_hex.clone().unwrap_or_default(),
+                )
+                .map_err(|e| e.to_string())?;
+            }
+            w.into_bytes()
+        }
+        ExportFormat::Xml => return Err("XML export is not available for the traffic log".into()),
+    };
+    let count = records.len();
+    tokio::fs::write(PathBuf::from(&path), data).await.map_err(|e| e.to_string())?;
     Ok(count)
 }
 
