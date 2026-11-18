@@ -8,6 +8,16 @@ import { useDevicesStore } from "@/stores/devices";
 
 const devices = useDevicesStore();
 
+const objectNames: Record<number, string> = {
+  0: "VendorName",
+  1: "ProductCode",
+  2: "MajorMinorRevision",
+  3: "VendorUrl",
+  4: "ProductName",
+  5: "ModelName",
+  6: "UserAppName",
+};
+
 const fmt = ref<ExportFormat>("csv");
 const exporting = ref(false);
 const exportMsg = ref<string | null>(null);
@@ -58,6 +68,25 @@ async function exportResults() {
           <span class="mono">{{ dev.target.endpoint }}{{ dev.target.port ? ":" + dev.target.port : "" }}</span>
         </div>
         <div><span class="lbl">Unit ID:</span> {{ dev.target.unit_id }}</div>
+      </div>
+
+      <div v-if="dev.device_identification" class="section">
+        <div class="section-title">Идентификация / Device ID (FC43 / MEI 0x0E)</div>
+        <table class="data">
+          <thead>
+            <tr><th>Объект</th><th>Значение</th></tr>
+          </thead>
+          <tbody>
+            <tr v-for="obj in dev.device_identification.objects" :key="obj.id">
+              <td class="obj-id">{{ objectNames[obj.id] ?? `Object ${obj.id}` }}</td>
+              <td>{{ obj.value }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="hint">
+          conformity level: {{ dev.device_identification.conformity_level }} ·
+          {{ dev.device_identification.more_follows ? "есть продолжение" : "полный ответ" }}
+        </div>
       </div>
 
       <div class="section">
@@ -175,5 +204,16 @@ async function exportResults() {
   font-family: var(--mono);
   font-size: 11px;
   color: var(--fg-dim);
+}
+
+.obj-id {
+  width: 180px;
+  color: var(--fg-dim);
+}
+
+.hint {
+  font-size: 11px;
+  color: var(--fg-dim);
+  margin-top: 4px;
 }
 </style>

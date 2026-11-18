@@ -132,6 +132,8 @@ export interface ScanParams {
   stop_on_first: boolean;
   register_plan: RegisterRange[];
   ip_concurrency: number;
+  /** Try FC43/MEI14 identification after a device answers. */
+  identify_devices?: boolean;
 }
 
 export type ProbeResult =
@@ -148,6 +150,19 @@ export interface RegisterValue {
   rtt_us: number;
 }
 
+export interface DeviceIdObject {
+  id: number;
+  value: string;
+}
+
+export interface DeviceIdentification {
+  read_code: number;
+  conformity_level: number;
+  more_follows: boolean;
+  next_object_id: number;
+  objects: DeviceIdObject[];
+}
+
 export interface DeviceRecord {
   key: string;
   target: DeviceTarget;
@@ -155,6 +170,7 @@ export interface DeviceRecord {
   probes: Record<number, ProbeResult>;
   /** map: "fc:address" -> value */
   registers: Record<string, RegisterValue>;
+  device_identification?: DeviceIdentification | null;
   first_seen_ms: number;
   last_seen_ms: number;
 }

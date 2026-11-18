@@ -107,9 +107,33 @@ UDP (see ROADMAP for MBAP-over-UDP selection).
 | 0x10 | Write Multiple Registers | write | manual console |
 | 0x16 | Mask Write Register | write | code supported in the codec |
 | 0x17 | Read/Write Multiple Registers | read/write | code supported in the codec |
+| 0x2B | Read Device Identification (MEI 0x0E) | read | basic identification of found devices (P2-05) |
 
 The diagnostic codes (0x07, 0x08, 0x0B, 0x0C) and device identification 0x2B
 are serial-only in the spec and are **not yet exposed** in the UI (see ROADMAP).
+
+## 4b. Device identification (FC43 / MEI 0x0E, P2-05)
+
+Request PDU (read category 1 = basic identification):
+
+```
+[0x2B][0x0E][0x01][0x00]
+      MEI  read object id (0 = first object)
+```
+
+Response data (after the function code):
+
+```
+[MEI=0x0E][read code][conformity level][more follows][next object id][count]
+  then `count` objects:
+  [object id (1)][length (1)][value (length bytes, text)]
+```
+
+Standard basic objects: `0` VendorName, `1` ProductCode, `2` MajorMinorRevision.
+Category 2 (regular) adds VendorUrl, ProductName, ModelName, UserAppName.
+Conformity level 0x01 = basic only, 0x02 = regular, 0x03 = extended.
+The scanner asks for basic identification once per found device (best effort):
+an exception or malformed response simply leaves `device_identification` empty.
 
 ## 5. Response decoding
 

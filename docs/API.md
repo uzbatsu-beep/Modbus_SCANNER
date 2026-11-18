@@ -95,7 +95,7 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 { timeout_ms: number; request_gap_ms: number; retries: number;
   probe_functions: number[]; stop_on_first: boolean;
   register_plan: Array<{ function, start, quantity }>;
-  ip_concurrency: number }
+  ip_concurrency: number; identify_devices?: boolean }
 ```
 
 ### Manual Modbus commands
@@ -179,7 +179,15 @@ Discriminated union on `kind`:
   target: DeviceTarget;
   probes: Record<number, ProbeResult>;
   registers: Record<string, RegisterValue>;  // key "fc:address", e.g. "03:0000"
+  device_identification?: DeviceIdentification | null;
   first_seen_ms: number; last_seen_ms: number }
+
+// FC43/MEI14, P2-05
+interface DeviceIdentification {
+  read_code: number; conformity_level: number;
+  more_follows: boolean; next_object_id: number;
+  objects: Array<{ id: number; value: string }>
+}
 ```
 
 `ProbeResult` variants (`status` discriminator):

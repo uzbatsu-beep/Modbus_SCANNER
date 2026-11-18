@@ -16,7 +16,7 @@ use parking_lot::RwLock;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
-use crate::modbus::frame::Pdu;
+use crate::modbus::frame::{parse_device_identification, read_device_identification, Pdu};
 use crate::transport::serial::{SerialPortConfig, SerialTransport};
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
@@ -47,6 +47,8 @@ pub struct EngineParams {
     pub request_gap: Duration,
     /// Max in-flight IP probes (serial work is always sequential).
     pub ip_concurrency: usize,
+    /// Whether to attempt FC43/MEI14 identification after a device answers.
+    pub identify_devices: bool,
 }
 
 impl EngineParams {
@@ -56,6 +58,7 @@ impl EngineParams {
             retries: p.retries.min(5),
             request_gap: Duration::from_millis(p.request_gap_ms.min(1_000) as u64),
             ip_concurrency: (p.ip_concurrency.clamp(1, 256)) as usize,
+            identify_devices: p.identify_devices,
         }
     }
 }
@@ -110,6 +113,7 @@ mod engine_params_tests {
         assert_eq!(e.retries, 2);
         assert_eq!(e.request_gap, Duration::from_millis(25));
         assert_eq!(e.ip_concurrency, 16);
+        assert!(e.identify_devices);
     }
 
     #[test]
@@ -124,6 +128,7 @@ mod engine_params_tests {
         assert_eq!(e.retries, 5);
         assert_eq!(e.request_gap, Duration::from_millis(1_000));
         assert_eq!(e.ip_concurrency, 1);
+        assert!(e.identify_devices);
     }
 }
 
@@ -703,6 +708,14 @@ async fn execute_probe(
                             note_ip_status(app, results, target, class, false, false, false);
                         }
 
+                        let key = format!(
+                            "{}:{}:{}",
+                            kind_short(target.kind),
+                            target.endpoint,
+                            target.port.map(|p| p.to_string()).unwrap_or_default()
+                        );
+                        let key = format!("{key}:{}", target.unit_id);
+
                         // Update results inside a closed scope: the write guard
                         // must not live across the await below.
                         let record: Option<DeviceRecord> = {
@@ -712,13 +725,6 @@ async fn execute_probe(
                                 ProbeResult::Exception { .. } => r.stats.responses_exception += 1,
                                 _ => {}
                             }
-                            let key = format!(
-                                "{}:{}:{}",
-                                kind_short(target.kind),
-                                target.endpoint,
-                                target.port.map(|p| p.to_string()).unwrap_or_default()
-                            );
-                            let key = format!("{key}:{}", target.unit_id);
                             if is_found {
                                 if let Some(rec) = r.records.iter_mut().find(|rec| rec.key == key) {
                                     rec.probes.insert(function, result.clone());
@@ -731,6 +737,7 @@ async fn execute_probe(
                                         target: target.clone(),
                                         probes,
                                         registers: HashMap::new(),
+                                        device_identification: None,
                                         first_seen_ms: now_ms(),
                                         last_seen_ms: now_ms(),
                                     });
@@ -745,6 +752,8 @@ async fn execute_probe(
                             if let Some(rec) = record {
                                 emit_event(app, &ScanEvent::DeviceFound { record: rec });
                             }
+                            // P2-05: ask the device who it is (best-effort).
+                            identify_device(app, serial_transport, target, results, &key, engine).await;
                             // The register plan is scheduled by the engine (it owns
                             // the strategy and the shared serial transport).
                             return ProbeOutcome {
@@ -932,6 +941,7 @@ async fn execute_register_read(
                         target: target.clone(),
                         probes: HashMap::new(),
                         registers: HashMap::new(),
+                        device_identification: None,
                         first_seen_ms: now_ms(),
                         last_seen_ms: now_ms(),
                     });
@@ -1051,6 +1061,78 @@ fn note_ip_status(
     };
     if changed {
         emit_event(app, &ScanEvent::IpTargetClassified { status: snapshot });
+    }
+}
+
+/// Try FC43/MEI14 identification once a device is known to answer.
+async fn identify_device(
+    app: &tauri::AppHandle,
+    serial_transport: &mut Option<SerialTransport>,
+    target: &DeviceTarget,
+    results: &Arc<RwLock<ScanResults>>,
+    key: &str,
+    engine: EngineParams,
+) {
+    if !engine.identify_devices {
+        return;
+    }
+    let adu = build_adu(
+        target.kind,
+        target.unit_id,
+        &read_device_identification(1, 0),
+    );
+    let timeout = engine.timeout;
+    let res: Result<Vec<u8>, TransportError> = match target.kind {
+        TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
+            Some(t) => t.transact(&adu, timeout, 32).await,
+            None => return,
+        },
+        TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
+            host: target.endpoint.clone(),
+            port: target.port.unwrap_or(502),
+            connect_timeout: timeout,
+        })
+        .await
+        {
+            Ok(mut t) => {
+                let out = t.transact(&adu, timeout, 32).await;
+                let _ = t.close().await;
+                out
+            }
+            Err(e) => Err(e),
+        },
+        TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
+            Ok(mut t) => t.transact(&adu, timeout, 32).await,
+            Err(e) => Err(e),
+        },
+    };
+    let resp = match res {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+    let pdu = match verify_adu(target.kind, target.unit_id, 0x2B, &resp) {
+        Ok(p) if !p.is_exception() => p,
+        _ => return,
+    };
+    let data = match &pdu {
+        Pdu::Response { data, .. } => data.clone(),
+        _ => return,
+    };
+    let identity = match parse_device_identification(&data) {
+        Ok(id) => id,
+        Err(_) => return,
+    };
+    let record = {
+        let mut r = results.write();
+        if let Some(rec) = r.records.iter_mut().find(|rec| rec.key == key) {
+            rec.device_identification = Some(identity);
+            Some(rec.clone())
+        } else {
+            None
+        }
+    };
+    if let Some(record) = record {
+        emit_event(app, &ScanEvent::DeviceUpdated { record });
     }
 }
 

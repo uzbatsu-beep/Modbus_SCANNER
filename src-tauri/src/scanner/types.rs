@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::modbus::common::TransportKind;
+use crate::modbus::frame::DeviceIdentification;
 use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
 
 pub use crate::modbus::common::SerialMode;
@@ -194,6 +195,13 @@ pub struct ScanParams {
     pub register_plan: Vec<RegisterRange>,
     /// Concurrency for IP scans (max in-flight sockets).
     pub ip_concurrency: u32,
+    /// Try FC43/MEI14 identification after a device answers (P2-05).
+    #[serde(default = "default_identify_devices")]
+    pub identify_devices: bool,
+}
+
+fn default_identify_devices() -> bool {
+    true
 }
 
 impl Default for ScanParams {
@@ -206,6 +214,7 @@ impl Default for ScanParams {
             stop_on_first: false,
             register_plan: Vec::new(),
             ip_concurrency: 32,
+            identify_devices: true,
         }
     }
 }
@@ -253,6 +262,9 @@ pub struct DeviceRecord {
     pub probes: HashMap<u8, ProbeResult>,
     /// Full register map scan results (key: "fc:address").
     pub registers: HashMap<String, RegisterValue>,
+    /// FC43/MEI14 device identity, if supported (P2-05).
+    #[serde(default)]
+    pub device_identification: Option<DeviceIdentification>,
     /// First seen timestamp (unix ms).
     pub first_seen_ms: u64,
     /// Last activity timestamp (unix ms).

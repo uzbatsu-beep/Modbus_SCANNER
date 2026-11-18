@@ -50,6 +50,9 @@ function toggleProbe(fc: number) {
     <div class="form-row">
       <label>Стоп после 1-го найден.</label>
       <input type="checkbox" v-model="params.stop_on_first" :disabled="scanner.isRunning" />
+      <label class="short">FC43 идентификация</label>
+      <input type="checkbox" v-model="params.identify_devices" :disabled="scanner.isRunning" />
+      <span class="hint">запрос Vendor / Product / Revision после ответа устройства</span>
     </div>
 
     <div class="hint">

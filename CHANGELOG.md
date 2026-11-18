@@ -17,6 +17,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI Node.js version bumped to 22
 
 ### Added
+- P2-05: best-effort FC43/MEI14 device identification (VendorName, ProductCode, Revision) with a device-detail view and `identify_devices` flag
 - P2-04: IP target classification (valid Modbus / port open / refused / timeout / unreachable) with a results-table view and `ip_target_classified` event
 - P2-03: adaptive register/coil map (`register_scan`) with Quick/Balanced/Deep strategies, exception-aware block splitting and a three-timeout guard
 - P2-01: two-phase automatic serial-settings sweep (`serial_auto` target) with early exit on the first valid Modbus frame

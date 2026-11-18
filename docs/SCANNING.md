@@ -106,7 +106,8 @@ the function's spec limit (125 registers or 2000 coils).
 | `probe_functions` | `[3, 4, 1, 2]` | FCs used to probe device presence |
 | `stop_on_first` | false | Stop after the first found device |
 | `register_plan` | `[]` | Ranges to read on each found device |
-| `ip_concurrency` | 32 | Planned max in-flight IP probes |
+| `ip_concurrency` | 32 | Max in-flight IP probes |
+| `identify_devices` | true | Try FC43/MEI14 identity after a device answers |
 
 **Implementation note:** all four parameters are effective: the engine derives
 one `EngineParams` set at scan start (timeout clamped to 50–10000 ms, retries
@@ -133,9 +134,12 @@ a timeout creates false negatives; too long makes a 247-id scan painfully slow.
 1. Probe PDU: read 1 element from address 0 using the configured FC.
 2. Any valid Modbus response (data **or** exception) counts as "device found".
 3. A CRC/LRC error, unit-id mismatch, unexpected FC, or timeout does not.
-4. Results are accumulated per device key:
+4. If `identify_devices` is enabled, one extra FC43/MEI14 request (P2-05) asks
+   for VendorName / ProductCode / Revision. It is best-effort: an exception or a
+   malformed answer only leaves the field empty.
+5. Results are accumulated per device key:
    `rtu:COM3:1`, `tcp:192.168.1.5:502:1`, `udp:…`.
-5. Found devices are pushed to the UI immediately via `scan:event`;
+6. Found devices are pushed to the UI immediately via `scan:event`;
    the results table can be refreshed live.
 
 ## Interpreting results

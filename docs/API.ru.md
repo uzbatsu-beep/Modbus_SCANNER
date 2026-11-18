@@ -95,7 +95,7 @@
 { timeout_ms: number; request_gap_ms: number; retries: number;
   probe_functions: number[]; stop_on_first: boolean;
   register_plan: Array<{ function, start, quantity }>;
-  ip_concurrency: number }
+  ip_concurrency: number; identify_devices?: boolean }
 ```
 
 ### Ручные команды Modbus
@@ -178,7 +178,15 @@
   target: DeviceTarget;
   probes: Record<number, ProbeResult>;
   registers: Record<string, RegisterValue>;  // ключ "fc:address", напр. "03:0000"
+  device_identification?: DeviceIdentification | null;
   first_seen_ms: number; last_seen_ms: number }
+
+// FC43/MEI14, P2-05
+interface DeviceIdentification {
+  read_code: number; conformity_level: number;
+  more_follows: boolean; next_object_id: number;
+  objects: Array<{ id: number; value: string }>
+}
 ```
 
 Варианты `ProbeResult` (дискриминатор `status`):

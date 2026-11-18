@@ -39,6 +39,7 @@
 - [x] Baud-rate sweep strategy: two-phase `serial_auto` (few ids across all settings, then full range on the matched one)
 - [x] Adaptive register map (`register_scan`): Quick/Balanced/Deep, exception-aware splitting, timeout guard
 - [x] IP target classification: valid Modbus / port open / refused / timeout / unreachable
+- [x] FC43/MEI14 basic device identification (VendorName, ProductCode, Revision)
 - [ ] MBAP transaction-id validation; "RTU over TCP" / MBAP-over-UDP selector
 - [ ] Single-device deep scan for TCP/UDP endpoints
 - [ ] Export per-device results from the detail pane
@@ -84,6 +85,9 @@ P2-03 — адаптивная карта регистров `register_scan` (Qu
 
 P2-04 — классификация IP-целей: валидный Modbus / порт открыт, не Modbus /
 отказ / таймаут / недоступен; отображается отдельной таблицей в результатах.
+
+P2-05 — базовая идентификация FC43/MEI14: VendorName / ProductCode / Revision,
+отображается в карточке устройства; управляется флагом `identify_devices`.
 
 P2-02 — параметры `timeout_ms`, `retries`, `request_gap_ms`, `ip_concurrency`
 теперь влияют на движок (единый `EngineParams`, ограничения значений; serial —

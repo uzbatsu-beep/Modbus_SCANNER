@@ -33,6 +33,8 @@ pub enum FunctionCode {
     ReadWriteMultipleRegisters = 0x17,
     /// Mask Write Register (0x16)
     MaskWriteRegister = 0x16,
+    /// Read Device Identification (0x2B / MEI 0x0E)
+    ReadDeviceIdentification = 0x2B,
 }
 
 impl FunctionCode {
@@ -48,6 +50,7 @@ impl FunctionCode {
             0x10 => Some(Self::WriteMultipleRegisters),
             0x16 => Some(Self::MaskWriteRegister),
             0x17 => Some(Self::ReadWriteMultipleRegisters),
+            0x2B => Some(Self::ReadDeviceIdentification),
             _ => None,
         }
     }
@@ -174,6 +177,118 @@ impl Pdu {
             function,
             data: bytes[1..].to_vec(),
         })
+    }
+}
+
+/// One identification object returned by FC43/MEI14.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceIdObject {
+    pub id: u8,
+    pub value: String,
+}
+
+/// Parsed Read Device Identification response (FC43 / MEI 0x0E).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DeviceIdentification {
+    /// Requested category: 1 basic, 2 regular, 3 extended, 4 individual object.
+    pub read_code: u8,
+    pub conformity_level: u8,
+    pub more_follows: bool,
+    pub next_object_id: u8,
+    pub objects: Vec<DeviceIdObject>,
+}
+
+impl DeviceIdentification {
+    pub fn get(&self, id: u8) -> Option<&str> {
+        self.objects.iter().find(|o| o.id == id).map(|o| o.value.as_str())
+    }
+
+    /// Standard object 0 — vendor name.
+    pub fn vendor_name(&self) -> Option<&str> {
+        self.get(0)
+    }
+
+    /// Standard object 1 — product code.
+    pub fn product_code(&self) -> Option<&str> {
+        self.get(1)
+    }
+
+    /// Standard object 2 — major/minor revision.
+    pub fn revision(&self) -> Option<&str> {
+        self.get(2)
+    }
+}
+
+/// Build a basic device-identification request (FC43, MEI 0x0E, category 1).
+pub fn read_device_identification(read_code: u8, object_id: u8) -> Vec<u8> {
+    vec![0x2B, 0x0E, read_code, object_id]
+}
+
+/// Parse the PDU data of an FC43 response (starts with MEI type 0x0E).
+pub fn parse_device_identification(data: &[u8]) -> Result<DeviceIdentification, ModbusError> {
+    if data.len() < 6 {
+        return Err(ModbusError::TooShort(data.len()));
+    }
+    if data[0] != 0x0E {
+        return Err(ModbusError::InvalidFrame(format!(
+            "unexpected MEI type {:#04x}, expected 0x0E",
+            data[0]
+        )));
+    }
+    let read_code = data[1];
+    let conformity_level = data[2];
+    let more_follows = data[3] != 0;
+    let next_object_id = data[4];
+    let count = data[5] as usize;
+    let mut pos = 6usize;
+    let mut objects = Vec::with_capacity(count);
+    for _ in 0..count {
+        if pos + 2 > data.len() {
+            return Err(ModbusError::TooShort(data.len()));
+        }
+        let id = data[pos];
+        let len = data[pos + 1] as usize;
+        pos += 2;
+        if pos + len > data.len() {
+            return Err(ModbusError::TooShort(data.len()));
+        }
+        objects.push(DeviceIdObject {
+            id,
+            value: String::from_utf8_lossy(&data[pos..pos + len]).into_owned(),
+        });
+        pos += len;
+    }
+    Ok(DeviceIdentification {
+        read_code,
+        conformity_level,
+        more_follows,
+        next_object_id,
+        objects,
+    })
+}
+
+#[cfg(test)]
+mod device_id_tests {
+    use super::*;
+
+    #[test]
+    fn parse_basic_identification() {
+        // MEI 0x0E, basic, conformity 0x01, no continuation, next id 0,
+        // 3 objects: 0="VEM", 1="PL", 2="1"
+        let data = [
+            0x0E, 0x01, 0x01, 0x00, 0x00, 0x03, 0x00, 0x03, b'V', b'E', b'M', 0x01, 0x02, b'P',
+            b'L', 0x02, 0x01, b'1',
+        ];
+        let id = parse_device_identification(&data).unwrap();
+        assert_eq!(id.vendor_name(), Some("VEM"));
+        assert_eq!(id.product_code(), Some("PL"));
+        assert_eq!(id.revision(), Some("1"));
+        assert!(!id.more_follows);
+    }
+
+    #[test]
+    fn request_pdu() {
+        assert_eq!(read_device_identification(1, 0), vec![0x2B, 0x0E, 0x01, 0x00]);
     }
 }
 

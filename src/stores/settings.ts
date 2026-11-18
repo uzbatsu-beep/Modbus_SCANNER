@@ -17,6 +17,7 @@ const DEFAULT_CONFIG: Config = {
     stop_on_first: false,
     register_plan: [],
     ip_concurrency: 32,
+    identify_devices: true,
   },
   last_serial: null,
   last_tcp_host: null,
