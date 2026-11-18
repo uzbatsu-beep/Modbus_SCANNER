@@ -509,12 +509,6 @@ fn apply_probe_outcome(
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Outcome {
-    Ok,
-    Failed,
-}
-
 /// What a completed probe hands back to the engine.
 #[derive(Debug)]
 struct ProbeOutcome {

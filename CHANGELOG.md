@@ -11,6 +11,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [0.1.1] - 2026-11-19
 
 ### Fixed
+- Removed the last unused Rust enum so release builds are warning-free
 - Register-plan reads after a serial probe now reuse the shared serial port instead of an unopened one
 - Vite `@` alias (frontend build failed in CI with "Rollup failed to resolve @/App.vue")
 - CI backend jobs now create a `dist/` placeholder before `cargo check` (generate_context!)
