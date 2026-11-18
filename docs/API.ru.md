@@ -60,6 +60,8 @@
 | `get_traffic_log` | — | `TrafficRecord[]` | P3-06: последние 2000 сырых обменов |
 | `clear_traffic_log` | — | `void` | Очистить журнал трафика |
 | `export_traffic_log` | `{ path: string, format: "csv"\|"json" }` | `number` | Экспорт журнала (число записей) |
+| `set_loggers` | `{ configs: LoggerConfig[] }` | `LoggerStatus[]` | P3-07: установить файловые логгеры (CSV/TSV/JSONL, ротация none/daily/session/size) |
+| `get_loggers` | — | `LoggerStatus[]` | Статус логгеров (записи, файл, ошибки) |
 
 Варианты `ScanTarget`:
 
@@ -228,6 +230,12 @@ results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, где
 `{ values: MonitorValueState[], cycle_ms: number }` — отправляется один раз за
 цикл опроса. `MonitorValueState` содержит `key`, `name`, `unit`, последние
 `values`, `min`/`max`, флаг `changed` и до 5000 `samples` (окно один час).
+
+`LoggerConfig` (P3-07): `{ id, path, format: "csv"|"tsv"|"json",
+rotation: "none"|"daily"|"session"|{ size_mb: number }, keys?: string[],
+enabled?: boolean }`. Логгеры получают выборки мониторинга каждый цикл;
+`keys = []` означает все точки. Ротация daily/session добавляет суффикс с
+датой/временем, size — создаёт новый файл с таймстемпом при превышении лимита.
 
 ### `traffic:record` — `TrafficRecord` (P3-06)
 

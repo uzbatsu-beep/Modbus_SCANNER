@@ -18,6 +18,7 @@ onMounted(async () => {
   await scanner.bindEvents();
   await monitor.bind();
   await monitor.refresh();
+  await monitor.refreshLoggers();
   await traffic.bind();
 });
 </script>

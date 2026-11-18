@@ -269,6 +269,34 @@ export type ScanEvent =
   | { kind: "probe_completed"; device_key: string; function: number; result: ProbeResult }
   | { kind: "finished"; total: number; found: number; errors: number; elapsed_ms: number };
 
+export type LogFormat = "csv" | "json" | "tsv";
+export type RotationMode =
+  | "none"
+  | "daily"
+  | "session"
+  | { size_mb: number };
+
+export interface LoggerConfig {
+  id: string;
+  path: string;
+  format: LogFormat;
+  rotation: RotationMode;
+  keys?: string[];
+  enabled?: boolean;
+}
+
+export interface LoggerStatus {
+  id: string;
+  path: string;
+  format: LogFormat;
+  rotation: RotationMode;
+  enabled: boolean;
+  records_written: number;
+  current_file: string;
+  last_write_ms?: number | null;
+  error?: string | null;
+}
+
 export interface TrafficRecord {
   id: number;
   timestamp_ms: number;

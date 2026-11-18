@@ -34,6 +34,7 @@ pub fn run() {
                 scanner: scanner::ScannerHandle::new(),
                 monitor: scanner::monitor::MonitorHandle::new(),
                 traffic: state::TrafficLogHandle::new(),
+                loggers: state::LoggerHandle::new(),
                 config: parking_lot::Mutex::new(state::Config::default()),
             });
             Ok(())
@@ -64,6 +65,8 @@ pub fn run() {
             commands::scanner::get_traffic_log,
             commands::scanner::clear_traffic_log,
             commands::scanner::export_traffic_log,
+            commands::scanner::set_loggers,
+            commands::scanner::get_loggers,
             // modbus
             commands::modbus_cmd::read_registers,
             commands::modbus_cmd::write_registers,

@@ -17,6 +17,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - CI Node.js version bumped to 22
 
 ### Added
+- P3-07: multiple file loggers for monitor samples (CSV/TSV/JSONL, rotation none/daily/session/size)
 - P3-06: raw TX/RX traffic log (`traffic:record` event, filters, CSV/JSON export, dedicated tab)
 - P3-05: live register monitor (250 ms–10 s), min/max, change highlighting and SVG trends with `monitor:update` event
 - P3-04: portable projects (`save_project`/`load_project`) with devices, tags and up to 20 scan snapshots

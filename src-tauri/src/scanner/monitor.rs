@@ -271,6 +271,13 @@ async fn monitor_task(
             items.sort_by(|a, b| a.key.cmp(&b.key));
             items
         };
+        // P3-07: feed all file loggers with this cycle's samples.
+        {
+            use tauri::Manager;
+            if let Some(state) = app.try_state::<crate::state::AppState>() {
+                state.loggers.write(&snapshot);
+            }
+        }
         let _ = app.emit("monitor:update", &MonitorUpdate {
             values: snapshot,
             cycle_ms: interval_ms as u64,

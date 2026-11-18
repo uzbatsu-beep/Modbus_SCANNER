@@ -12,6 +12,8 @@ import type {
   DecodeSpec,
   DecodedValue,
   ExportFormat,
+  LoggerConfig,
+  LoggerStatus,
   ManualResponse,
   MonitorUpdate,
   MonitorValueState,
@@ -78,6 +80,9 @@ export const api = {
     clearTrafficLog: () => invoke<void>("clear_traffic_log"),
     exportTrafficLog: (path: string, format: ExportFormat) =>
       invoke<number>("export_traffic_log", { path, format }),
+    setLoggers: (configs: LoggerConfig[]) =>
+      invoke<LoggerStatus[]>("set_loggers", { configs }),
+    getLoggers: () => invoke<LoggerStatus[]>("get_loggers"),
   },
 
   monitor: {

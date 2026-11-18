@@ -3,7 +3,13 @@
 import { defineStore } from "pinia";
 
 import { api } from "@/api/mod";
-import type { MonitorUpdate, MonitorValueState, MonitorWatch } from "@/types/ipc";
+import type {
+  LoggerConfig,
+  LoggerStatus,
+  MonitorUpdate,
+  MonitorValueState,
+  MonitorWatch,
+} from "@/types/ipc";
 
 export const useMonitorStore = defineStore("monitor", {
   state: () => ({
@@ -12,6 +18,7 @@ export const useMonitorStore = defineStore("monitor", {
     bound: false,
     lastCycleMs: 0,
     error: null as string | null,
+    loggers: [] as LoggerStatus[],
   }),
 
   getters: {
@@ -45,6 +52,14 @@ export const useMonitorStore = defineStore("monitor", {
       } catch (e) {
         this.error = String(e);
       }
+    },
+
+    async refreshLoggers() {
+      this.loggers = await api.scanner.getLoggers();
+    },
+
+    async setLoggers(configs: LoggerConfig[]) {
+      this.loggers = await api.scanner.setLoggers(configs);
     },
 
     async stop() {

@@ -430,6 +430,61 @@ pub struct IpTargetStatus {
     pub last_seen_ms: u64,
 }
 
+/// Output format of a file logger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    Csv,
+    Json,
+    Tsv,
+}
+
+/// File rotation policy.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RotationMode {
+    /// Single file, no rotation.
+    None,
+    /// New file every day (date suffix).
+    Daily,
+    /// New file per monitor session (timestamp suffix).
+    Session,
+    /// Rotate when the file exceeds N megabytes.
+    SizeMb(u32),
+}
+
+/// One file logger attached to monitor samples (P3-07).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggerConfig {
+    pub id: String,
+    pub path: String,
+    pub format: LogFormat,
+    pub rotation: RotationMode,
+    /// Only these watch keys are written (empty = all).
+    #[serde(default)]
+    pub keys: Vec<String>,
+    #[serde(default = "default_logger_enabled")]
+    pub enabled: bool,
+}
+
+fn default_logger_enabled() -> bool {
+    true
+}
+
+/// Runtime status of a file logger.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoggerStatus {
+    pub id: String,
+    pub path: String,
+    pub format: LogFormat,
+    pub rotation: RotationMode,
+    pub enabled: bool,
+    pub records_written: u64,
+    pub current_file: String,
+    pub last_write_ms: Option<u64>,
+    pub error: Option<String>,
+}
+
 /// One raw Modbus exchange for protocol debugging (P3-06).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TrafficRecord {

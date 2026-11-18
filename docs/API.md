@@ -60,6 +60,8 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | `get_traffic_log` | — | `TrafficRecord[]` | P3-06: last 2000 raw exchanges |
 | `clear_traffic_log` | — | `void` | Clear the traffic log |
 | `export_traffic_log` | `{ path: string, format: "csv"\|"json" }` | `number` | Export the log (count of records) |
+| `set_loggers` | `{ configs: LoggerConfig[] }` | `LoggerStatus[]` | P3-07: install file loggers (CSV/TSV/JSONL, rotation none/daily/session/size) |
+| `get_loggers` | — | `LoggerStatus[]` | Current logger status (written records, file, errors) |
 
 `ScanTarget` variants:
 
@@ -229,6 +231,12 @@ results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, where
 `{ values: MonitorValueState[], cycle_ms: number }` — emitted once per monitor
 poll cycle. `MonitorValueState` carries `key`, `name`, `unit`, latest `values`,
 `min`/`max`, a `changed` flag and up to 5000 `samples` (one hour window).
+
+`LoggerConfig` (P3-07): `{ id, path, format: "csv"|"tsv"|"json",
+rotation: "none"|"daily"|"session"|{ size_mb: number }, keys?: string[],
+enabled?: boolean }`. Loggers consume monitor samples each cycle; `keys = []`
+means all watches. Daily/session rotation adds a date/timestamp suffix, size
+rotation starts a timestamped file when the limit is exceeded.
 
 ### `traffic:record` — `TrafficRecord` (P3-06)
 

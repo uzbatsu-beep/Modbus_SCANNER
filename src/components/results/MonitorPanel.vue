@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
-import type { MonitorWatch } from "@/types/ipc";
+import type { LogFormat, LoggerConfig, MonitorWatch, RotationMode } from "@/types/ipc";
 import { useDevicesStore } from "@/stores/devices";
 import { useMonitorStore } from "@/stores/monitor";
 import { useSettingsStore } from "@/stores/settings";
@@ -16,6 +16,50 @@ const watches = ref<MonitorWatch[]>([]);
 const trendKey = ref<string | null>(null);
 const windowMs = ref(60_000);
 const error = ref<string | null>(null);
+
+// P3-07: file loggers attached to the monitor cycle.
+const loggerConfigs = ref<LoggerConfig[]>([]);
+const loggerForm = reactiveLoggerForm();
+
+function reactiveLoggerForm() {
+  return {
+    id: "main",
+    path: "modbus-values.csv",
+    format: "csv" as LogFormat,
+    rotation: "none" as "none" | "daily" | "session" | "size",
+    sizeMb: 10,
+    allKeys: true,
+    enabled: true,
+  };
+}
+
+function addLogger() {
+  const rotation: RotationMode =
+    loggerForm.rotation === "size"
+      ? { size_mb: loggerForm.sizeMb }
+      : loggerForm.rotation;
+  const config: LoggerConfig = {
+    id: loggerForm.id.trim() || `logger-${loggerConfigs.value.length + 1}`,
+    path: loggerForm.path.trim(),
+    format: loggerForm.format,
+    rotation,
+    keys: loggerForm.allKeys ? [] : watches.value.map((w) => w.key),
+    enabled: loggerForm.enabled,
+  };
+  loggerConfigs.value = [
+    ...loggerConfigs.value.filter((c) => c.id !== config.id),
+    config,
+  ];
+}
+
+async function applyLoggers() {
+  error.value = null;
+  await monitor.setLoggers(loggerConfigs.value);
+}
+
+function removeLogger(id: string) {
+  loggerConfigs.value = loggerConfigs.value.filter((c) => c.id !== id);
+}
 
 const available = computed(() => {
   if (!devices.selected) return [];
@@ -171,6 +215,72 @@ const trendPoints = computed(() => {
       </svg>
       <div v-else class="hint">Нет данных для тренда</div>
     </div>
+
+    <div class="loggers">
+      <div class="section-title">Файловые логгеры / Loggers (P3-07)</div>
+
+      <div class="form-row">
+        <label>ID</label>
+        <input v-model="loggerForm.id" class="num" />
+        <label class="short">Файл</label>
+        <input v-model="loggerForm.path" class="wide" />
+        <label class="short">Формат</label>
+        <select v-model="loggerForm.format">
+          <option value="csv">CSV</option>
+          <option value="tsv">TSV</option>
+          <option value="json">JSONL</option>
+        </select>
+      </div>
+
+      <div class="form-row">
+        <label>Ротация</label>
+        <select v-model="loggerForm.rotation">
+          <option value="none">нет</option>
+          <option value="daily">ежедневно</option>
+          <option value="session">по сессии</option>
+          <option value="size">по размеру</option>
+        </select>
+        <input
+          v-if="loggerForm.rotation === 'size'"
+          v-model.number="loggerForm.sizeMb"
+          type="number"
+          min="1"
+          class="num"
+        />
+        <label class="check"><input v-model="loggerForm.allKeys" type="checkbox" /> все точки</label>
+        <label class="check"><input v-model="loggerForm.enabled" type="checkbox" /> включён</label>
+        <button :disabled="!loggerForm.path.trim()" @click="addLogger">+ в список</button>
+        <button class="primary" :disabled="loggerConfigs.length === 0" @click="applyLoggers">
+          Применить
+        </button>
+        <button @click="monitor.refreshLoggers()">↻ статус</button>
+      </div>
+
+      <div v-if="loggerConfigs.length" class="watch-list">
+        <span v-for="c in loggerConfigs" :key="c.id" class="watch-chip mono">
+          {{ c.id }} → {{ c.path }} ({{ c.format }})
+          <button @click="removeLogger(c.id)">×</button>
+        </span>
+      </div>
+
+      <table v-if="monitor.loggers.length" class="data">
+        <thead>
+          <tr><th>ID</th><th>Файл</th><th>Записей</th><th>Статус</th></tr>
+        </thead>
+        <tbody>
+          <tr v-for="s in monitor.loggers" :key="s.id">
+            <td>{{ s.id }}</td>
+            <td class="mono">{{ s.current_file || s.path }}</td>
+            <td>{{ s.records_written }}</td>
+            <td>
+              <span class="tag" :class="s.error ? 'error' : s.enabled ? 'ok' : 'dim'">
+                {{ s.error ?? (s.enabled ? "активен" : "выключен") }}
+              </span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </template>
 
@@ -234,5 +344,11 @@ const trendPoints = computed(() => {
   background: var(--bg-input);
   border: 1px solid var(--border);
   border-radius: 6px;
+}
+
+.loggers {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 8px;
 }
 </style>

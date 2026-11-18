@@ -6,8 +6,9 @@ use tauri::{AppHandle, State};
 
 use crate::scanner::engine::{ControlMsg, ScannerHandle};
 use crate::scanner::types::{
-    now_ms, DeviceRecord, MonitorValueState, MonitorWatch, ProbeResult, Project, ScanParams,
-    ScanProgress, ScanResults, ScanSnapshot, ScanStatus, ScanTarget, TrafficRecord,
+    now_ms, DeviceRecord, LoggerConfig, LoggerStatus, MonitorValueState, MonitorWatch, ProbeResult,
+    Project, ScanParams, ScanProgress, ScanResults, ScanSnapshot, ScanStatus, ScanTarget,
+    TrafficRecord,
 };
 use crate::state::AppState;
 
@@ -88,6 +89,21 @@ pub async fn export_results(
 
     let _ = app;
     Ok(count)
+}
+
+/// Configure (and replace) the set of file loggers (P3-07).
+#[tauri::command]
+pub fn set_loggers(
+    state: State<'_, AppState>,
+    configs: Vec<LoggerConfig>,
+) -> Vec<LoggerStatus> {
+    state.loggers.set_loggers(configs);
+    state.loggers.status()
+}
+
+#[tauri::command]
+pub fn get_loggers(state: State<'_, AppState>) -> Vec<LoggerStatus> {
+    state.loggers.status()
 }
 
 /// Raw TX/RX log for protocol debugging (P3-06).
