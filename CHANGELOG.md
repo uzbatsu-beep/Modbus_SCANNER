@@ -8,7 +8,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), версионирование —
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.1] - 2026-11-19
 
 ### Fixed
 - Register-plan reads after a serial probe now reuse the shared serial port instead of an unopened one
@@ -49,5 +49,6 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Bilingual documentation (EN/RU): README, architecture, protocol, scanning, API, development
 - GitHub Actions CI: frontend typecheck/build, backend check/tests on Windows and Linux
 
-[Unreleased]: https://github.com/uzbatsu-beep/Modbus_SCANNER/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/uzbatsu-beep/Modbus_SCANNER/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.1
 [0.1.0]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.0
