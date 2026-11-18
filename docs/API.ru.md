@@ -62,6 +62,7 @@
 | `export_traffic_log` | `{ path: string, format: "csv"\|"json" }` | `number` | Экспорт журнала (число записей) |
 | `set_loggers` | `{ configs: LoggerConfig[] }` | `LoggerStatus[]` | P3-07: установить файловые логгеры (CSV/TSV/JSONL, ротация none/daily/session/size) |
 | `get_loggers` | — | `LoggerStatus[]` | Статус логгеров (записи, файл, ошибки) |
+| `compare_scans` | `{ left: ScanResults, right: ScanResults, left_label, right_label }` | `ScanDiff` | P3-08: сравнить карты регистров двух снимков |
 
 Варианты `ScanTarget`:
 
@@ -236,6 +237,12 @@ rotation: "none"|"daily"|"session"|{ size_mb: number }, keys?: string[],
 enabled?: boolean }`. Логгеры получают выборки мониторинга каждый цикл;
 `keys = []` означает все точки. Ротация daily/session добавляет суффикс с
 датой/временем, size — создаёт новый файл с таймстемпом при превышении лимита.
+
+`ScanDiff` (P3-08): `{ left_label, right_label, left_devices, right_devices,
+added_devices, removed_devices, devices: DeviceDiff[], registers: RegisterDiff[],
+added, removed, changed }`. Каждый `RegisterDiff` содержит `device_key`,
+`function`, `address`, `change: "added"|"removed"|"changed"|"unchanged"`,
+`old_value`, `new_value`. В списке только изменившиеся регистры.
 
 ### `traffic:record` — `TrafficRecord` (P3-06)
 

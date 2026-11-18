@@ -430,6 +430,52 @@ pub struct IpTargetStatus {
     pub last_seen_ms: u64,
 }
 
+/// Kind of change for one register between two scans (P3-08).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChangeKind {
+    Added,
+    Removed,
+    Changed,
+    Unchanged,
+}
+
+/// One register-level difference.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RegisterDiff {
+    pub device_key: String,
+    pub function: u8,
+    pub address: u16,
+    pub change: ChangeKind,
+    pub old_value: Option<u16>,
+    pub new_value: Option<u16>,
+}
+
+/// Per-device diff counters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceDiff {
+    pub device_key: String,
+    pub added: u32,
+    pub removed: u32,
+    pub changed: u32,
+}
+
+/// Result of comparing two scan snapshots.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ScanDiff {
+    pub left_label: String,
+    pub right_label: String,
+    pub left_devices: usize,
+    pub right_devices: usize,
+    pub added_devices: Vec<String>,
+    pub removed_devices: Vec<String>,
+    pub devices: Vec<DeviceDiff>,
+    pub registers: Vec<RegisterDiff>,
+    pub added: u32,
+    pub removed: u32,
+    pub changed: u32,
+}
+
 /// Output format of a file logger.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

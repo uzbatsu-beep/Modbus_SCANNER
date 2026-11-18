@@ -4,7 +4,7 @@
 
 import { defineStore } from "pinia";
 import { api } from "@/api/mod";
-import type { Config } from "@/types/ipc";
+import type { Config, Project } from "@/types/ipc";
 
 const DEFAULT_CONFIG: Config = {
   language: "ru",
@@ -36,6 +36,7 @@ export const useSettingsStore = defineStore("settings", {
     config: { ...DEFAULT_CONFIG } as Config,
     loaded: false,
     saving: false,
+    loadedProject: null as Project | null,
   }),
 
   actions: {

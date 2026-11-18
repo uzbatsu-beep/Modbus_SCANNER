@@ -67,6 +67,7 @@ pub fn run() {
             commands::scanner::export_traffic_log,
             commands::scanner::set_loggers,
             commands::scanner::get_loggers,
+            commands::scanner::compare_scans,
             // modbus
             commands::modbus_cmd::read_registers,
             commands::modbus_cmd::write_registers,

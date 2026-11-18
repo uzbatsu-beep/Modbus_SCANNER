@@ -2,7 +2,6 @@
 import { reactive, ref } from "vue";
 
 import { api } from "@/api/mod";
-import type { Project } from "@/types/ipc";
 import { useSettingsStore } from "@/stores/settings";
 import { useScannerStore } from "@/stores/scanner";
 import { useDevicesStore } from "@/stores/devices";
@@ -22,7 +21,6 @@ const msg = ref<string | null>(null);
 
 const devices = useDevicesStore();
 const project = reactive({ name: "Modbus scan", path: "modbus-project.json" });
-const loadedProject = ref<Project | null>(null);
 const projectMsg = ref<string | null>(null);
 
 async function saveProject() {
@@ -39,7 +37,7 @@ async function loadProject() {
   projectMsg.value = null;
   try {
     const p = await api.scanner.loadProject(project.path.trim());
-    loadedProject.value = p;
+    settings.loadedProject = p;
     project.name = p.name;
     await settings.load();
     await devices.refresh();
@@ -134,11 +132,13 @@ function clearLog() {
         <span v-if="projectMsg" class="msg">{{ projectMsg }}</span>
       </div>
 
-      <div v-if="loadedProject" class="form-row">
+      <div v-if="settings.loadedProject" class="form-row">
         <label>Загружен</label>
         <span class="mono">
-          {{ loadedProject.name }} · {{ loadedProject.results.records.length }} устройств ·
-          {{ loadedProject.tags.length }} тегов · {{ loadedProject.history.length }} снимков
+          {{ settings.loadedProject.name }} ·
+          {{ settings.loadedProject.results.records.length }} устройств ·
+          {{ settings.loadedProject.tags.length }} тегов ·
+          {{ settings.loadedProject.history.length }} снимков
         </span>
       </div>
     </div>

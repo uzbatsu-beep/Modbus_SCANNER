@@ -343,6 +343,38 @@ export interface MonitorUpdate {
   cycle_ms: number;
 }
 
+export type ChangeKind = "added" | "removed" | "changed" | "unchanged";
+
+export interface RegisterDiff {
+  device_key: string;
+  function: number;
+  address: number;
+  change: ChangeKind;
+  old_value?: number | null;
+  new_value?: number | null;
+}
+
+export interface DeviceDiff {
+  device_key: string;
+  added: number;
+  removed: number;
+  changed: number;
+}
+
+export interface ScanDiff {
+  left_label: string;
+  right_label: string;
+  left_devices: number;
+  right_devices: number;
+  added_devices: string[];
+  removed_devices: string[];
+  devices: DeviceDiff[];
+  registers: RegisterDiff[];
+  added: number;
+  removed: number;
+  changed: number;
+}
+
 export interface ScanSnapshot {
   timestamp_ms: number;
   label: string;

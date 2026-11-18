@@ -10,6 +10,7 @@ const devices = useDevicesStore();
 const links = [
   { to: "/", label: "Сканер / Scanner" },
   { to: "/results", label: "Результаты / Results" },
+  { to: "/diff", label: "Diff" },
   { to: "/traffic", label: "Трафик / Traffic" },
   { to: "/manual", label: "Ручной режим / Manual" },
   { to: "/settings", label: "Настройки / Settings" },

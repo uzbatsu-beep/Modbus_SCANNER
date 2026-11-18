@@ -62,6 +62,7 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | `export_traffic_log` | `{ path: string, format: "csv"\|"json" }` | `number` | Export the log (count of records) |
 | `set_loggers` | `{ configs: LoggerConfig[] }` | `LoggerStatus[]` | P3-07: install file loggers (CSV/TSV/JSONL, rotation none/daily/session/size) |
 | `get_loggers` | — | `LoggerStatus[]` | Current logger status (written records, file, errors) |
+| `compare_scans` | `{ left: ScanResults, right: ScanResults, left_label, right_label }` | `ScanDiff` | P3-08: diff register maps of two snapshots |
 
 `ScanTarget` variants:
 
@@ -237,6 +238,12 @@ rotation: "none"|"daily"|"session"|{ size_mb: number }, keys?: string[],
 enabled?: boolean }`. Loggers consume monitor samples each cycle; `keys = []`
 means all watches. Daily/session rotation adds a date/timestamp suffix, size
 rotation starts a timestamped file when the limit is exceeded.
+
+`ScanDiff` (P3-08): `{ left_label, right_label, left_devices, right_devices,
+added_devices, removed_devices, devices: DeviceDiff[], registers: RegisterDiff[],
+added, removed, changed }`. Each `RegisterDiff` has `device_key`, `function`,
+`address`, `change: "added"|"removed"|"changed"|"unchanged"`, `old_value`,
+`new_value`. Only changed registers are listed.
 
 ### `traffic:record` — `TrafficRecord` (P3-06)
 

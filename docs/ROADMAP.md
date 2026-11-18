@@ -51,7 +51,7 @@
 - [ ] Register map sweep: contiguous-range detection with configurable step
 - [ ] Value decoding presets (float32, uint32, int16, scaled values, bitfields)
 - [x] Scan profiles / templates: saved targets + register plans (projects, P3-04)
-- [ ] Session compare (diff two scans)
+- [x] Session compare (diff two scans, P3-08)
 - [ ] CSV/XLSX export with decoded columns
 - [ ] Full i18n (RU/EN) and light theme
 - [ ] Generate `src/types/ipc.ts` from Rust types (`ts-rs` or custom schema)

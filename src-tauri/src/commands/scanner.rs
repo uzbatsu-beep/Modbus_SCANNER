@@ -7,7 +7,7 @@ use tauri::{AppHandle, State};
 use crate::scanner::engine::{ControlMsg, ScannerHandle};
 use crate::scanner::types::{
     now_ms, DeviceRecord, LoggerConfig, LoggerStatus, MonitorValueState, MonitorWatch, ProbeResult,
-    Project, ScanParams, ScanProgress, ScanResults, ScanSnapshot, ScanStatus, ScanTarget,
+    Project, ScanDiff, ScanParams, ScanProgress, ScanResults, ScanSnapshot, ScanStatus, ScanTarget,
     TrafficRecord,
 };
 use crate::state::AppState;
@@ -89,6 +89,17 @@ pub async fn export_results(
 
     let _ = app;
     Ok(count)
+}
+
+/// Compare two scan snapshots (P3-08).
+#[tauri::command]
+pub fn compare_scans(
+    left: ScanResults,
+    right: ScanResults,
+    left_label: String,
+    right_label: String,
+) -> ScanDiff {
+    crate::scanner::diff::compare(&left, &right, left_label, right_label)
 }
 
 /// Configure (and replace) the set of file loggers (P3-07).

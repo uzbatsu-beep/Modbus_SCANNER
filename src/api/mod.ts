@@ -21,6 +21,7 @@ import type {
   Project,
   ReadRequest,
   RawFrameRequest,
+  ScanDiff,
   ScanEvent,
   ScanProgress,
   ScanResults,
@@ -83,6 +84,12 @@ export const api = {
     setLoggers: (configs: LoggerConfig[]) =>
       invoke<LoggerStatus[]>("set_loggers", { configs }),
     getLoggers: () => invoke<LoggerStatus[]>("get_loggers"),
+    compareScans: (
+      left: ScanResults,
+      right: ScanResults,
+      left_label: string,
+      right_label: string
+    ) => invoke<ScanDiff>("compare_scans", { left, right, left_label, right_label }),
   },
 
   monitor: {
