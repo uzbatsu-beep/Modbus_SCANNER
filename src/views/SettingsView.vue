@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { reactive, ref } from "vue";
 
 import { api } from "@/api/mod";
@@ -27,9 +28,9 @@ async function saveProject() {
   projectMsg.value = null;
   try {
     await api.scanner.saveProject(project.path.trim(), project.name.trim() || "Modbus scan");
-    projectMsg.value = "проект сохранён";
+    projectMsg.value = t("projectSaved");
   } catch (e) {
-    projectMsg.value = `ошибка: ${e}`;
+    projectMsg.value = `${t("errorPrefix")} ${e}`;
   }
 }
 
@@ -41,9 +42,9 @@ async function loadProject() {
     project.name = p.name;
     await settings.load();
     await devices.refresh();
-    projectMsg.value = `загружено устройств: ${p.results.records.length}, тегов: ${p.tags.length}, снимков: ${p.history.length}`;
+    projectMsg.value = `${t("projectLoaded")}: ${p.results.records.length}, ${t("tags")}: ${p.tags.length}, ${t("snapshots")}: ${p.history.length}`;
   } catch (e) {
-    projectMsg.value = `ошибка: ${e}`;
+    projectMsg.value = `${t("errorPrefix")} ${e}`;
   }
 }
 const appInfo = ref<{ name: string; version: string; debug: boolean } | null>(null);
@@ -59,9 +60,9 @@ async function save() {
     settings.config.export_format = local.export_format;
     settings.config.export_dir = local.export_dir || null;
     await settings.save();
-    msg.value = "настройки сохранены";
+    msg.value = t("settingsSaved");
   } catch (e) {
-    msg.value = `ошибка: ${e}`;
+    msg.value = `${t("errorPrefix")} ${e}`;
   } finally {
     saving.value = false;
   }
@@ -75,10 +76,10 @@ function clearLog() {
 <template>
   <div class="settings-view">
     <div class="panel">
-      <div class="panel-title">Общие / General</div>
+      <div class="panel-title">{{ t("general") }}</div>
 
       <div class="form-row">
-        <label>Язык / Language</label>
+        <label>{{ t("language") }}</label>
         <select v-model="local.language">
           <option value="ru">Русский</option>
           <option value="en">English</option>
@@ -86,19 +87,19 @@ function clearLog() {
       </div>
 
       <div class="form-row">
-        <label>Тема / Theme</label>
+        <label>{{ t("theme") }}</label>
         <select v-model="local.theme">
-          <option value="dark">Dark</option>
-          <option value="light">Light (в разработке)</option>
+          <option value="dark">{{ t("dark") }}</option>
+          <option value="light">{{ t("light") }}</option>
         </select>
       </div>
     </div>
 
     <div class="panel">
-      <div class="panel-title">Экспорт / Export</div>
+      <div class="panel-title">{{ t("exportSettings") }}</div>
 
       <div class="form-row">
-        <label>Формат по умолчанию</label>
+        <label>{{ t("defaultFormat") }}</label>
         <select v-model="local.export_format">
           <option value="csv">CSV</option>
           <option value="json">JSON</option>
@@ -107,66 +108,66 @@ function clearLog() {
       </div>
 
       <div class="form-row">
-        <label>Каталог по умолчанию</label>
+        <label>{{ t("exportDir") }}</label>
         <input v-model="local.export_dir" placeholder="Documents/modbus-scan" class="wide" />
       </div>
     </div>
 
     <div class="panel">
-      <div class="panel-title">Проект / Project (устройства + теги + история)</div>
+      <div class="panel-title">{{ t("project") }}</div>
 
       <div class="form-row">
-        <label>Название</label>
+        <label>{{ t("projectName") }}</label>
         <input v-model="project.name" placeholder="Modbus scan" />
       </div>
 
       <div class="form-row">
-        <label>Файл проекта</label>
+        <label>{{ t("projectFile") }}</label>
         <input v-model="project.path" class="wide" placeholder="modbus-project.json" />
       </div>
 
       <div class="form-row">
         <label />
-        <button :disabled="!project.path.trim()" @click="saveProject">Сохранить проект</button>
-        <button :disabled="!project.path.trim()" @click="loadProject">Загрузить проект</button>
+        <button :disabled="!project.path.trim()" @click="saveProject">{{ t("saveProject") }}</button>
+        <button :disabled="!project.path.trim()" @click="loadProject">{{ t("loadProject") }}</button>
         <span v-if="projectMsg" class="msg">{{ projectMsg }}</span>
       </div>
 
       <div v-if="settings.loadedProject" class="form-row">
-        <label>Загружен</label>
+        <label>{{ t("loaded") }}</label>
         <span class="mono">
           {{ settings.loadedProject.name }} ·
-          {{ settings.loadedProject.results.records.length }} устройств ·
-          {{ settings.loadedProject.tags.length }} тегов ·
-          {{ settings.loadedProject.history.length }} снимков
+          {{ settings.loadedProject.results.records.length }} {{ t("devicesTitle") }} ·
+          {{ settings.loadedProject.tags.length }} {{ t("tags") }} ·
+          {{ settings.loadedProject.history.length }} {{ t("snapshots") }}
         </span>
       </div>
     </div>
 
     <div class="panel">
-      <div class="panel-title">Диагностика / Diagnostics</div>
+      <div class="panel-title">{{ t("diagnostics") }}</div>
 
       <div class="form-row">
-        <label>Версия</label>
+        <label>{{ t("version") }}</label>
         <span v-if="appInfo" class="mono">
           {{ appInfo.name }} v{{ appInfo.version }} {{ appInfo.debug ? "(debug)" : "(release)" }}
         </span>
       </div>
 
       <div class="form-row">
-        <label>Уровень логов (RUST_LOG)</label>
+        <label>{{ t("logLevel") }}</label>
         <span class="mono">{{ "info,modbus_scanner_lib=debug" }}</span>
       </div>
 
       <div class="form-row">
-        <label>Журнал UI</label>
-        <span class="mono">{{ scanner.log.length }} записей</span>
-        <button @click="clearLog()">Очистить</button>
+        <label>{{ t("uiLog") }}</label>
+        <span class="mono">{{ scanner.log.length }} {{ t("records") }}</span>
+        <button @click="clearLog()">{{ t("clear") }}</button>
       </div>
     </div>
 
     <div class="form-row">
-      <button class="primary" :disabled="saving" @click="save">Сохранить настройки</button>
+      <button class="primary" :disabled="saving" @click="save">{{ t("saveSettings") }}</button>
       <span v-if="msg" class="msg">{{ msg }}</span>
     </div>
   </div>

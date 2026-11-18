@@ -1,19 +1,20 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import { t } from "@/i18n";
 import { useScannerStore } from "@/stores/scanner";
 import type { ScanStatus } from "@/types/ipc";
 
 const scanner = useScannerStore();
 
 const statusLabel = computed<Record<ScanStatus, string>>(() => ({
-  idle: "ожидание",
-  preparing: "подготовка",
-  running: "сканирование",
-  paused: "пауза",
-  stopped: "остановлено",
-  finished: "завершено",
-  failed: "ошибка",
+  idle: t("statusIdle"),
+  preparing: t("statusPreparing"),
+  running: t("statusRunning"),
+  paused: t("statusPaused"),
+  stopped: t("statusStopped"),
+  finished: t("statusFinished"),
+  failed: t("statusFailed"),
 }));
 
 const found = computed(() => scanner.progress?.found ?? 0);
@@ -35,9 +36,9 @@ const pct = computed(() =>
     </span>
 
     <template v-if="scanner.status !== 'idle'">
-      <span class="status-item">найдено: {{ found }}</span>
-      <span class="status-item">ошибок: {{ errors }}</span>
-      <span class="status-item">время: {{ elapsed.toFixed(1) }}s</span>
+      <span class="status-item">{{ t("found") }}: {{ found }}</span>
+      <span class="status-item">{{ t("errors") }}: {{ errors }}</span>
+      <span class="status-item">{{ t("time") }}: {{ elapsed.toFixed(1) }}s</span>
       <span v-if="total > 0" class="status-item">{{ done }}/{{ total }} ({{ pct }}%)</span>
       <div class="progress-track">
         <div class="progress-fill" :style="{ width: pct + '%' }" />

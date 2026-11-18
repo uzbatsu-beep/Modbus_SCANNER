@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed } from "vue";
 
 import type { ScanParams } from "@/types/ipc";
@@ -27,24 +28,24 @@ function toggleProbe(fc: number) {
 
 <template>
   <div class="panel">
-    <div class="panel-title">Параметры сканирования / Scan params</div>
+    <div class="panel-title">{{ t("scanParamsTitle") }}</div>
 
     <div class="form-row">
-      <label>Таймаут ответа, мс</label>
+      <label>{{ t("timeout") }}</label>
       <input v-model.number="params.timeout_ms" type="number" min="50" max="10000" :disabled="scanner.isRunning" />
-      <label class="short">Пауза между req, мс</label>
+      <label class="short">{{ t("gap") }}</label>
       <input v-model.number="params.request_gap_ms" type="number" min="0" max="1000" :disabled="scanner.isRunning" />
     </div>
 
     <div class="form-row">
-      <label>Ретраев (до «нет ответа»)</label>
+      <label>{{ t("retries") }}</label>
       <input v-model.number="params.retries" type="number" min="0" max="5" :disabled="scanner.isRunning" />
-      <label class="short">Параллелизм IP</label>
+      <label class="short">{{ t("ipConcurrency") }}</label>
       <input v-model.number="params.ip_concurrency" type="number" min="1" max="256" :disabled="scanner.isRunning" />
     </div>
 
     <div class="form-row">
-      <label>FC зонда устройства</label>
+      <label>{{ t("probeFcs") }}</label>
       <label v-for="fc in READ_FCS" :key="fc" class="check">
         <input
           type="checkbox"
@@ -57,22 +58,22 @@ function toggleProbe(fc: number) {
     </div>
 
     <div class="form-row">
-      <label>Стоп после 1-го найден.</label>
+      <label>{{ t("stopFirst") }}</label>
       <input type="checkbox" v-model="params.stop_on_first" :disabled="scanner.isRunning" />
-      <label class="short">FC43 идентификация</label>
+      <label class="short">{{ t("identify") }}</label>
       <input type="checkbox" v-model="params.identify_devices" :disabled="scanner.isRunning" />
-      <span class="hint">запрос Vendor / Product / Revision после ответа устройства</span>
+      <span class="hint">{{ t("identifyHint") }}</span>
     </div>
 
     <div class="form-row">
-      <label>Формат ADU (TCP)</label>
+      <label>{{ t("tcpAdu") }}</label>
       <select v-model="tcpFraming" :disabled="scanner.isRunning">
-        <option value="mbap">MBAP (стандартный Modbus TCP)</option>
-        <option value="rtu">RTU over TCP (сырой кадр + CRC)</option>
+        <option value="mbap">{{ t("mbap") }}</option>
+        <option value="rtu">{{ t("rtuOverTcp") }}</option>
       </select>
-      <label class="short">MBAP для UDP</label>
+      <label class="short">{{ t("udpMbap") }}</label>
       <input type="checkbox" v-model="params.udp_mbap" :disabled="scanner.isRunning" />
-      <span class="hint">иначе UDP передаёт RTU-кадр</span>
+      <span class="hint">{{ t("tcpAduHint") }}</span>
     </div>
 
     <div class="hint">

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed, ref } from "vue";
 
 import type { LogFormat, LoggerConfig, MonitorWatch, RotationMode } from "@/types/ipc";
@@ -94,7 +95,7 @@ function removeWatch(key: string) {
 async function start() {
   error.value = null;
   if (watches.value.length === 0) {
-    error.value = "добавьте хотя бы один регистр";
+    error.value = t("noMonitorPoints");
     return;
   }
   await monitor.start(watches.value, interval.value);
@@ -139,26 +140,26 @@ const trendPoints = computed(() => {
 
 <template>
   <div class="panel">
-    <div class="panel-title">Живой мониторинг / Live monitor ({{ monitor.count }})</div>
+    <div class="panel-title">{{ t("monitorTitle") }} ({{ monitor.count }})</div>
 
     <div class="form-row">
-      <label>Регистр из выбранного устройства</label>
+      <label>{{ t("monitorRegister") }}</label>
       <select v-model.number="selectedAddress" :disabled="monitor.running">
-        <option :value="null">— выберите —</option>
+        <option :value="null">{{ t("select") }}</option>
         <option v-for="r in available" :key="r.address" :value="r.address">
           0x{{ r.address.toString(16).padStart(4, "0") }} =
           {{ r.as_hex.toUpperCase() }} (FC{{ r.function.toString(16).toUpperCase() }})
         </option>
       </select>
       <button :disabled="monitor.running || selectedAddress === null" @click="addWatch">
-        + добавить
+        {{ t("add") }}
       </button>
-      <label class="short">Период, мс</label>
+      <label class="short">{{ t("period") }}</label>
       <input v-model.number="interval" type="number" min="250" max="10000" step="50" :disabled="monitor.running" />
       <button v-if="!monitor.running" class="primary" :disabled="watches.length === 0" @click="start">
-        ▶ Старт
+        ▶ {{ t("start") }}
       </button>
-      <button v-else class="danger" @click="stop">■ Стоп</button>
+      <button v-else class="danger" @click="stop">■ {{ t("stop") }}</button>
       <span v-if="error || monitor.error" class="error-text">{{ error || monitor.error }}</span>
     </div>
 
@@ -171,7 +172,7 @@ const trendPoints = computed(() => {
 
     <table v-if="monitor.values.length" class="data">
       <thead>
-        <tr><th>Точка</th><th>Значение</th><th>Min</th><th>Max</th><th>Изменение</th><th>Ошибки</th></tr>
+        <tr><th>Point</th><th>{{ t("value") }}</th><th>Min</th><th>Max</th><th>{{ t("change") }}</th><th>{{ t("errors") }}</th></tr>
       </thead>
       <tbody>
         <tr
@@ -189,42 +190,42 @@ const trendPoints = computed(() => {
           <td class="mono">{{ v.max ?? "—" }}</td>
           <td>
             <span class="tag" :class="v.changed ? 'warn' : 'dim'">
-              {{ v.changed ? "изменилось" : "стабильно" }}
+              {{ v.changed ? t("changed") : t("stable") }}
             </span>
           </td>
           <td>{{ v.errors }}</td>
         </tr>
       </tbody>
     </table>
-    <div v-else class="hint">Нет точек мониторинга. Добавьте регистр и нажмите «Старт».</div>
+    <div v-else class="hint">{{ t("noMonitorPoints") }}</div>
 
     <div class="trend">
       <div class="form-row">
-        <label>Тренд</label>
+        <label>{{ t("trend") }}</label>
         <select v-model="trendKey">
           <option v-for="v in monitor.values" :key="v.key" :value="v.key">{{ v.name }}</option>
         </select>
         <select v-model.number="windowMs">
-          <option :value="60_000">1 мин</option>
-          <option :value="300_000">5 мин</option>
-          <option :value="3_600_000">1 час</option>
+          <option :value="60_000">{{ t("min1") }}</option>
+          <option :value="300_000">{{ t("min5") }}</option>
+          <option :value="3_600_000">{{ t("hour1") }}</option>
         </select>
       </div>
       <svg v-if="trendPoints" viewBox="0 0 600 120" class="chart" preserveAspectRatio="none">
         <polyline :points="trendPoints" fill="none" stroke="var(--accent)" stroke-width="2" />
       </svg>
-      <div v-else class="hint">Нет данных для тренда</div>
+      <div v-else class="hint">{{ t("noTrend") }}</div>
     </div>
 
     <div class="loggers">
-      <div class="section-title">Файловые логгеры / Loggers (P3-07)</div>
+      <div class="section-title">{{ t("loggers") }}</div>
 
       <div class="form-row">
         <label>ID</label>
         <input v-model="loggerForm.id" class="num" />
-        <label class="short">Файл</label>
+        <label class="short">{{ t("file") }}</label>
         <input v-model="loggerForm.path" class="wide" />
-        <label class="short">Формат</label>
+        <label class="short">{{ t("format") }}</label>
         <select v-model="loggerForm.format">
           <option value="csv">CSV</option>
           <option value="tsv">TSV</option>
@@ -233,12 +234,12 @@ const trendPoints = computed(() => {
       </div>
 
       <div class="form-row">
-        <label>Ротация</label>
+        <label>{{ t("rotation") }}</label>
         <select v-model="loggerForm.rotation">
-          <option value="none">нет</option>
-          <option value="daily">ежедневно</option>
-          <option value="session">по сессии</option>
-          <option value="size">по размеру</option>
+          <option value="none">{{ t("noRotation") }}</option>
+          <option value="daily">{{ t("daily") }}</option>
+          <option value="session">{{ t("session") }}</option>
+          <option value="size">{{ t("size") }}</option>
         </select>
         <input
           v-if="loggerForm.rotation === 'size'"
@@ -247,13 +248,13 @@ const trendPoints = computed(() => {
           min="1"
           class="num"
         />
-        <label class="check"><input v-model="loggerForm.allKeys" type="checkbox" /> все точки</label>
-        <label class="check"><input v-model="loggerForm.enabled" type="checkbox" /> включён</label>
-        <button :disabled="!loggerForm.path.trim()" @click="addLogger">+ в список</button>
+        <label class="check"><input v-model="loggerForm.allKeys" type="checkbox" /> {{ t("allPoints") }}</label>
+        <label class="check"><input v-model="loggerForm.enabled" type="checkbox" /> {{ t("enabled") }}</label>
+        <button :disabled="!loggerForm.path.trim()" @click="addLogger">{{ t("addToList") }}</button>
         <button class="primary" :disabled="loggerConfigs.length === 0" @click="applyLoggers">
-          Применить
+          {{ t("apply") }}
         </button>
-        <button @click="monitor.refreshLoggers()">↻ статус</button>
+        <button @click="monitor.refreshLoggers()">{{ t("statusRefresh") }}</button>
       </div>
 
       <div v-if="loggerConfigs.length" class="watch-list">
@@ -265,7 +266,7 @@ const trendPoints = computed(() => {
 
       <table v-if="monitor.loggers.length" class="data">
         <thead>
-          <tr><th>ID</th><th>Файл</th><th>Записей</th><th>Статус</th></tr>
+          <tr><th>ID</th><th>{{ t("file") }}</th><th>{{ t("records") }}</th><th>{{ t("status") }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="s in monitor.loggers" :key="s.id">
@@ -274,7 +275,7 @@ const trendPoints = computed(() => {
             <td>{{ s.records_written }}</td>
             <td>
               <span class="tag" :class="s.error ? 'error' : s.enabled ? 'ok' : 'dim'">
-                {{ s.error ?? (s.enabled ? "активен" : "выключен") }}
+                {{ s.error ?? (s.enabled ? t("active") : t("disabled")) }}
               </span>
             </td>
           </tr>

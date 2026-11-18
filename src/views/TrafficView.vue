@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed, nextTick, ref, watch } from "vue";
 
 import type { ExportFormat } from "@/types/ipc";
@@ -56,38 +57,38 @@ function statusClass(status: string): string {
 async function exportLog() {
   msg.value = null;
   const count = await traffic.exportLog(path.value.trim(), format.value);
-  msg.value = count > 0 ? `экспортировано записей: ${count}` : (traffic.error ?? "ошибка");
+  msg.value = count > 0 ? `${t("recordsExported")}: ${count}` : (traffic.error ?? t("errorPrefix"));
 }
 
 async function clear() {
   await traffic.clear();
-  msg.value = "журнал очищен";
+  msg.value = t("clear") + " " + t("saved");
 }
 </script>
 
 <template>
   <div class="panel traffic-panel">
     <div class="panel-title">
-      Журнал протокола / Raw traffic ({{ filtered.length }} / {{ traffic.count }})
+      {{ t("trafficTitle") }} ({{ filtered.length }} / {{ traffic.count }})
     </div>
 
     <div class="form-row">
-      <label>Функция</label>
+      <label>{{ t("function") }}</label>
       <select v-model.number="functionFilter">
-        <option :value="null">все</option>
+        <option :value="null">{{ t("all") }}</option>
         <option v-for="fc in functions" :key="fc" :value="fc">{{ fcName(fc) }}</option>
       </select>
-      <label class="short">Статус</label>
+      <label class="short">{{ t("status") }}</label>
       <select v-model="statusFilter">
-        <option :value="null">все</option>
+        <option :value="null">{{ t("all") }}</option>
         <option v-for="s in statuses" :key="s" :value="s">{{ s }}</option>
       </select>
       <label class="check">
         <input v-model="traffic.autoScroll" type="checkbox" />
-        автопрокрутка
+        {{ t("autoScroll") }}
       </label>
-      <button @click="traffic.refresh()">↻ обновить</button>
-      <button @click="clear">Очистить</button>
+      <button @click="traffic.refresh()">{{ t("update") }}</button>
+      <button @click="clear">{{ t("clear") }}</button>
     </div>
 
     <div ref="list" class="traffic-list">
@@ -112,17 +113,17 @@ async function clear() {
           </tr>
         </tbody>
       </table>
-      <div v-if="filtered.length === 0" class="empty-hint">Нет записей. Запустите сканирование или ручной запрос.</div>
+      <div v-if="filtered.length === 0" class="empty-hint">{{ t("noTraffic") }}</div>
     </div>
 
     <div class="form-row export-row">
-      <label>Экспорт журнала</label>
+      <label>{{ t("exportLog") }}</label>
       <input v-model="path" class="wide" />
       <select v-model="format">
         <option value="csv">CSV</option>
         <option value="json">JSON</option>
       </select>
-      <button class="primary" @click="exportLog">Экспорт</button>
+      <button class="primary" @click="exportLog">{{ t("export") }}</button>
       <span v-if="msg" class="msg">{{ msg }}</span>
     </div>
   </div>

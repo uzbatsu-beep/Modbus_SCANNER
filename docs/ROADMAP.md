@@ -53,7 +53,7 @@
 - [x] Scan profiles / templates: saved targets + register plans (projects, P3-04)
 - [x] Session compare (diff two scans, P3-08)
 - [ ] CSV/XLSX export with decoded columns
-- [ ] Full i18n (RU/EN) and light theme
+- [x] Full i18n (RU/EN) and light theme (P3-09)
 - [ ] Generate `src/types/ipc.ts` from Rust types (`ts-rs` or custom schema)
 - [ ] Unit tests for strategies/engine with a mock transport
 - [ ] Linux/macOS CI matrix

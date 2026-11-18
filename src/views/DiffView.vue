@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed, onMounted, ref } from "vue";
 
 import { api } from "@/api/mod";
@@ -20,12 +21,17 @@ const kindFilter = ref<ChangeKind | "all">("all");
 const deviceFilter = ref<string | null>(null);
 const error = ref<string | null>(null);
 
-const labels: Record<ChangeKind, string> = {
-  added: "добавлен",
-  removed: "удалён",
-  changed: "изменён",
-  unchanged: "без изменений",
-};
+function changeLabel(kind: ChangeKind): string {
+  return t(
+    kind === "added"
+      ? "changeAdded"
+      : kind === "removed"
+        ? "changeRemoved"
+        : kind === "changed"
+          ? "changeChanged"
+          : "changeUnchanged"
+  );
+}
 
 const tagClass: Record<ChangeKind, string> = {
   added: "ok",
@@ -37,7 +43,7 @@ const tagClass: Record<ChangeKind, string> = {
 onMounted(async () => {
   const list: Source[] = [];
   try {
-    list.push({ id: "current", label: "Текущая сессия", results: await api.scanner.getResults() });
+    list.push({ id: "current", label: t("currentSession"), results: await api.scanner.getResults() });
   } catch (e) {
     error.value = String(e);
   }
@@ -45,7 +51,7 @@ onMounted(async () => {
   if (project) {
     list.push({
       id: "project-current",
-      label: `${project.name} — текущие результаты`,
+      label: `${project.name} — ${t("currentResults")}`,
       results: project.results,
     });
     project.history.forEach((snapshot, i) => {
@@ -95,25 +101,25 @@ function hex(value: number | null | undefined): string {
 
 <template>
   <div class="panel">
-    <div class="panel-title">Сравнение сканов / Scan diff</div>
+    <div class="panel-title">{{ t("diffTitle") }}</div>
 
     <div class="form-row">
-      <label>A (до)</label>
+      <label>{{ t("before") }}</label>
       <select v-model="leftId">
         <option v-for="s in sources" :key="s.id" :value="s.id">{{ s.label }}</option>
       </select>
-      <label class="short">B (после)</label>
+      <label class="short">{{ t("after") }}</label>
       <select v-model="rightId">
         <option v-for="s in sources" :key="s.id" :value="s.id">{{ s.label }}</option>
       </select>
       <button class="primary" :disabled="!leftId || !rightId || leftId === rightId" @click="compare">
-        Сравнить
+        {{ t("compare") }}
       </button>
       <span v-if="error" class="error-text">{{ error }}</span>
     </div>
 
     <div v-if="!settings.loadedProject" class="hint">
-      Загрузите проект во вкладке «Настройки», чтобы сравнивать сохранённые снимки сканов.
+      {{ t("loadProjectHint") }}
     </div>
 
     <template v-if="diff">
@@ -122,38 +128,38 @@ function hex(value: number | null | undefined): string {
         <span class="tag warn">~ {{ diff.changed }}</span>
         <span class="tag error">− {{ diff.removed }}</span>
         <span class="dim">
-          устройств: {{ diff.left_devices }} → {{ diff.right_devices }}
-          · добавлено {{ diff.added_devices.length }} · удалено {{ diff.removed_devices.length }}
+          {{ t("devicesTitle") }}: {{ diff.left_devices }} → {{ diff.right_devices }}
+          · {{ t("optionAdded") }} {{ diff.added_devices.length }} · {{ t("optionRemoved") }} {{ diff.removed_devices.length }}
         </span>
       </div>
 
       <div v-if="diff.added_devices.length || diff.removed_devices.length" class="device-changes">
         <div v-if="diff.added_devices.length" class="mono">
-          новые устройства: {{ diff.added_devices.join(", ") }}
+          {{ t("newDevices") }}: {{ diff.added_devices.join(", ") }}
         </div>
         <div v-if="diff.removed_devices.length" class="mono">
-          пропавшие устройства: {{ diff.removed_devices.join(", ") }}
+          {{ t("goneDevices") }}: {{ diff.removed_devices.join(", ") }}
         </div>
       </div>
 
       <div class="form-row">
-        <label>Тип изменения</label>
+        <label>{{ t("changeType") }}</label>
         <select v-model="kindFilter">
-          <option value="all">все</option>
-          <option value="added">добавлены</option>
-          <option value="changed">изменены</option>
-          <option value="removed">удалены</option>
+          <option value="all">{{ t("all") }}</option>
+          <option value="added">{{ t("optionAdded") }}</option>
+          <option value="changed">{{ t("optionChanged") }}</option>
+          <option value="removed">{{ t("optionRemoved") }}</option>
         </select>
-        <label class="short">Устройство</label>
+        <label class="short">{{ t("devicesTitle") }}</label>
         <select v-model="deviceFilter">
-          <option :value="null">все</option>
+          <option :value="null">{{ t("all") }}</option>
           <option v-for="d in devices" :key="d" :value="d">{{ d }}</option>
         </select>
       </div>
 
       <table class="data">
         <thead>
-          <tr><th>Устройство</th><th>FC</th><th>Адрес</th><th>Было</th><th>Стало</th><th>Изменение</th></tr>
+          <tr><th>{{ t("devicesTitle") }}</th><th>FC</th><th>{{ t("address") }}</th><th>{{ t("beforeValue") }}</th><th>{{ t("afterValue") }}</th><th>{{ t("changeHeader") }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="(r, i) in rows" :key="`${r.device_key}-${r.function}-${r.address}-${i}`">
@@ -162,11 +168,11 @@ function hex(value: number | null | undefined): string {
             <td class="mono">0x{{ r.address.toString(16).padStart(4, "0").toUpperCase() }}</td>
             <td class="mono">{{ hex(r.old_value) }}</td>
             <td class="mono">{{ hex(r.new_value) }}</td>
-            <td><span class="tag" :class="tagClass[r.change]">{{ labels[r.change] }}</span></td>
+            <td><span class="tag" :class="tagClass[r.change]">{{ changeLabel(r.change) }}</span></td>
           </tr>
         </tbody>
       </table>
-      <div v-if="rows.length === 0" class="hint">Изменений по выбранному фильтру нет.</div>
+      <div v-if="rows.length === 0" class="hint">{{ t("noChanges") }}</div>
     </template>
   </div>
 </template>

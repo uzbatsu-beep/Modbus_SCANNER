@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 
 import { api } from "@/api/mod";
@@ -76,7 +77,7 @@ async function exportResults() {
     const path = prompt("Путь для сохранения файла:", defaultName);
     if (!path) return;
     await api.scanner.exportDevice(dev.value.key, path, fmt.value);
-    exportMsg.value = `устройство экспортировано: ${dev.value.key}`;
+    exportMsg.value = `${t("exportedDevice")}: ${dev.value.key}`;
   } catch (e) {
     exportMsg.value = `ошибка: ${e}`;
   } finally {
@@ -87,26 +88,26 @@ async function exportResults() {
 
 <template>
   <div class="panel">
-    <div class="panel-title">Детали устройства / Device detail</div>
+    <div class="panel-title">{{ t("deviceDetail") }}</div>
 
-    <div v-if="!dev" class="empty">Выберите устройство в таблице</div>
+    <div v-if="!dev" class="empty">{{ t("selectDevice") }}</div>
 
     <template v-else>
       <div class="detail-grid">
-        <div><span class="lbl">Ключ:</span> <span class="mono">{{ dev.key }}</span></div>
-        <div><span class="lbl">Транспорт:</span> {{ dev.target.kind.toUpperCase() }}</div>
+        <div><span class="lbl">{{ t("key") }}:</span> <span class="mono">{{ dev.key }}</span></div>
+        <div><span class="lbl">{{ t("transportCol") }}:</span> {{ dev.target.kind.toUpperCase() }}</div>
         <div>
-          <span class="lbl">Адрес:</span>
+          <span class="lbl">{{ t("address") }}:</span>
           <span class="mono">{{ dev.target.endpoint }}{{ dev.target.port ? ":" + dev.target.port : "" }}</span>
         </div>
         <div><span class="lbl">Unit ID:</span> {{ dev.target.unit_id }}</div>
       </div>
 
       <div v-if="dev.device_identification" class="section">
-        <div class="section-title">Идентификация / Device ID (FC43 / MEI 0x0E)</div>
+        <div class="section-title">{{ t("identity") }}</div>
         <table class="data">
           <thead>
-            <tr><th>Объект</th><th>Значение</th></tr>
+            <tr><th>{{ t("object") }}</th><th>{{ t("value") }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="obj in dev.device_identification.objects" :key="obj.id">
@@ -117,15 +118,15 @@ async function exportResults() {
         </table>
         <div class="hint">
           conformity level: {{ dev.device_identification.conformity_level }} ·
-          {{ dev.device_identification.more_follows ? "есть продолжение" : "полный ответ" }}
+          {{ dev.device_identification.more_follows ? t("moreFollows") : t("fullAnswer") }}
         </div>
       </div>
 
       <div class="section">
-        <div class="section-title">Результаты зондов / Probes</div>
+        <div class="section-title">{{ t("probes") }}</div>
         <table class="data">
           <thead>
-            <tr><th>Функция</th><th>Статус</th><th>Значения / Ошибка</th><th>RTT</th><th>Raw</th></tr>
+            <tr><th>{{ t("function") }}</th><th>{{ t("status") }}</th><th>{{ t("values") }}</th><th>{{ t("rtt") }}</th><th>{{ t("raw") }}</th></tr>
           </thead>
           <tbody>
             <tr v-for="p in probes" :key="p.fc">
@@ -157,11 +158,11 @@ async function exportResults() {
       </div>
 
       <div class="section">
-        <div class="section-title">Карта регистров / Register map ({{ registers.length }})</div>
-        <div v-if="registers.length === 0" class="empty">Карта регистров не сканировалась</div>
+        <div class="section-title">{{ t("registerMap") }} ({{ registers.length }})</div>
+        <div v-if="registers.length === 0" class="empty">{{ t("noRegisterMap") }}</div>
         <table v-else class="data regs">
           <thead>
-            <tr><th colspan="2">Выбор</th><th>Адрес</th><th>Hex</th><th>Dec</th><th>Bin</th></tr>
+            <tr><th colspan="2">{{ t("select") }}</th><th>{{ t("address") }}</th><th>Hex</th><th>Dec</th><th>Bin</th></tr>
           </thead>
           <tbody>
             <tr v-for="r in registers" :key="`${r.function}:${r.address}`">
@@ -190,7 +191,7 @@ async function exportResults() {
       />
 
       <div class="section export">
-        <div class="section-title">Экспорт устройства</div>
+        <div class="section-title">{{ t("exportDevice") }}</div>
         <select v-model="fmt">
           <option value="csv">CSV</option>
           <option value="json">JSON</option>

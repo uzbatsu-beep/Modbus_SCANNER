@@ -15,6 +15,37 @@
   --mono: "JetBrains Mono", "Cascadia Mono", Consolas, monospace;
 }
 
+:root[data-theme="light"] {
+  --bg: #f4f6f9;
+  --bg-panel: #ffffff;
+  --bg-input: #eef1f6;
+  --border: #d3d9e2;
+  --fg: #242a33;
+  --fg-dim: #6b7483;
+  --accent: #1f6feb;
+  --accent-hover: #1a5fd0;
+  --ok: #1a7f37;
+  --warn: #9a6700;
+  --error: #c52828;
+}
+
+:root[data-theme="light"] table.data tr:hover td {
+  background: #e9edf4;
+}
+
+:root[data-theme="light"] table.data tr.selected td {
+  background: #dce8fb;
+}
+
+:root[data-theme="light"] .changed-row {
+  background: rgba(154, 103, 0, 0.1);
+}
+
+:root[data-theme="light"] .status-bar,
+:root[data-theme="light"] .topbar {
+  background: var(--bg-panel);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;

@@ -69,7 +69,7 @@ snapshots), P3-05 ✅ (live monitor: 250 ms–10 s polling, min/max, change flag
 1 min/5 min/1 h SVG trends), P3-06 ✅ (raw TX/RX traffic log with filters and
 CSV/JSON export), P3-07 ✅ (multiple file loggers with daily/session/size
 rotation, CSV/TSV/JSONL), P3-08 ✅ (scan diff against project snapshots).
-P3-09 (full i18n and light theme) is still open.
+P3-09 ✅ (built-in RU/EN i18n for all UI panels and a light theme). v0.3 is complete.
 
 **Goal:** solve the main field-engineer pain — “the device is there, the docs are not”.
 

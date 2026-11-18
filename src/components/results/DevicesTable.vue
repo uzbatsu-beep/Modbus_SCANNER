@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed } from "vue";
 
 import type { DeviceRecord, ProbeResult } from "@/types/ipc";
@@ -35,23 +36,23 @@ function select(key: string) {
 
 <template>
   <div class="panel">
-    <div class="panel-title">Найденные устройства / Devices ({{ rows.length }})</div>
+    <div class="panel-title">{{ t("devicesTitle") }} ({{ rows.length }})</div>
 
-    <div v-if="rows.length === 0" class="empty">Нет данных. Запустите сканирование.</div>
+    <div v-if="rows.length === 0" class="empty">{{ t("noData") }}</div>
 
     <table v-else class="data">
       <thead>
         <tr>
-          <th>Транспорт</th>
-          <th>Адрес / Endpoint</th>
+          <th>{{ t("transportCol") }}</th>
+          <th>{{ t("address") }} / Endpoint</th>
           <th>Unit</th>
           <th>FC 03</th>
           <th>FC 04</th>
           <th>FC 01</th>
           <th>FC 02</th>
-          <th>Регистров</th>
-          <th>Перв. ответ</th>
-          <th>Посл. ответ</th>
+          <th>{{ t("registers") }}</th>
+          <th>{{ t("firstSeen") }}</th>
+          <th>{{ t("lastSeen") }}</th>
         </tr>
       </thead>
       <tbody>

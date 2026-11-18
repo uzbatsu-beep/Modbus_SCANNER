@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed } from "vue";
 
 import type { IpTargetClass } from "@/types/ipc";
@@ -18,14 +19,21 @@ const rows = computed(() => [...devices.ipTargets].sort((a, b) => {
   return rank[b.class] - rank[a.class] || a.endpoint.localeCompare(b.endpoint);
 }));
 
-const labels: Record<IpTargetClass, string> = {
-  valid_modbus: "валидный Modbus",
-  port_open_no_modbus: "порт открыт, не Modbus",
-  connection_refused: "отказ в соединении",
-  timeout: "таймаут",
-  unreachable: "недоступен",
-  unknown: "не опрошен",
-};
+function classLabel(kind: IpTargetClass): string {
+  return t(
+    kind === "valid_modbus"
+      ? "classValid"
+      : kind === "port_open_no_modbus"
+        ? "classOpen"
+        : kind === "connection_refused"
+          ? "classRefused"
+          : kind === "timeout"
+            ? "classTimeout"
+            : kind === "unreachable"
+              ? "classUnreachable"
+              : "classUnknown"
+  );
+}
 
 const tagClass: Record<IpTargetClass, string> = {
   valid_modbus: "ok",
@@ -39,24 +47,24 @@ const tagClass: Record<IpTargetClass, string> = {
 
 <template>
   <div v-if="rows.length" class="panel">
-    <div class="panel-title">Классификация IP-целей / IP targets ({{ rows.length }})</div>
+    <div class="panel-title">{{ t("ipTargets") }} ({{ rows.length }})</div>
     <table class="data">
       <thead>
         <tr>
           <th>Endpoint</th>
-          <th>Порт</th>
-          <th>Класс</th>
-          <th>Unit ID</th>
+          <th>{{ t("port") }}</th>
+          <th>{{ t("ipClass") }}</th>
+          <th>{{ t("unitIds") }}</th>
           <th>OK / EXC</th>
-          <th>Таймауты</th>
-          <th>Ошибки</th>
+          <th>{{ t("timeouts") }}</th>
+          <th>{{ t("transportErrors") }}</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="`${row.endpoint}:${row.port}`">
           <td>{{ row.endpoint }}</td>
           <td>{{ row.port }}</td>
-          <td><span class="tag" :class="tagClass[row.class]">{{ labels[row.class] }}</span></td>
+          <td><span class="tag" :class="tagClass[row.class]">{{ classLabel(row.class) }}</span></td>
           <td class="dim">{{ row.unit_ids_probed.join(", ") }}</td>
           <td>{{ row.responses_ok }} / {{ row.responses_exception }}</td>
           <td>{{ row.timeouts }}</td>

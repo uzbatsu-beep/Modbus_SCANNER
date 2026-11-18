@@ -2,6 +2,7 @@
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "@/api/mod";
+import { t } from "@/i18n";
 import type {
   ParitySerde,
   ScanParams,
@@ -140,23 +141,23 @@ function start() {
 
 <template>
   <div class="panel">
-    <div class="panel-title">Modbus RTU / ASCII — сканер шины (unit id)</div>
+    <div class="panel-title">{{ t("scanPanelTitle") }}</div>
 
     <div class="form-row">
-      <label>Порт / Port</label>
+      <label>{{ t("port") }}</label>
       <select v-model="form.port_name" :disabled="scanner.isRunning">
         <option v-for="p in serial.ports" :key="p.port_name" :value="p.port_name">
           {{ p.port_name }} ({{ p.port_type }}{{ p.product ? " · " + p.product : "" }})
         </option>
-        <option v-if="serial.ports.length === 0" value="">— нет портов —</option>
+        <option v-if="serial.ports.length === 0" value="">{{ t("noPorts") }}</option>
       </select>
       <button :disabled="testing || scanner.isRunning" @click="serial.refresh()">↻</button>
-      <button :disabled="testing || scanner.isRunning" @click="testPort">Тест</button>
+      <button :disabled="testing || scanner.isRunning" @click="testPort">{{ t("test") }}</button>
       <span v-if="testResult" class="test-result">{{ testResult }}</span>
     </div>
 
     <div class="form-row">
-      <label>Режим / Mode</label>
+      <label>{{ t("mode") }}</label>
       <select v-model="form.mode" :disabled="scanner.isRunning">
         <option value="rtu">RTU (binary + CRC-16)</option>
         <option value="ascii">ASCII (hex + LRC)</option>
@@ -164,14 +165,14 @@ function start() {
     </div>
 
     <div class="form-row">
-      <label>Авто-поиск настроек</label>
+      <label>{{ t("autoSettings") }}</label>
       <label class="check">
         <input type="checkbox" v-model="autoSweep" :disabled="scanner.isRunning" />
-        свип baud / чётности (если настройки неизвестны)
+        {{ t("autoSettingsHint") }}
       </label>
       <span v-if="autoSweep" class="hint">
-        Сначала опрашиваются 1, 2, 3, 4, 5, 10, 20, 100, 247 на каждом сочетании;
-        после первого корректного ответа сканируется весь диапазон unit ID.
+        {{ t("autoDiscoveryHint1") }}
+        {{ t("autoDiscoveryHint2") }}
       </span>
     </div>
 
@@ -189,7 +190,7 @@ function start() {
     </div>
 
     <div v-if="autoSweep" class="form-row sweep-options">
-      <label>Чётность</label>
+      <label>{{ t("parity") }}</label>
       <label v-for="p in parityOptions" :key="p" class="check">
         <input
           type="checkbox"
@@ -199,26 +200,26 @@ function start() {
         />
         {{ p === "none" ? "N (8N1)" : p === "even" ? "E (8E1)" : "O (8O1)" }}
       </label>
-      <span class="hint">рекомендуется таймаут 200–300 мс для свипа</span>
+      <span class="hint">{{ t("recommendedTimeout") }}</span>
     </div>
 
     <div class="form-row" :class="{ dimmed: autoSweep }">
-      <label>Скорость / Baud</label>
+      <label>{{ t("baud") }}</label>
       <select v-model.number="form.baud_rate" :disabled="scanner.isRunning || autoSweep">
         <option v-for="b in BAUD_RATES" :key="b" :value="b">{{ b }}</option>
       </select>
-      <label class="short">Биты</label>
+      <label class="short">{{ t("dataBits") }}</label>
       <select v-model="form.data_bits" :disabled="scanner.isRunning || autoSweep">
         <option value="eight">8</option>
         <option value="seven">7</option>
       </select>
-      <label class="short">Чётность</label>
+      <label class="short">{{ t("parity") }}</label>
       <select v-model="form.parity" :disabled="scanner.isRunning || autoSweep">
         <option value="none">N</option>
         <option value="even">E</option>
         <option value="odd">O</option>
       </select>
-      <label class="short">Стоп</label>
+      <label class="short">{{ t("stopBits") }}</label>
       <select v-model="form.stop_bits" :disabled="scanner.isRunning || autoSweep">
         <option value="one">1</option>
         <option value="two">2</option>
@@ -226,21 +227,21 @@ function start() {
     </div>
 
     <div class="form-row">
-      <label>Unit ID: от — до</label>
+      <label>{{ t("unitRange") }}</label>
       <input v-model.number="form.unit_from" type="number" min="0" max="247" :disabled="scanner.isRunning" />
       <span>—</span>
       <input v-model.number="form.unit_to" type="number" min="0" max="247" :disabled="scanner.isRunning" />
-      <span class="hint">0 = broadcast (ответа нет), 248–255 зарезервированы</span>
+      <span class="hint">{{ t("broadcastHint") }}</span>
     </div>
 
     <div class="form-row">
       <label />
       <button class="primary" :disabled="!canStart" @click="start">
         <template v-if="autoSweep">
-          ▶ Свип настроек + {{ form.unit_to - form.unit_from + 1 }} адресов
+          ▶ {{ t("sweepAndScan") }} {{ form.unit_to - form.unit_from + 1 }} {{ t("addresses") }}
         </template>
         <template v-else>
-          ▶ Сканировать шину ({{ form.unit_to - form.unit_from + 1 }} адресов)
+          ▶ {{ t("scanBus") }} ({{ form.unit_to - form.unit_from + 1 }} {{ t("addresses") }})
         </template>
       </button>
     </div>

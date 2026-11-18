@@ -2,19 +2,20 @@
 import { computed } from "vue";
 import { useRoute } from "vue-router";
 
+import { t } from "@/i18n";
 import { useDevicesStore } from "@/stores/devices";
 
 const route = useRoute();
 const devices = useDevicesStore();
 
-const links = [
-  { to: "/", label: "Сканер / Scanner" },
-  { to: "/results", label: "Результаты / Results" },
-  { to: "/diff", label: "Diff" },
-  { to: "/traffic", label: "Трафик / Traffic" },
-  { to: "/manual", label: "Ручной режим / Manual" },
-  { to: "/settings", label: "Настройки / Settings" },
-];
+const links = computed(() => [
+  { to: "/", label: t("navScan") },
+  { to: "/results", label: t("navResults") },
+  { to: "/diff", label: t("navDiff") },
+  { to: "/traffic", label: t("navTraffic") },
+  { to: "/manual", label: t("navManual") },
+  { to: "/settings", label: t("navSettings") },
+]);
 
 const foundBadge = computed(() => (devices.foundCount > 0 ? devices.foundCount : ""));
 </script>

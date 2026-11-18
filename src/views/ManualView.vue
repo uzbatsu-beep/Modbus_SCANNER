@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed, onMounted, reactive, ref } from "vue";
 
 import { api } from "@/api/mod";
@@ -128,10 +129,10 @@ onMounted(() => {
 <template>
   <div class="manual-view">
     <div class="panel">
-      <div class="panel-title">Ручной режим / Manual (одиночные запросы)</div>
+      <div class="panel-title">{{ t("manualTitle") }}</div>
 
       <div class="form-row">
-        <label>Транспорт</label>
+        <label>{{ t("transport") }}</label>
         <select v-model="form.kind">
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
@@ -150,44 +151,44 @@ onMounted(() => {
       </div>
 
       <div v-else class="form-row">
-        <label>Порт / Port</label>
+        <label>{{ t("port") }}</label>
         <input v-model="form.port_name" placeholder="COM3 / /dev/ttyUSB0" />
         <label class="short">Baud</label>
         <input v-model.number="form.baud_rate" type="number" />
       </div>
 
       <div class="form-row">
-        <label>Таймаут, мс</label>
+        <label>{{ t("timeout") }}</label>
         <input v-model.number="form.timeout_ms" type="number" min="50" max="10000" />
-        <label class="short">Ретраи</label>
+        <label class="short">{{ t("retries") }}</label>
         <input v-model.number="form.retries" type="number" min="0" max="5" />
       </div>
     </div>
 
     <!-- READ -->
     <div class="panel">
-      <div class="panel-title">Чтение / Read</div>
+      <div class="panel-title">{{ t("read") }}</div>
       <div class="form-row">
-        <label>Функция</label>
+        <label>{{ t("function") }}</label>
         <select v-model.number="form.read_fc">
           <option :value="0x01">{{ FC_NAMES[0x01] }}</option>
           <option :value="0x02">{{ FC_NAMES[0x02] }}</option>
           <option :value="0x03">{{ FC_NAMES[0x03] }}</option>
           <option :value="0x04">{{ FC_NAMES[0x04] }}</option>
         </select>
-        <label class="short">Адрес (hex)</label>
+        <label class="short">{{ t("addressHex") }}</label>
         <input v-model.number="form.read_addr" type="number" min="0" max="65535" />
-        <label class="short">Кол-во</label>
+        <label class="short">{{ t("quantity") }}</label>
         <input v-model.number="form.read_qty" type="number" min="1" max="125" />
-        <button class="primary" :disabled="busy" @click="doRead">▶ Читать</button>
+        <button class="primary" :disabled="busy" @click="doRead">▶ {{ t("readBtn") }}</button>
       </div>
     </div>
 
     <!-- WRITE -->
     <div class="panel">
-      <div class="panel-title">Запись / Write</div>
+      <div class="panel-title">{{ t("write") }}</div>
       <div class="form-row">
-        <label>Функция</label>
+        <label>{{ t("function") }}</label>
         <select v-model.number="form.write_fc">
           <option :value="0x05">{{ FC_NAMES[0x05] }}</option>
           <option :value="0x06">{{ FC_NAMES[0x06] }}</option>
@@ -197,23 +198,23 @@ onMounted(() => {
         <input v-model.number="form.write_addr" type="number" min="0" max="65535" />
       </div>
       <div class="form-row">
-        <label>Значения (hex)</label>
+        <label>{{ t("valuesHex") }}</label>
         <input v-model="form.write_vals" placeholder="0x1234, 0xABCD или 1234 ABCD" class="wide" />
-        <button class="warn" :disabled="busy" @click="doWrite">✎ Записать</button>
+        <button class="warn" :disabled="busy" @click="doWrite">✎ {{ t("writeBtn") }}</button>
       </div>
     </div>
 
     <!-- RAW -->
     <div class="panel">
-      <div class="panel-title">Raw-фрейм / Raw frame</div>
+      <div class="panel-title">{{ t("rawFrame") }}</div>
       <div class="form-row">
         <label>ADU hex</label>
         <input v-model="form.raw_hex" placeholder="03 00 00 00 0A" class="wide mono" />
         <label class="check">
           <input type="checkbox" v-model="form.raw_full_adu" />
-          полный ADU (без автосборки)
+          {{ t("fullAdu") }}
         </label>
-        <button :disabled="busy" @click="doRaw()">▶ Отправить</button>
+        <button :disabled="busy" @click="doRaw()">▶ {{ t("send") }}</button>
       </div>
       <div class="hint">
         Без галки: hex = PDU, ADU строится автоматически (RTU: +адрес+CRC; ASCII: +':' +hex +LRC+CRLF;
@@ -223,10 +224,10 @@ onMounted(() => {
 
     <!-- RESPONSE -->
     <div class="panel" v-if="lastResponse">
-      <div class="panel-title">Ответ / Response ({{ lastAction }})</div>
+      <div class="panel-title">{{ t("response") }} ({{ lastAction }})</div>
 
       <div class="form-row">
-        <label>Статус</label>
+        <label>{{ t("status") }}</label>
         <span class="tag" :class="lastResponse.ok ? 'ok' : 'error'">
           {{ lastResponse.ok ? "OK" : lastResponse.error ?? "ERROR" }}
         </span>
@@ -240,7 +241,7 @@ onMounted(() => {
       </div>
 
       <div v-if="lastResponse.values.length > 0" class="form-row">
-        <label>Значения</label>
+        <label>{{ t("values") }}</label>
         <div class="hex vals">
           <span
             v-for="(v, i) in lastResponse.values"

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed } from "vue";
 
 import { useScannerStore } from "@/stores/scanner";
@@ -8,32 +9,32 @@ const scanner = useScannerStore();
 const devices = useDevicesStore();
 
 const statusText = computed<Record<string, string>>(() => ({
-  idle: "ожидание",
-  preparing: "подготовка",
-  running: "сканирование...",
-  paused: "пауза",
-  stopped: "остановлено",
-  finished: "завершено",
-  failed: "ошибка запуска",
+  idle: t("statusIdle"),
+  preparing: t("statusPreparing"),
+  running: t("statusRunning"),
+  paused: t("statusPaused"),
+  stopped: t("statusStopped"),
+  finished: t("statusFinished"),
+  failed: t("startFailed"),
 }));
 </script>
 
 <template>
   <div class="panel controls">
     <div class="controls-left">
-      <button v-if="scanner.canStart" class="primary" disabled>▶ Старт</button>
-      <button v-if="scanner.isRunning" class="danger" @click="scanner.stop()">■ Стоп</button>
-      <button v-if="scanner.isRunning" class="warn" @click="scanner.pause()">⏸ Пауза</button>
-      <button v-if="scanner.isPaused" class="warn" @click="scanner.resume()">▶ Продолжить</button>
+      <button v-if="scanner.canStart" class="primary" disabled>▶ {{ t("start") }}</button>
+      <button v-if="scanner.isRunning" class="danger" @click="scanner.stop()">■ {{ t("stop") }}</button>
+      <button v-if="scanner.isRunning" class="warn" @click="scanner.pause()">⏸ {{ t("pause") }}</button>
+      <button v-if="scanner.isPaused" class="warn" @click="scanner.resume()">▶ {{ t("resume") }}</button>
       <button v-if="!scanner.canStart && !scanner.isRunning" class="danger" @click="scanner.stop()">
-        ■ Стоп
+        ■ {{ t("stop") }}
       </button>
       <span class="status">{{ statusText[scanner.status] }}</span>
     </div>
     <div class="controls-right">
-      <span class="found">найдено устройств: {{ devices.foundCount }}</span>
+      <span class="found">{{ t("devicesFound") }}: {{ devices.foundCount }}</span>
       <button v-if="devices.foundCount > 0 && scanner.canStart" @click="devices.clear()">
-        Очистить результаты
+        {{ t("clearResults") }}
       </button>
     </div>
   </div>

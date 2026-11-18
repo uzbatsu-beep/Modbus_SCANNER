@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed, reactive, ref, watch } from "vue";
 
 import { api } from "@/api/mod";
@@ -130,23 +131,23 @@ async function removeTag(address: number) {
 
 <template>
   <div class="section inspector">
-    <div class="section-title">Интерпретация регистров / Register inspector</div>
+    <div class="section-title">{{ t("inspectorTitle") }}</div>
 
     <div v-if="values.length === 0" class="hint">
-      Выберите 1–2 регистра в таблице выше (для 32-битных значений нужны два).
+      {{ t("selectRegisters") }}
     </div>
 
     <template v-else>
       <div class="raw-addresses mono">
-        Адреса: {{ addresses.map((a) => "0x" + a.toString(16).padStart(4, "0")).join(" · ") }}
+        {{ t("inspectorAddresses") }}: {{ addresses.map((a) => "0x" + a.toString(16).padStart(4, "0")).join(" · ") }}
         · raw: {{ values.map((v) => "0x" + v.toString(16).padStart(4, "0")).join(" ") }}
       </div>
 
-      <div v-if="loading" class="hint">декодирование…</div>
+      <div v-if="loading" class="hint">{{ t("decoding") }}</div>
 
       <table v-else-if="result" class="data">
         <thead>
-          <tr><th>Тип</th><th>Byte order</th><th>Значение</th></tr>
+          <tr><th>{{ t("type") }}</th><th>{{ t("byteOrder") }}</th><th>{{ t("value") }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="(item, i) in result.interpretations" :key="i">
@@ -158,7 +159,7 @@ async function removeTag(address: number) {
       </table>
 
       <div v-if="result?.suggestions.length" class="suggestions">
-        <span class="tag warn">возможные варианты (гипотезы)</span>
+        <span class="tag warn">{{ t("hypotheses") }}</span>
         <span v-for="(s, i) in result.suggestions" :key="i" class="suggestion mono">
           {{ valueNames[s.data_type] }} ({{ s.byte_order.toUpperCase() }}) ≈ {{ s.value.toFixed(3) }}
         </span>
@@ -166,9 +167,9 @@ async function removeTag(address: number) {
 
       <div class="tag-form">
         <div class="form-row">
-          <label>Имя тега</label>
+          <label>{{ t("tagName") }}</label>
           <input v-model="form.name" placeholder="Voltage_L1" />
-          <label class="short">Тип</label>
+          <label class="short">{{ t("type") }}</label>
           <select v-model="form.data_type">
             <option value="int16">INT16</option>
             <option value="uint16">UINT16</option>
@@ -177,7 +178,7 @@ async function removeTag(address: number) {
             <option value="float32">FLOAT32</option>
             <option value="ascii">ASCII</option>
           </select>
-          <label class="short">Byte order</label>
+          <label class="short">{{ t("byteOrder") }}</label>
           <select v-model="form.byte_order" :disabled="!needsTwo && form.data_type !== 'ascii'">
             <option value="abcd">ABCD</option>
             <option value="badc">BADC</option>
@@ -186,22 +187,22 @@ async function removeTag(address: number) {
           </select>
         </div>
         <div class="form-row">
-          <label>Масштаб (× / ÷ / +)</label>
+          <label>{{ t("scale") }}</label>
           <input v-model.number="form.multiplier" type="number" step="any" class="num" />
           <input v-model.number="form.divider" type="number" step="any" class="num" />
           <input v-model.number="form.offset" type="number" step="any" class="num" />
-          <label class="short">Единица</label>
+          <label class="short">{{ t("unitShort") }}</label>
           <input v-model="form.unit" placeholder="V" class="num" />
-          <button class="primary" :disabled="!form.name.trim()" @click="saveTag">Сохранить тег</button>
+          <button class="primary" :disabled="!form.name.trim()" @click="saveTag">{{ t("saveTag") }}</button>
         </div>
       </div>
     </template>
 
     <div v-if="tags.length" class="saved-tags">
-      <div class="section-title">Именованные теги устройства</div>
+      <div class="section-title">{{ t("namedTags") }}</div>
       <table class="data">
         <thead>
-          <tr><th>Имя</th><th>Адрес</th><th>Тип</th><th>Значение</th><th /></tr>
+          <tr><th>{{ t("nameCol") }}</th><th>{{ t("address") }}</th><th>{{ t("type") }}</th><th>{{ t("value") }}</th><th /></tr>
         </thead>
         <tbody>
           <tr v-for="tag in tags" :key="`${tag.address}-${tag.name}`">

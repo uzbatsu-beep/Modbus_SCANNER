@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { t } from "@/i18n";
 import { computed, reactive } from "vue";
 
 import type { ManualTarget, RegisterScanMode, ScanTarget } from "@/types/ipc";
@@ -84,39 +85,39 @@ function start() {
 
 <template>
   <div class="panel">
-    <div class="panel-title">Карта регистров / Register map (адаптивный скан)</div>
+    <div class="panel-title">{{ t("regScanTitle") }}</div>
 
     <div class="form-row">
-      <label>Транспорт</label>
+      <label>{{ t("transport") }}</label>
       <select v-model="form.kind" :disabled="scanner.isRunning">
         <option value="tcp">TCP</option>
         <option value="udp">UDP</option>
         <option value="rtu">RTU (serial)</option>
         <option value="ascii">ASCII (serial)</option>
       </select>
-      <label class="short">Unit ID</label>
+      <label class="short">{{ t("unit") }}</label>
       <input v-model.number="form.unit_id" type="number" min="0" max="255" :disabled="scanner.isRunning" />
       <button v-if="devices.selected" :disabled="scanner.isRunning" @click="useSelected">
-        ← из выбранного устройства
+        {{ t("fromSelected") }}
       </button>
     </div>
 
     <div v-if="!isSerial" class="form-row">
-      <label>Хост</label>
+      <label>{{ t("host") }}</label>
       <input v-model="form.endpoint" placeholder="192.168.1.1" :disabled="scanner.isRunning" />
       <label class="short">Порт</label>
       <input v-model.number="form.port" type="number" min="1" max="65535" :disabled="scanner.isRunning" />
     </div>
 
     <div v-else class="form-row">
-      <label>Порт / Port</label>
+      <label>{{ t("port") }}</label>
       <input v-model="form.serial_port" placeholder="COM3" :disabled="scanner.isRunning" />
-      <label class="short">Baud</label>
+      <label class="short">{{ t("baud") }}</label>
       <input v-model.number="form.baud_rate" type="number" :disabled="scanner.isRunning" />
     </div>
 
     <div class="form-row">
-      <label>Функция</label>
+      <label>{{ t("function") }}</label>
       <select v-model.number="form.function" :disabled="scanner.isRunning">
         <option :value="0x01">{{ FC_NAMES[0x01] }}</option>
         <option :value="0x02">{{ FC_NAMES[0x02] }}</option>
@@ -125,28 +126,28 @@ function start() {
       </select>
       <label class="short">Адрес от</label>
       <input v-model.number="form.start" type="number" min="0" max="65535" :disabled="scanner.isRunning" />
-      <label class="short">до</label>
+      <label class="short">{{ t("to") }}</label>
       <input v-model.number="form.end" type="number" min="0" max="65535" :disabled="scanner.isRunning" />
     </div>
 
     <div class="form-row">
-      <label>Стратегия</label>
+      <label>{{ t("strategy") }}</label>
       <select v-model="form.mode" :disabled="scanner.isRunning">
-        <option value="quick">Quick — блоки, один сплит на 1/5</option>
-        <option value="balanced">Balanced — 100 → 20 → 5 → регистры</option>
-        <option value="deep">Deep — до одиночных регистров</option>
+        <option value="quick">{{ t("quickMode") }}</option>
+        <option value="balanced">{{ t("balancedMode") }}</option>
+        <option value="deep">{{ t("deepMode") }}</option>
       </select>
-      <label class="short">Размер блока (0 = авто)</label>
+      <label class="short">{{ t("blockSize") }}</label>
       <input v-model.number="form.batch" type="number" min="0" max="2000" :disabled="scanner.isRunning" />
     </div>
 
     <div class="form-row">
       <label />
       <button class="primary" :disabled="!canStart" @click="start">
-        ▶ Сканировать {{ form.end - form.start + 1 }} адресов
+        ▶ {{ t("scanAddresses") }} {{ form.end - form.start + 1 }} {{ t("addresses") }}
       </button>
       <span class="hint">
-        Timeouts не делятся; 3 подряд → стоп. Exception 01/03 → немедленный стоп.
+        {{ t("timeoutRules") }}
       </span>
     </div>
   </div>
