@@ -146,6 +146,16 @@ serializes them as JavaScript numbers.
 | `src/stores/` | Pinia stores |
 | `src/views/`, `src/components/` | UI |
 
+## Windows QA installers (PR #3)
+
+Before field acceptance, use the dedicated **Windows QA installers (no release)**
+GitHub Actions workflow. It produces NSIS EXE + MSI for Windows, captures
+SHA256 checksums and the source commit, and uploads a time-limited test artifact
+**without** creating a GitHub Release or a tag. See
+[WINDOWS_QA.md](WINDOWS_QA.md) and the
+[hardware acceptance checklist](FIELD_VALIDATION_v1.0.1.md).
+Both QA and official release builds verify version manifest consistency.
+
 ## Release process (E-06)
 
 Releases are automated by `.github/workflows/release.yml`:

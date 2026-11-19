@@ -143,6 +143,16 @@ CI перегенерирует биндинги и упадёт, если `src/
 | `src/stores/` | Сторы Pinia |
 | `src/views/`, `src/components/` | UI |
 
+## Тестовые Windows-инсталляторы (PR #3)
+
+До стендовых испытаний используйте GitHub Actions **Windows QA installers
+(no release)**. Он собирает NSIS EXE и MSI, формирует SHA256 и метаданные
+коммита, сохраняет тестовые файлы в артефакте CI, **не создавая**
+релизный тег и GitHub Release. Подробности:
+[WINDOWS_QA.ru.md](WINDOWS_QA.ru.md) и
+[протокол стендовых испытаний](FIELD_VALIDATION_v1.0.1.md).
+Перед сборкой QA и официального релиза проверяется согласованность версий.
+
 ## Релизный процесс (E-06)
 
 Релизы автоматизированы workflow `.github/workflows/release.yml`:
