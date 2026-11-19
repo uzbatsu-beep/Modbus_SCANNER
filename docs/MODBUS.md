@@ -109,8 +109,8 @@ transaction-id validation as TCP.
 | 0x06 | Write Single Register | write | manual console |
 | 0x0F | Write Multiple Coils | write | manual console |
 | 0x10 | Write Multiple Registers | write | manual console |
-| 0x16 | Mask Write Register | write | code supported in the codec |
-| 0x17 | Read/Write Multiple Registers | read/write | code supported in the codec |
+| 0x16 | Mask Write Register | write | reserved in `FunctionCode` only — no builder/parser yet |
+| 0x17 | Read/Write Multiple Registers | read/write | reserved in `FunctionCode` only — no builder/parser yet |
 | 0x2B | Read Device Identification (MEI 0x0E) | read | basic identification of found devices (P2-05) |
 
 The diagnostic codes (0x07, 0x08, 0x0B, 0x0C) and device identification 0x2B

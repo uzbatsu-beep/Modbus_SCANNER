@@ -62,7 +62,8 @@ console and register map).
 - [Development](docs/DEVELOPMENT.md) — setup, build, tests, conventions
 - [Research](docs/RESEARCH.md) — market/community/academic findings and sources
 - [v2.0 Platform research](docs/RESEARCH_V2.md) — gateways, web companion, IEC 62443, plugins
-- [Development plan](docs/PLAN.md) — prioritized phases v0.2 → v1.0
+- [Development plan](docs/PLAN.md) - prioritized phases v0.2 → v1.0
+- [Audit](docs/AUDIT.md) - git, reliability, documentation and transparency findings
 - [Roadmap](docs/ROADMAP.md) — current status and next steps
 - [Security](docs/SECURITY.md) — safety of writing to unknown devices
 
@@ -127,11 +128,12 @@ cargo test --lib         # protocol unit tests
 
 ## Status
 
-This is an early MVP: the protocol layer, transports, scanner engine and UI are
-implemented and the project compiles. Release **v0.1.1** covers v0.2 (field
-discovery, adaptive scan, IP classification, FC43, exports) and v0.3 (decoder,
-projects, live monitor, traffic log, loggers, scan diff, RU/EN UI and a light
-theme) — see [ROADMAP](docs/ROADMAP.md) and [PLAN](docs/PLAN.md).
+The protocol layer, transports, scanner engine and UI are implemented and the
+project compiles. Release **v0.1.1** covers the v0.2 and v0.3 feature sets;
+**v1.0** (headless CLI, local REST/WS API, device profiles, Modbus TLS,
+automated releases, generated IPC types, mock tests and 3-OS CI) is complete in
+`main` and pending a `v1.0.0` tag/release — see [ROADMAP](docs/ROADMAP.md) and
+[PLAN](docs/PLAN.md).
 
 ## License
 

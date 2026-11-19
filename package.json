@@ -18,7 +18,6 @@
     "build": "vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "lint": "eslint . --ext .vue,.ts,.tsx --fix",
     "typecheck": "vue-tsc --noEmit",
     "gen:types": "cd src-tauri && cargo run --bin gen_bindings"
   },

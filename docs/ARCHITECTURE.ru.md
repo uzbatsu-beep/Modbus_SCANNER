@@ -97,7 +97,7 @@ pub trait Transport: Send {
 
 ### 5. Фронтенд — `src/`
 
-- `views/` — четыре вкладки: Scan, Results, Manual, Settings.
+- `views/` — Scan, Results, Profiles, Diff, Traffic, Manual, Settings.
 - `stores/` — Pinia: состояние/журнал сканера, устройства, порты, настройки.
 - `api/mod.ts` — типизированные обёртки `invoke` и `listen` из `@tauri-apps/api`.
 - `types/ipc.ts` — зеркало Rust-типов; синхронизируется вручную (генератор схем
@@ -105,7 +105,8 @@ pub trait Transport: Send {
 
 ## Асинхронность и конкуренция
 
-- Tauri хранит состояние приложения (`AppState`: `ScannerHandle` + `Config` в мьютексе).
+- Tauri хранит состояние приложения (`AppState`: `Arc<ScannerHandle>`, `MonitorHandle`,
+  `TrafficLogHandle`, `LoggerHandle`, дескриптор локального API и `Config` в мьютексе).
 - `start_scan` планирует одну задачу tokio; IPC-вызов возвращается сразу.
 - Последовательный scan **обязан** быть последовательным — общая шина не
   поддерживает параллельные запросы.

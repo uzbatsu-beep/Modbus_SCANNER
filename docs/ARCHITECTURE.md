@@ -98,7 +98,7 @@ via `tauri::generate_handler!`.
 
 ### 5. Frontend — `src/`
 
-- `views/` — four tabs: Scan, Results, Manual, Settings.
+- `views/` — Scan, Results, Profiles, Diff, Traffic, Manual, Settings.
 - `stores/` — Pinia: scanner state/log, devices, serial ports, settings.
 - `api/mod.ts` — typed wrappers around `@tauri-apps/api/core` `invoke` and
   `@tauri-apps/api/event` `listen`.
@@ -107,7 +107,8 @@ via `tauri::generate_handler!`.
 
 ## Async and concurrency model
 
-- Tauri manages app state (`AppState`: `ScannerHandle` + `Config` in a mutex).
+- Tauri manages app state (`AppState`: `Arc<ScannerHandle>`, `MonitorHandle`,
+  `TrafficLogHandle`, `LoggerHandle`, local API handle and `Config` in a mutex).
 - `start_scan` spawns one tokio task; the IPC call returns immediately.
 - Serial scans **must** be sequential — a shared bus cannot multiplex requests.
 - IP scans are currently also executed sequentially by the engine; the

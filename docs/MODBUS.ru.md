@@ -110,8 +110,8 @@ transaction id, что и в TCP.
 | 0x06 | Write Single Register | запись | ручная консоль |
 | 0x0F | Write Multiple Coils | запись | ручная консоль |
 | 0x10 | Write Multiple Registers | запись | ручная консоль |
-| 0x16 | Mask Write Register | запись | поддержка в кодеке |
-| 0x17 | Read/Write Multiple Registers | чтение/запись | поддержка в кодеке |
+| 0x16 | Mask Write Register | запись | только в `FunctionCode`, сборщик/парсер не реализованы |
+| 0x17 | Read/Write Multiple Registers | чтение/запись | только в `FunctionCode`, сборщик/парсер не реализованы |
 | 0x2B | Read Device Identification (MEI 0x0E) | чтение | базовая идентификация найденных устройств (P2-05) |
 
 Диагностические коды (0x07, 0x08, 0x0B, 0x0C) и идентификация устройства 0x2B

@@ -11,10 +11,11 @@ rust-version = "1.77"
 
 [lib]
 name = "modbus_scanner_lib"
-# NOTE: cdylib/staticlib are needed for Tauri mobile; on the gnu toolchain
-# they break `cargo test` (STATUS_ENTRYPOINT_NOT_FOUND), so enable on demand:
-#   cargo build --features mobile-libs
-# crate-type = ["staticlib", "cdylib", "rlib"]
+# rlib only: the desktop app links through `main.rs`.
+# For Tauri mobile targets, replace this line manually with
+#   crate-type = ["staticlib", "cdylib", "rlib"]
+# (cdylib/staticlib break `cargo test` on the Windows-gnu toolchain, so they
+# are not enabled here; there is no `mobile-libs` Cargo feature).
 crate-type = ["rlib"]
 
 [build-dependencies]

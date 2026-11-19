@@ -183,11 +183,16 @@ impl ScannerHandle {
     /// Latest progress snapshot.
     pub fn progress(&self) -> ScanProgress {
         let results = self.results.read();
-        let total = results.stats.requests_sent + results.stats.timeouts;
+        let total = results.stats.requests_sent;
+        let done = (results.stats.responses_ok
+            + results.stats.responses_exception
+            + results.stats.timeouts
+            + results.stats.transport_errors)
+            .min(total);
         ScanProgress {
             status: *self.status_tx.borrow(),
             total,
-            done: total,
+            done,
             found: results.records.len() as u64,
             current: String::new(),
             errors: results.stats.timeouts + results.stats.transport_errors,
