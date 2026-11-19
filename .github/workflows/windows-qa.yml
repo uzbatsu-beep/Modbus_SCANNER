@@ -1,0 +1,107 @@
+name: Windows QA installers (no release)
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/windows-qa.yml"
+      - ".github/workflows/release.yml"
+      - "scripts/check-release-version.mjs"
+      - "package.json"
+      - "package-lock.json"
+      - "index.html"
+      - "src/**"
+      - "src-tauri/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-qa-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-qa:
+    name: Windows QA (EXE + MSI, no publishing)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout exact source commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install locked frontend dependencies
+        run: npm ci
+
+      - name: Verify manifest versions
+        run: node scripts/check-release-version.mjs
+
+      - name: Frontend typecheck
+        run: npm run typecheck
+
+      - name: Rust protocol regression tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Build QA Windows installers (NSIS and MSI)
+        run: npm run tauri build -- --bundles nsis,msi
+
+      - name: Stage QA installers, SHA256 and build metadata
+        id: prepare
+        shell: pwsh
+        env:
+          SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $root = "src-tauri/target/release/bundle"
+          $files = @(Get-ChildItem -Path $root -Recurse -File | Where-Object { $_.Extension -in @(".exe", ".msi") })
+          $exe = @($files | Where-Object { $_.Extension -eq ".exe" })
+          $msi = @($files | Where-Object { $_.Extension -eq ".msi" })
+          if ($files.Count -ne 2 -or $exe.Count -ne 1 -or $msi.Count -ne 1) {
+            throw "Expected exactly one NSIS .exe and one MSI .msi; found $($files.Count) files"
+          }
+          New-Item -ItemType Directory -Force -Path "qa-dist" | Out-Null
+          $checksums = @()
+          foreach ($file in $files) {
+            if (-not $file.Name.Contains("_$version")) {
+              throw "Installer version mismatch: $($file.Name) (expected $version)"
+            }
+            Copy-Item -LiteralPath $file.FullName -Destination "qa-dist/$($file.Name)"
+            $hash = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $checksums += "$hash  $($file.Name)"
+          }
+          $checksums | Set-Content -Path "qa-dist/SHA256SUMS.txt" -Encoding utf8
+          @(
+            "MODBUS SCANNER - UNVALIDATED TEST BUILD / НЕПРОВЕРЕННАЯ ТЕСТОВАЯ СБОРКА"
+            "This is not a GitHub Release. Do not deploy on a live OT process."
+            "Version: $version"
+            "Source commit: $env:SOURCE_SHA"
+            "GitHub run: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/actions/runs/$env:GITHUB_RUN_ID"
+            "Built: $(Get-Date -AsUTC -Format o)"
+            "Validation: automated tests only; physical RS-485 validation required"
+            "See docs/FIELD_VALIDATION_v1.0.1.md"
+          ) | Set-Content -Path "qa-dist/BUILD-INFO.txt" -Encoding utf8
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Get-ChildItem "qa-dist" | Select-Object Name, Length | Format-Table | Out-String | Write-Host
+
+      - name: Upload Windows QA bundle (no release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: modbus-scanner-v${{ steps.prepare.outputs.version }}-windows-qa-${{ github.run_number }}
+          path: qa-dist/*
+          if-no-files-found: error
+          retention-days: 14
