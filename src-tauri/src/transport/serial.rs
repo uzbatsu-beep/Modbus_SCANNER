@@ -111,9 +111,33 @@ pub struct SerialTransport {
     mode: SerialMode,
 }
 
+/// Modbus Serial Line specification: at <=19200 baud t3.5 is 3.5 character times;
+/// above 19200 baud the recommended fixed delay is 1.75 ms.
+pub fn required_rtu_gap(baud_rate: u32, data_bits: DataBitsSerde, parity: ParitySerde, stop_bits: StopBitsSerde) -> Duration {
+    if baud_rate > 19_200 {
+        return Duration::from_micros(1_750);
+    }
+    let data = match data_bits {
+        DataBitsSerde::Five => 5u64,
+        DataBitsSerde::Six => 6,
+        DataBitsSerde::Seven => 7,
+        DataBitsSerde::Eight => 8,
+    };
+    let parity_bit = if parity == ParitySerde::None { 0 } else { 1 };
+    let stop = if stop_bits == StopBitsSerde::Two { 2 } else { 1 };
+    let bits_per_character = 1u64 + data + parity_bit + stop;
+    let baud = u64::from(baud_rate.max(1));
+    Duration::from_micros((bits_per_character * 3_500_000).div_ceil(baud))
+}
+
 impl SerialTransport {
     /// Open a serial port with the given parameters.
-    pub async fn open(config: SerialPortConfig, mode: SerialMode) -> TransportResult<Self> {
+    pub async fn open(mut config: SerialPortConfig, mode: SerialMode) -> TransportResult<Self> {
+        if mode == SerialMode::Rtu {
+            config.frame_gap = config.frame_gap.max(required_rtu_gap(
+                config.baud_rate, config.data_bits, config.parity, config.stop_bits,
+            ));
+        }
         let builder = tokio_serial::new(&config.port_name, config.baud_rate)
             .data_bits(config.data_bits.into())
             .parity(config.parity.into())
@@ -134,20 +158,20 @@ impl SerialTransport {
     /// Read raw bytes until a frame end condition is met:
     /// - RTU: no fixed terminator — use the silent interval (no new bytes for N ms);
     /// - ASCII: read until CRLF (b'\r' b'\n').
-    async fn read_frame_raw(&mut self, quiet_ms: u64) -> TransportResult<Vec<u8>> {
-        let quiet = Duration::from_millis(quiet_ms);
+    async fn read_frame_raw(&mut self, quiet: Duration) -> TransportResult<Vec<u8>> {
         let mut tmp = [0u8; 512];
 
         loop {
             let wait = tokio::time::timeout(quiet, self.stream.read(&mut tmp)).await;
             match wait {
                 Err(_) => {
-                    // silent interval elapsed — RTU frame complete (or nothing came)
-                    if !self.rx_buf.is_empty() {
-                        let frame = std::mem::take(&mut self.rx_buf);
-                        return Ok(frame);
+                    // Silence terminates an RTU response only AFTER bytes arrived.
+                    // Before the first byte (or while ASCII waits for CRLF), rely on
+                    // the outer Transport::transact response timeout.
+                    if self.mode == SerialMode::Rtu && !self.rx_buf.is_empty() {
+                        return Ok(std::mem::take(&mut self.rx_buf));
                     }
-                    return Err(TransportError::Timeout(quiet));
+                    continue;
                 }
                 Ok(Err(e)) => return Err(TransportError::Io(e)),
                 Ok(Ok(0)) => return Err(TransportError::Closed),
@@ -211,12 +235,34 @@ impl Transport for SerialTransport {
     }
 
     async fn recv_raw(&mut self, _expected_hint: usize) -> TransportResult<Vec<u8>> {
-        // RTU: 5 ms of silence = frame end (scanner-oriented, works well up to 115200).
-        // ASCII: CRLF terminator.
-        let quiet_ms = match self.mode {
-            SerialMode::Rtu => 5,
-            SerialMode::Ascii => 5,
+        // RTU: at least t3.5 of silence ends the frame, even at low baud rates.
+        // ASCII: wait for CRLF; the outer response timeout bounds the wait.
+        let quiet = match self.mode {
+            SerialMode::Rtu => self.config.frame_gap.max(Duration::from_millis(5)),
+            SerialMode::Ascii => Duration::from_millis(5),
         };
-        self.read_frame_raw(quiet_ms).await
+        self.read_frame_raw(quiet).await
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rtu_gap_is_based_on_actual_character_duration() {
+        assert_eq!(
+            required_rtu_gap(1_200, DataBitsSerde::Eight, ParitySerde::None, StopBitsSerde::One),
+            Duration::from_micros(29_167)
+        );
+        assert_eq!(
+            required_rtu_gap(9_600, DataBitsSerde::Eight, ParitySerde::Even, StopBitsSerde::One),
+            Duration::from_micros(4_011)
+        );
+        assert_eq!(
+            required_rtu_gap(38_400, DataBitsSerde::Eight, ParitySerde::None, StopBitsSerde::One),
+            Duration::from_micros(1_750)
+        );
     }
 }

@@ -87,6 +87,41 @@ pub trait ScanStrategy: Send {
     }
 }
 
+/// A single existing device over any supported transport (serial or IP).
+pub struct SingleDeviceStrategy {
+    target: DeviceTarget,
+    params: ScanParams,
+    fc_pos: usize,
+}
+
+impl ScanStrategy for SingleDeviceStrategy {
+    fn total(&self) -> u64 {
+        self.params.probe_functions.len() as u64
+    }
+
+    fn next_item(&mut self) -> Option<WorkItem> {
+        while let Some(&function) = self.params.probe_functions.get(self.fc_pos) {
+            self.fc_pos += 1;
+            if let Some(pdu) = probe_pdu(function) {
+                return Some(WorkItem::Probe {
+                    target: self.target.clone(),
+                    function,
+                    pdu,
+                });
+            }
+        }
+        None
+    }
+
+    fn on_device_found(&mut self, target: &DeviceTarget) -> Vec<WorkItem> {
+        self.params.register_plan.iter().filter_map(|r| register_work(target, r)).collect()
+    }
+
+    fn stop_on_found(&self) -> bool {
+        self.params.stop_on_first
+    }
+}
+
 /// Serial bus scan: unit ids from..=to on one port.
 pub struct UnitIdStrategy {
     port: super::types::SerialPortParams,
@@ -681,15 +716,16 @@ impl IpRangeStrategy {
         if mask > 32 {
             return None;
         }
-        let base: Ipv4Addr = addr.parse().ok()?;
-        let mask_bits = u32::MAX << (32 - mask);
-        if mask == 0 {
+        // A CIDR must never allocate an unbounded address vector (e.g. /8).
+        // At most /16 is allowed, matching parse_range()'s 65_536 cap.
+        if mask < 16 {
             return None;
         }
+        let base: Ipv4Addr = addr.parse().ok()?;
+        let mask_bits = u32::MAX << (32 - mask);
         let start = u32::from(base) & mask_bits;
         let end = start | !mask_bits;
-        let list = (start..=end).filter_map(|v| Ipv4Addr::from(v).to_string().parse::<Ipv4Addr>().ok().or(Some(Ipv4Addr::from(v)))).collect();
-        Some(list)
+        Some((start..=end).map(Ipv4Addr::from).collect())
     }
 
     /// Parse "from"-"to" into an address list.
@@ -778,6 +814,15 @@ impl ScanStrategy for IpRangeStrategy {
 }
 
 fn register_work(target: &DeviceTarget, r: &RegisterRange) -> Option<WorkItem> {
+    let max_qty = match r.function {
+        0x01 | 0x02 => 2_000u16,
+        0x03 | 0x04 => 125u16,
+        _ => return None,
+    };
+    if r.quantity == 0 || r.quantity > max_qty ||
+        (r.start as u32 + r.quantity as u32) > 65_536 {
+        return None;
+    }
     let pdu = match r.function {
         0x01 => request::read_coils(r.start, r.quantity),
         0x02 => request::read_discrete_inputs(r.start, r.quantity),
@@ -802,10 +847,19 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
             to,
             port,
             mode,
-        } => Ok(Box::new(UnitIdStrategy::new(port, mode, from, to, params))),
+        } => {
+            if !(1..=247).contains(&from) || !(1..=247).contains(&to) {
+                return Err("serial unit IDs must be 1..=247 (0 is broadcast)".into());
+            }
+            Ok(Box::new(UnitIdStrategy::new(port, mode, from, to, params)))
+        },
         ScanTarget::SerialAuto { sweep } => {
             if sweep.baud_rates.is_empty() || sweep.framings.is_empty() || sweep.discovery_unit_ids.is_empty() {
                 return Err("baud rates, framings and discovery unit ids must not be empty".into());
+            }
+            if sweep.discovery_unit_ids.iter().any(|&id| !(1..=247).contains(&id))
+                || !(1..=247).contains(&sweep.unit_from) || !(1..=247).contains(&sweep.unit_to) {
+                return Err("serial unit IDs must be 1..=247 (0 is broadcast)".into());
             }
             Ok(Box::new(BaudSweepStrategy::new(sweep, params)))
         }
@@ -813,8 +867,8 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
             if scan.start > scan.end {
                 return Err("register scan start must not exceed end".into());
             }
-            if crate::modbus::frame::FunctionCode::from_u8(scan.function).is_none() {
-                return Err(format!("unsupported scan function {:#04x}", scan.function));
+            if !matches!(scan.function, 0x01..=0x04) {
+                return Err(format!("register scan only supports read FC01..FC04 (got {:#04x})", scan.function));
             }
             Ok(Box::new(RegisterScanStrategy::new(scan, params)))
         }
@@ -846,21 +900,14 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
             };
             Ok(Box::new(IpRangeStrategy::new(kind, port, unit_ids, ips, params)))
         }
-        ScanTarget::SingleDevice {
-            target,
-            register_plan,
-        } => {
+        ScanTarget::SingleDevice { target, register_plan } => {
+            if matches!(target.kind, crate::modbus::common::TransportKind::Rtu |
+                crate::modbus::common::TransportKind::Ascii) && target.serial.is_none() {
+                return Err("serial params required for RTU/ASCII".into());
+            }
             let mut params = params;
             params.register_plan = register_plan;
-            let kind = match target.kind {
-                crate::modbus::common::TransportKind::Rtu => SerialMode::Rtu,
-                _ => SerialMode::Rtu,
-            };
-            let port = target.serial.clone().ok_or("serial params required")?;
-            let mut s = UnitIdStrategy::new(port, kind, target.unit_id, target.unit_id, params.clone());
-            // Note: SingleDevice uses probe_functions + register_plan
-            let _ = &mut s;
-            Ok(Box::new(s))
+            Ok(Box::new(SingleDeviceStrategy { target, params, fc_pos: 0 }))
         }
     }
 }
@@ -905,5 +952,64 @@ pub fn classify_response(function: u8, pdu: &[u8], rtt_us: u128) -> ProbeResult 
             function,
             message: e.to_string(),
         },
+    }
+}
+
+
+#[cfg(test)]
+mod reliability_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_oversized_cidr_before_allocation() {
+        assert!(IpRangeStrategy::parse_cidr("10.0.0.0/0").is_none());
+        assert!(IpRangeStrategy::parse_cidr("10.0.0.0/8").is_none());
+        assert!(IpRangeStrategy::parse_cidr("10.0.0.0/15").is_none());
+        assert_eq!(IpRangeStrategy::parse_cidr("10.20.30.0/24").unwrap().len(), 256);
+        assert_eq!(IpRangeStrategy::parse_cidr("10.20.30.9/32").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn single_device_tcp_needs_no_serial_configuration() {
+        let target = DeviceTarget {
+            kind: crate::modbus::common::TransportKind::Tcp,
+            endpoint: "192.168.0.10".into(),
+            port: Some(502),
+            unit_id: 1,
+            serial: None,
+            serial_mode: None,
+        };
+        let mut strategy = build_strategy(
+            ScanTarget::SingleDevice { target, register_plan: Vec::new() },
+            ScanParams::default(),
+        ).unwrap();
+        assert!(matches!(strategy.next_item(), Some(WorkItem::Probe { .. })));
+    }
+
+    #[test]
+    fn register_scan_rejects_write_functions_and_broadcast_discovery() {
+        let target = DeviceTarget {
+            kind: crate::modbus::common::TransportKind::Tcp,
+            endpoint: "127.0.0.1".into(),
+            port: Some(502),
+            unit_id: 1,
+            serial: None,
+            serial_mode: None,
+        };
+        let scan = RegisterScanParams {
+            target, function: 0x10, start: 0, end: 10,
+            mode: RegisterScanMode::Balanced, batch: 0,
+        };
+        assert!(build_strategy(ScanTarget::RegisterScan { scan }, ScanParams::default()).is_err());
+        let port = super::super::types::SerialPortParams {
+            port_name: "COM3".into(), baud_rate: 9600,
+            data_bits: crate::transport::serial::DataBitsSerde::Eight,
+            parity: crate::transport::serial::ParitySerde::None,
+            stop_bits: crate::transport::serial::StopBitsSerde::One,
+        };
+        assert!(build_strategy(
+            ScanTarget::UnitIdRange { from: 0, to: 1, port, mode: SerialMode::Rtu },
+            ScanParams::default(),
+        ).is_err());
     }
 }
