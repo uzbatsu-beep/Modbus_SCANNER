@@ -201,6 +201,25 @@ export interface DeviceIdentification {
   objects: DeviceIdObject[];
 }
 
+export interface ProfileRegister {
+  function: number;
+  address: number;
+  name: string;
+  spec: DecodeSpec;
+  unit?: string | null;
+  description?: string | null;
+}
+
+export interface DeviceProfile {
+  id: string;
+  vendor: string;
+  product_code: string;
+  revision: string;
+  name: string;
+  description?: string | null;
+  registers: ProfileRegister[];
+}
+
 export interface TagDefinition {
   device_key: string;
   address: number;
@@ -494,6 +513,7 @@ export interface Config {
   export_dir?: string | null;
   export_format: string;
   tags?: TagDefinition[];
+  profiles?: DeviceProfile[];
 }
 
 /** Backend Config.last_serial uses transport::serial::SerialPortConfig. */

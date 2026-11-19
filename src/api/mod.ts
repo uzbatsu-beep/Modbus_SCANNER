@@ -9,6 +9,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type {
   Config,
   DecodeResult,
+  DeviceProfile,
   DecodeSpec,
   DecodedValue,
   ExportFormat,
@@ -29,6 +30,7 @@ import type {
   ScanTarget,
   ScanParams,
   SerialPortInfo,
+  TagDefinition,
   TestSerialResult,
   TrafficRecord,
   WriteRequest,
@@ -95,6 +97,20 @@ export const api = {
   monitor: {
     onUpdate: (cb: (u: MonitorUpdate) => void) =>
       listen<MonitorUpdate>("monitor:update", (e) => cb(e.payload)),
+  },
+
+  profiles: {
+    list: () => invoke<DeviceProfile[]>("get_profiles"),
+    save: (profiles: DeviceProfile[]) =>
+      invoke<DeviceProfile[]>("save_profiles", { profiles }),
+    importFile: (path: string, format: "csv" | "json") =>
+      invoke<DeviceProfile[]>("import_profiles", { path, format }),
+    fromDevice: (deviceKey: string) =>
+      invoke<DeviceProfile>("create_profile_from_device", { deviceKey }),
+    suggest: (deviceKey: string) =>
+      invoke<DeviceProfile | null>("suggest_profile", { deviceKey }),
+    apply: (deviceKey: string, profileId: string) =>
+      invoke<TagDefinition[]>("apply_profile", { deviceKey, profileId }),
   },
 
   modbus: {

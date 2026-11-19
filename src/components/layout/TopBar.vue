@@ -11,6 +11,7 @@ const devices = useDevicesStore();
 const links = computed(() => [
   { to: "/", label: t("navScan") },
   { to: "/results", label: t("navResults") },
+  { to: "/profiles", label: t("navProfiles") },
   { to: "/diff", label: t("navDiff") },
   { to: "/traffic", label: t("navTraffic") },
   { to: "/manual", label: t("navManual") },

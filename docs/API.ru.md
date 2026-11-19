@@ -40,6 +40,22 @@
 | `stop_api_server` | — | `void` |
 | `get_api_status` | — | `number \| null` (порт) |
 
+### Профили устройств (E-04)
+
+| Команда | Аргументы | Результат |
+|---------|-----------|-----------|
+| `get_profiles` | — | `DeviceProfile[]` |
+| `save_profiles` | `{ profiles: DeviceProfile[] }` | `DeviceProfile[]` |
+| `import_profiles` | `{ path: string, format: "csv"\|"json" }` | `DeviceProfile[]` (сливаются в конфиг) |
+| `create_profile_from_device` | `{ deviceKey: string }` | `DeviceProfile` (заготовка по FC43) |
+| `suggest_profile` | `{ deviceKey: string }` | `DeviceProfile \| null` (по vendor/product/revision) |
+| `apply_profile` | `{ deviceKey: string, profileId: string }` | `TagDefinition[]` (заменяет теги устройства) |
+
+`DeviceProfile = { id, vendor, product_code, revision, name, description?,
+registers: ProfileRegister[] }`; `ProfileRegister = { function, address, name,
+spec: DecodeSpec, unit?, description? }`. Сопоставление identity регистронезависимо,
+пустое поле профиля — wildcard. Пример CSV: `examples/profiles.csv`.
+
 ### Последовательные порты
 
 **`list_serial_ports`** → `SerialPortInfo[]`

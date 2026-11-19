@@ -40,6 +40,23 @@ Tauri commands for the in-app server: `start_api_server(port)`, `stop_api_server
 | `stop_api_server` | — | `void` |
 | `get_api_status` | — | `number \| null` (listening port) |
 
+### Device profiles (E-04)
+
+| Command | Args | Returns |
+|---------|------|---------|
+| `get_profiles` | — | `DeviceProfile[]` |
+| `save_profiles` | `{ profiles: DeviceProfile[] }` | `DeviceProfile[]` |
+| `import_profiles` | `{ path: string, format: "csv"\|"json" }` | `DeviceProfile[]` (merged into config) |
+| `create_profile_from_device` | `{ deviceKey: string }` | `DeviceProfile` (skeleton from FC43 identity) |
+| `suggest_profile` | `{ deviceKey: string }` | `DeviceProfile \| null` (matched by vendor/product/revision) |
+| `apply_profile` | `{ deviceKey: string, profileId: string }` | `TagDefinition[]` (replaces tags for that device) |
+
+`DeviceProfile = { id, vendor, product_code, revision, name, description?,
+registers: ProfileRegister[] }`; `ProfileRegister = { function, address, name,
+spec: DecodeSpec, unit?, description? }`. Identity matching is case-insensitive
+and an empty profile field acts as a wildcard. A sample CSV is in
+`examples/profiles.csv`.
+
 ### Serial ports
 
 **`list_serial_ports`** → `SerialPortInfo[]`

@@ -3,12 +3,14 @@ import { t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 
 import { api } from "@/api/mod";
-import type { ExportFormat } from "@/types/ipc";
+import type { DeviceProfile, ExportFormat } from "@/types/ipc";
 import { FC_NAMES } from "@/types/ipc";
 import { useDevicesStore } from "@/stores/devices";
+import { useSettingsStore } from "@/stores/settings";
 import RegisterInspector from "@/components/results/RegisterInspector.vue";
 
 const devices = useDevicesStore();
+const settings = useSettingsStore();
 
 const objectNames: Record<number, string> = {
   0: "VendorName",
@@ -25,6 +27,28 @@ const exporting = ref(false);
 const exportMsg = ref<string | null>(null);
 
 const dev = computed(() => devices.selected);
+
+const suggestedProfile = ref<DeviceProfile | null>(null);
+watch(
+  () => dev.value?.key,
+  async (key) => {
+    suggestedProfile.value = null;
+    if (!key || !dev.value?.device_identification) return;
+    try {
+      suggestedProfile.value = await api.profiles.suggest(key);
+    } catch {
+      suggestedProfile.value = null;
+    }
+  },
+  { immediate: true }
+);
+
+async function applySuggestedProfile() {
+  if (!dev.value || !suggestedProfile.value) return;
+  await api.profiles.apply(dev.value.key, suggestedProfile.value.id);
+  await settings.load();
+  await devices.refresh();
+}
 
 // Up to two registers can be selected for the interactive decoder.
 const selectedAddresses = ref<number[]>([]);
@@ -120,6 +144,13 @@ async function exportResults() {
           conformity level: {{ dev.device_identification.conformity_level }} ·
           {{ dev.device_identification.more_follows ? t("moreFollows") : t("fullAnswer") }}
         </div>
+      </div>
+
+      <div v-if="suggestedProfile" class="section">
+        <div class="section-title">{{ t("applyProfile") }}: {{ suggestedProfile.name }}</div>
+        <button class="primary" @click="applySuggestedProfile">
+          {{ t("applyProfile") }} ({{ suggestedProfile.registers.length }} {{ t("registers") }})
+        </button>
       </div>
 
       <div class="section">

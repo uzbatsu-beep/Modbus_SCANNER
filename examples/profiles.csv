@@ -1,0 +1,6 @@
+vendor,product_code,revision,name,function,address,tag_name,data_type,byte_order,multiplier,divider,offset,unit,description
+GENERIC,METER,1.0,Generic energy meter,3,0x0064,Voltage_L1,float32,abcd,1,1,0,V,Phase 1 voltage
+GENERIC,METER,1.0,Generic energy meter,3,0x0066,Voltage_L2,float32,abcd,1,1,0,V,Phase 2 voltage
+GENERIC,METER,1.0,Generic energy meter,3,0x0068,Voltage_L3,float32,abcd,1,1,0,V,Phase 3 voltage
+GENERIC,METER,1.0,Generic energy meter,3,0x0074,Energy_kWh,uint32,abcd,1,10,0,kWh,Counter in 0.1 kWh steps
+GENERIC,PLC,1.0,Generic PLC,3,0x0000,Status_Word,uint16,abcd,1,1,0,,Device status bits

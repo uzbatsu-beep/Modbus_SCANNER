@@ -81,6 +81,12 @@ pub fn run() {
             commands::modbus_cmd::send_raw_frame,
             commands::modbus_cmd::inspect_registers,
             commands::modbus_cmd::decode_register,
+            commands::profiles::get_profiles,
+            commands::profiles::save_profiles,
+            commands::profiles::import_profiles,
+            commands::profiles::create_profile_from_device,
+            commands::profiles::suggest_profile,
+            commands::profiles::apply_profile,
             // config
             commands::config::get_config,
             commands::config::save_config,

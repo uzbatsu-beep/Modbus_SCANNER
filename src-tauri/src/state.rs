@@ -9,8 +9,8 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 
 use crate::scanner::types::{
-    now_ms, LogFormat, LoggerConfig, LoggerStatus, MonitorValueState, RotationMode, ScanParams,
-    TagDefinition, TrafficRecord,
+    now_ms, DeviceProfile, LogFormat, LoggerConfig, LoggerStatus, MonitorValueState,
+    RotationMode, ScanParams, TagDefinition, TrafficRecord,
 };
 
 /// Shared application state, injected into Tauri as managed state.
@@ -315,6 +315,9 @@ pub struct Config {
     /// Named register tags (P3-03), persisted with the configuration.
     #[serde(default)]
     pub tags: Vec<TagDefinition>,
+    /// Reusable device profiles (E-04), persisted with the configuration.
+    #[serde(default)]
+    pub profiles: Vec<DeviceProfile>,
 }
 
 impl Default for Config {
@@ -331,6 +334,7 @@ impl Default for Config {
             export_dir: None,
             export_format: "csv".into(),
             tags: Vec::new(),
+            profiles: Vec::new(),
         }
     }
 }

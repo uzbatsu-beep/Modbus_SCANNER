@@ -66,7 +66,8 @@ P2-03 ✅ выполнено (адаптивный скан регистров Q
 **v1.0:** E-01 ✅ (движок и монитор отделены от Tauri через `EventSink`,
 `TrafficSink` и `SampleSink`; `bridge.rs` — единственный модуль, знающий про Tauri),
 E-02 ✅ (headless `scan`-CLI с JSON-отчётом через `EventSink::null()`),
-E-03 ✅ (локальный REST + WebSocket API на 127.0.0.1, общий движок, только loopback).
+E-03 ✅ (локальный REST + WebSocket API на 127.0.0.1, общий движок, только loopback),
+E-04 ✅ (профили устройств: импорт CSV/JSON, поиск по FC43, автоподстановка тегов).
 
 **v0.3:** P3-01 ✅ (декодер int/uint/float32/ASCII × 4 byte order),
 P3-02 ✅ (помеченные гипотезы float), P3-03 ✅ (именованные теги с масштабом в

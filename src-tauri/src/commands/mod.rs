@@ -11,6 +11,7 @@
 
 pub mod config;
 pub mod modbus_cmd;
+pub mod profiles;
 pub mod scanner;
 pub mod serial;
 pub mod system;

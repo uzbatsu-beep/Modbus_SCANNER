@@ -262,6 +262,81 @@ pub enum ProbeResult {
     },
 }
 
+/// One register description inside a reusable device profile (E-04).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileRegister {
+    pub function: u8,
+    pub address: u16,
+    pub name: String,
+    pub spec: DecodeSpec,
+    #[serde(default)]
+    pub unit: Option<String>,
+    #[serde(default)]
+    pub description: Option<String>,
+}
+
+/// A reusable register map matched by FC43 identity.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeviceProfile {
+    pub id: String,
+    pub vendor: String,
+    pub product_code: String,
+    pub revision: String,
+    pub name: String,
+    #[serde(default)]
+    pub description: Option<String>,
+    #[serde(default)]
+    pub registers: Vec<ProfileRegister>,
+}
+
+impl DeviceProfile {
+    /// Identity fields are case-insensitive; an empty profile field is a wildcard.
+    pub fn matches(&self, identity: &DeviceIdentification) -> bool {
+        let vendor = identity.vendor_name().unwrap_or("").trim().to_lowercase();
+        let product = identity.product_code().unwrap_or("").trim().to_lowercase();
+        let revision = identity.revision().unwrap_or("").trim().to_lowercase();
+        let matches_field = |expected: &str, actual: &str| {
+            expected.trim().is_empty() || expected.trim().to_lowercase() == actual
+        };
+        matches_field(&self.vendor, &vendor)
+            && matches_field(&self.product_code, &product)
+            && matches_field(&self.revision, &revision)
+    }
+
+    /// Build a skeleton profile from a discovered device's identity.
+    pub fn from_identity(identity: &DeviceIdentification) -> Self {
+        let vendor = identity.vendor_name().unwrap_or("unknown").to_string();
+        let product = identity.product_code().unwrap_or("unknown").to_string();
+        let revision = identity.revision().unwrap_or("").to_string();
+        let id = format!("{vendor}|{product}|{revision}").to_lowercase().replace(' ', "_");
+        let name = format!("{vendor} {product}");
+        Self {
+            id,
+            vendor,
+            product_code: product,
+            revision,
+            name,
+            description: None,
+            registers: Vec::new(),
+        }
+    }
+
+    /// Turn the profile's register descriptions into tags for one device.
+    pub fn to_tags(&self, device_key: &str) -> Vec<TagDefinition> {
+        self.registers
+            .iter()
+            .map(|r| TagDefinition {
+                device_key: device_key.to_string(),
+                address: r.address,
+                name: r.name.clone(),
+                spec: r.spec,
+                unit: r.unit.clone(),
+                description: r.description.clone(),
+            })
+            .collect()
+    }
+}
+
 /// A named register tag with decoding/scaling (P3-03).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TagDefinition {

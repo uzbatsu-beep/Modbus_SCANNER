@@ -13,6 +13,7 @@ const ru = {
   navTraffic: "Трафик / Traffic",
   navManual: "Ручной режим / Manual",
   navSettings: "Настройки / Settings",
+  navProfiles: "Профили / Profiles",
   brandSub: "RTU / ASCII / TCP / UDP",
 
   // Status bar
@@ -274,6 +275,20 @@ const ru = {
   tags: "тегов",
   snapshots: "снимков",
   loaded: "Загружен",
+  profilesTitle: "Профили устройств / Device profiles",
+  importFile: "Импорт файла",
+  createFromDevice: "Создать из устройства",
+  applyProfile: "Применить профиль",
+  selectProfile: "Профиль",
+  targetDevice: "Устройство",
+  registersCount: "Регистров",
+  noProfiles: "Профилей нет. Импортируйте CSV/JSON или создайте из устройства с FC43.",
+  imported: "импортировано",
+  applied: "применено тегов",
+  created: "профиль создан",
+  vendor: "Производитель",
+  productCode: "Код продукта",
+  revision: "Ревизия",
 } as const;
 
 export type TranslationKey = keyof typeof ru;
@@ -285,6 +300,7 @@ const en: Record<TranslationKey, string> = {
   navTraffic: "Traffic",
   navManual: "Manual",
   navSettings: "Settings",
+  navProfiles: "Profiles",
   brandSub: "RTU / ASCII / TCP / UDP",
 
   statusIdle: "idle",
@@ -532,6 +548,20 @@ const en: Record<TranslationKey, string> = {
   tags: "tags",
   snapshots: "snapshots",
   loaded: "Loaded",
+  profilesTitle: "Device profiles",
+  importFile: "Import file",
+  createFromDevice: "Create from device",
+  applyProfile: "Apply profile",
+  selectProfile: "Profile",
+  targetDevice: "Device",
+  registersCount: "Registers",
+  noProfiles: "No profiles. Import CSV/JSON or create one from an FC43-identified device.",
+  imported: "imported",
+  applied: "tags applied",
+  created: "profile created",
+  vendor: "Vendor",
+  productCode: "Product code",
+  revision: "Revision",
 };
 
 /** Translate a key into the active language. */

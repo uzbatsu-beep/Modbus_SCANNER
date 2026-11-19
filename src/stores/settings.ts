@@ -29,6 +29,7 @@ const DEFAULT_CONFIG: Config = {
   export_dir: null,
   export_format: "csv",
   tags: [],
+  profiles: [],
 };
 
 export const useSettingsStore = defineStore("settings", {
