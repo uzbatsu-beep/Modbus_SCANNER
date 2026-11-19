@@ -10,6 +10,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- Audit: progress counters no longer double-count timeouts; stale architecture/protocol docs, broken `lint` script and misleading Cargo comment corrected
+
+## [1.0.0] - 2026-11-19
+
 ### Added
 - E-08: in-memory MockTransport engine tests and CI matrix extended to macOS (v1.0 complete)
 - E-07: generated TypeScript IPC bindings from Rust via `ts-rs` (`npm run gen:types`, 67 files, facade, CI freshness check)
@@ -66,6 +71,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Bilingual documentation (EN/RU): README, architecture, protocol, scanning, API, development
 - GitHub Actions CI: frontend typecheck/build, backend check/tests on Windows and Linux
 
-[Unreleased]: https://github.com/uzbatsu-beep/Modbus_SCANNER/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/uzbatsu-beep/Modbus_SCANNER/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v1.0.0
 [0.1.1]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.1
 [0.1.0]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.0

@@ -1,6 +1,6 @@
 [package]
 name = "modbus-scanner"
-version = "0.1.1"
+version = "1.0.0"
 description = "Modbus RTU/ASCII/TCP/UDP scanner - cross-platform desktop tool"
 authors = ["uzbatsu-beep <uzbatsu@gmail.com>"]
 license = "GPL-3.0-only"

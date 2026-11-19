@@ -1,7 +1,7 @@
 {
   "name": "modbus-scanner",
   "private": true,
-  "version": "0.1.1",
+  "version": "1.0.0",
   "description": "Modbus RTU/ASCII/TCP/UDP scanner - cross-platform desktop tool",
   "license": "GPL-3.0-only",
   "repository": {

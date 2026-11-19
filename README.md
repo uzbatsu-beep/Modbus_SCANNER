@@ -130,10 +130,9 @@ cargo test --lib         # protocol unit tests
 
 The protocol layer, transports, scanner engine and UI are implemented and the
 project compiles. Release **v0.1.1** covers the v0.2 and v0.3 feature sets;
-**v1.0** (headless CLI, local REST/WS API, device profiles, Modbus TLS,
-automated releases, generated IPC types, mock tests and 3-OS CI) is complete in
-`main` and pending a `v1.0.0` tag/release — see [ROADMAP](docs/ROADMAP.md) and
-[PLAN](docs/PLAN.md).
+**v1.0.0** (headless CLI, local REST/WS API, device profiles, Modbus TLS,
+automated releases, generated IPC types, mock tests and 3-OS CI) is the current
+release — see [ROADMAP](docs/ROADMAP.md) and [PLAN](docs/PLAN.md).
 
 ## License
 
