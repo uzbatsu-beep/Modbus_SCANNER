@@ -116,3 +116,19 @@ Rust собранный тестовый бинарник завершается
 | `src/api/mod.ts` | Обёртки invoke/listen |
 | `src/stores/` | Сторы Pinia |
 | `src/views/`, `src/components/` | UI |
+
+## Релизный процесс (E-06)
+
+Релизы автоматизированы workflow `.github/workflows/release.yml`:
+
+1. Поднимите версию в `package.json`, `package-lock.json`, `Cargo.toml`,
+   `Cargo.lock` и `tauri.conf.json`; добавьте секцию в `CHANGELOG.md`.
+2. Закоммитьте и запушьте в `main`, затем создайте и запушьте аннотированный
+   тег `vX.Y.Z`.
+3. Workflow собирает Windows-инсталляторы на `windows-latest`
+   (`npm ci` → `npm run tauri build`), загружает их как артефакт и создаёт
+   GitHub Release по тегу с файлами MSI и NSIS.
+
+Локальный аналог: `npm run tauri build`; артефакты — в
+`src-tauri/target/release/bundle/{msi,nsis}/`. На машине пользователя нужен
+WebView2 Runtime.

@@ -117,3 +117,18 @@ schema. Update docs/API + ROADMAP when the contract changes.
 | `src/api/mod.ts` | invoke/listen wrappers |
 | `src/stores/` | Pinia stores |
 | `src/views/`, `src/components/` | UI |
+
+## Release process (E-06)
+
+Releases are automated by `.github/workflows/release.yml`:
+
+1. Bump the version in `package.json`, `package-lock.json`, `Cargo.toml`,
+   `Cargo.lock` and `tauri.conf.json`; add a `CHANGELOG.md` section.
+2. Commit and push to `main`, then create and push an annotated tag `vX.Y.Z`.
+3. The workflow builds the Windows installers on `windows-latest`
+   (`npm ci` → `npm run tauri build`), uploads them as an artifact, and creates
+   a GitHub Release from the tag with the MSI and NSIS files attached.
+
+Local equivalent: `npm run tauri build`; artifacts are in
+`src-tauri/target/release/bundle/{msi,nsis}/`. The Windows target requires
+WebView2 Runtime on the end user's machine.

@@ -68,7 +68,8 @@ P2-03 ✅ выполнено (адаптивный скан регистров Q
 E-02 ✅ (headless `scan`-CLI с JSON-отчётом через `EventSink::null()`),
 E-03 ✅ (локальный REST + WebSocket API на 127.0.0.1, общий движок, только loopback),
 E-04 ✅ (профили устройств: импорт CSV/JSON, поиск по FC43, автоподстановка тегов),
-E-05 ✅ (Modbus Security: TLS на порту 802, корневые CA webpki, опциональный mTLS).
+E-05 ✅ (Modbus Security: TLS на порту 802, корневые CA webpki, опциональный mTLS),
+E-06 ✅ (релиз по тегу через GitHub Actions с ассетами MSI/NSIS).
 
 **v0.3:** P3-01 ✅ (декодер int/uint/float32/ASCII × 4 byte order),
 P3-02 ✅ (помеченные гипотезы float), P3-03 ✅ (именованные теги с масштабом в

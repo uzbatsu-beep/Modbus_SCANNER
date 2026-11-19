@@ -67,7 +67,8 @@ per-probe log ✅ done. v0.2 is complete.
 E-02 ✅ (headless `scan` CLI with JSON report; uses `EventSink::null()`),
 E-03 ✅ (local REST + WebSocket API on 127.0.0.1, shared engine, loopback only),
 E-04 ✅ (device profiles: CSV/JSON import, FC43 identity matching, auto tag setup),
-E-05 ✅ (Modbus Security: TLS on port 802, webpki roots, optional mutual TLS).
+E-05 ✅ (Modbus Security: TLS on port 802, webpki roots, optional mutual TLS),
+E-06 ✅ (tag-triggered GitHub Actions release with MSI/NSIS assets).
 
 **v0.3:** P3-01 ✅ (decoder: int/uint/float32/ASCII × 4 byte orders),
 P3-02 ✅ (labelled float hypotheses), P3-03 ✅ (named tags with scaling, stored
