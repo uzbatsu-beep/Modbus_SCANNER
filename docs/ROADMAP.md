@@ -17,7 +17,7 @@
 | **v0.1.0** — MVP | ✅ релиз | Протокол RTU/ASCII/TCP/UDP, транспорты, движок сканера, UI, экспорт, документация |
 | **v0.2** — Field Discovery | ✅ в v0.1.1 | Автосвип baud/чётности, адаптивный register scan, классификация IP, FC43, экспорт по устройству, валидация MBAP tx id, выбор ADU, журнал зондов |
 | **v0.3** — Decode & Monitor | ✅ в v0.1.1 | Декодер типов и byte order, именованные теги, проекты с историей, live-мониторинг и тренды, raw TX/RX-журнал, файловые логгеры, diff сканов, RU/EN UI и светлая тема |
-| **v1.0** — Ecosystem & Automation | 🔄 в работе (E-01 готово) | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, тесты и CI |
+| **v1.0** — Ecosystem & Automation | 🔄 в работе (E-01, E-02 готовы) | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, тесты и CI |
 | **v1.1** — Diagnostics | 📋 запланирован | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting |
 | **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
 | **v2.0** — Platform | 💡 исследование | Шлюзы MQTT/OPC UA/REST/BACnet, web-компаньон, политики IEC 62443, плагины |
@@ -44,7 +44,7 @@
 | ID | Задача | Почему (источник) | Оценка | Зависимости |
 |----|--------|-------------------|--------|-------------|
 | E-01 ✅ | Выделить ядро движка от `tauri::AppHandle`: событийный адаптер (`EventSink`) вместо прямого `app.emit` | Готово: `EventSink`, `TrafficSink`, `SampleSink` и `bridge.rs`; ядро не содержит `tauri::` | L | — |
-| E-02 | Headless CLI: `modbus-scanner scan --rtu COM3 --sweep --json > report.json` | Скриптинг и CI-проверки, modpoll/pymodbus-ниша в [RESEARCH](RESEARCH.md) | M | E-01 |
+| E-02 ✅ | Headless CLI: `modbus-scanner scan --port COM3 --auto --output report.json` | Готово: JSON в stdout/файл, serial-auto и TCP/UDP-цели, общий движок через `EventSink` | M | E-01 |
 | E-03 | Локальный REST + WebSocket API (`127.0.0.1`, без авторизации по умолчанию, только read) | Интеграции в стек Modbus Logic / MQTT-шлюзы | L | E-01 |
 | E-04 | Профили устройств: библиотека известных register map, импорт CSV/JSON, автоподстановка декодера по FC43 | Большинство пользователей застревает на «есть устройство, нет документации» | M | P3-01, P3-04 |
 | E-05 | Modbus Security (TLS, порт 802, X.509) — исследование и MVP-поддержка | Официальная [спецификация Modbus Organization](https://modbus.org/modbus-specifications) | L | — |

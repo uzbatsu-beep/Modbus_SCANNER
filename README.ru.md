@@ -76,6 +76,27 @@ npm install
 npm run tauri dev        # запуск Vite + окна Tauri
 ```
 
+### Headless CLI
+
+Тот же движок работает без GUI: `scan` печатает JSON-отчёт (или пишет его в файл
+через `--output`):
+
+```bash
+# последовательная шина, авто-свип скорости/чётности
+src-tauri/target/release/modbus-scanner.exe scan --port COM3 --auto --output report.json
+
+# подсеть Modbus TCP
+src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --tcp-port 502
+
+# RTU поверх TCP / UDP, свои тайминги
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --udp --udp-mbap
+```
+
+Полный список: `modbus-scanner scan --help`. Без подкоманды запускается десктопное
+приложение. CLI использует `EventSink` вместо Tauri, поэтому логика сканирования
+полностью общая.
+
 Production-сборка:
 
 ```bash

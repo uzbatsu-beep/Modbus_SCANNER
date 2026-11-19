@@ -205,6 +205,28 @@ impl ScannerHandle {
         *self.results.write() = results;
     }
 
+    /// Wait until the current scan reaches a terminal state (used by the CLI).
+    pub async fn wait_finished(&self, timeout: Duration) -> Result<ScanResults, String> {
+        let mut rx = self.status_tx.subscribe();
+        let deadline = Instant::now() + timeout;
+        loop {
+            {
+                let status = *rx.borrow_and_update();
+                if matches!(status, ScanStatus::Finished | ScanStatus::Stopped | ScanStatus::Failed) {
+                    return Ok(self.results());
+                }
+            }
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err("scan timeout exceeded".into());
+            }
+            tokio::time::timeout(remaining, rx.changed())
+                .await
+                .map_err(|_| "scan timeout exceeded".to_string())?
+                .map_err(|e| e.to_string())?;
+        }
+    }
+
     /// Start a new scan. Returns an error if one is already running.
     pub async fn start(
         &self,

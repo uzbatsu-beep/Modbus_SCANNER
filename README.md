@@ -76,6 +76,27 @@ npm install
 npm run tauri dev        # starts Vite + the Tauri window
 ```
 
+### Headless CLI
+
+The same engine also runs without the GUI. `scan` prints a JSON report (or writes
+it with `--output`):
+
+```bash
+# serial bus, auto baud/parity sweep, report to file
+src-tauri/target/release/modbus-scanner.exe scan --port COM3 --auto --output report.json
+
+# Modbus TCP subnet
+src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --tcp-port 502
+
+# raw RTU over TCP, UDP, custom timeouts
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --udp --udp-mbap
+```
+
+Run `modbus-scanner scan --help` for all options. With no subcommand the desktop
+app starts. The CLI uses an `EventSink` instead of Tauri, so GUI and CLI share
+exactly the same scanning logic.
+
 Production build:
 
 ```bash

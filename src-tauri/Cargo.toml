@@ -34,6 +34,7 @@ hex = "0.4"
 rand = "0.8"
 parking_lot = "0.12"
 async-trait = "0.1"
+clap = { version = "4", features = ["derive"] }
 
 [features]
 # by default Tauri runs in production mode

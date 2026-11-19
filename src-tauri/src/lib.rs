@@ -8,6 +8,7 @@
 //! - `state`  - shared application state (Mutex<AppState>)
 
 pub mod bridge;
+pub mod cli;
 pub mod commands;
 pub mod modbus;
 pub mod scanner;

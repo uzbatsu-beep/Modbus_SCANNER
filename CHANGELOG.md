@@ -11,6 +11,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- E-02: headless `scan` CLI with JSON reports, serial auto-sweep and TCP/UDP targets (same engine as GUI)
 - E-01: framework-agnostic scanner core (`EventSink`, `TrafficSink`, `SampleSink`); Tauri is isolated in `bridge.rs`, enabling a future CLI/headless mode
 
 ### Docs
