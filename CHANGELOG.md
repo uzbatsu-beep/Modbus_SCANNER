@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- RESEARCH_V2 §9: live registry data (crates.io/GitHub) on OPC UA, MQTT, BACnet and WASM libraries, GPL-3.0 licence compatibility and decisions for G-01…G-06
+
+### Changed
+- ROADMAP/AUDIT refreshed for the published v1.0.0; v1.1/v1.2 exit criteria and the v2.0 technology choices/order made explicit
+
 ### Fixed
 - Audit: progress counters no longer double-count timeouts; stale architecture/protocol docs, broken `lint` script and misleading Cargo comment corrected
 

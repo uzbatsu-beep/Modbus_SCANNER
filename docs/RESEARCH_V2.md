@@ -7,6 +7,9 @@
 policies, plugin architecture · **Method:** official standards bodies, GitHub,
 vendor documentation, industry blogs and community discussions via search.
 
+**Addendum (§9):** live registry snapshot (crates.io API + GitHub search,
+2026-11-19) backing the concrete library choices in the v2.0 backlog.
+
 ---
 
 ## 1. Market landscape / what gateways actually do
@@ -111,7 +114,73 @@ loading.
 | BACnet stack size | isolate behind a feature flag; consider mature crate |
 | WASM plugin sandbox limits hardware access | plugins only transform data; transports stay in core |
 
-## 8. Sources
+## 9. Technology selection — addendum (2026-11-19)
+
+The first pass answered *what* a v2.0 platform should do. This addendum answers
+*what we build it with*, using live registry data so the backlog in
+[ROADMAP.md](ROADMAP.md) rests on verifiable maintenance and licence facts.
+
+### 9.1 Candidate libraries (snapshot 2026-11-19)
+
+| Area | Crate / project | Version | Last release | Licence | Recent downloads | Verdict |
+|------|-----------------|---------|--------------|---------|------------------|---------|
+| OPC UA | [`async-opcua`](https://github.com/freeopcua/async-opcua) | 0.19.0 | 2026-07-18 | MPL-2.0 | 121k | **Chosen** — active async client+server, separate `server` feature |
+| OPC UA (legacy) | [`opcua`](https://github.com/locka99/opcua) | 0.12.0 | 2024-01-01 | MPL-2.0 | 27k | Rejected — no release in ~2 years (repo pushed 2025-04) |
+| MQTT | [`rumqttc`](https://github.com/bytebeamio/rumqtt) | 0.25.1 | 2025-11-21 | Apache-2.0 | 2.59M | **Chosen** — de-facto standard, rustls + WebSocket features |
+| MQTT (alt) | [`paho-mqtt`](https://github.com/eclipse/paho.mqtt.rust) | 0.14.0 | 2026-03-26 | EPL-2.0 | 392k | Backup only — EPL-2.0 patent terms need review |
+| BACnet | [`bacnet-rs`](https://github.com/bacnet-rs/bacnet-rs) | 0.3.2 | 2026-09-02 | MIT OR Apache-2.0 | 8k | **Watchlist** — maintained but pre-1.0, small community (~28★) |
+| BACnet (legacy) | [`bacnet`](https://github.com/BiancoRoyal/bacnet-rust) | 0.1.0 | 2018-05-14 | MPL-2.0 | 23 | Rejected — abandoned |
+| Sparkplug B | no mature Rust crate | — | — | — | — | **Own encoder** with [`prost`](https://github.com/tokio-rs/prost) 0.14.6; GitHub search found only 0–10★ prototypes |
+| WASM plugins | [`extism`](https://github.com/extism/extism) | 1.41.0 | 2026-10-09 | BSD-3-Clause | 239k | **Chosen** for G-06 (capability-based SDK) |
+| WASM runtime | [`wasmtime`](https://github.com/bytecodealliance/wasmtime) | 51.0.0-rc | 2026-11-19 | Apache-2.0 WITH LLVM-exception | 13.4M | **Chosen** as runtime, but pin a *stable* release, not an RC |
+| Modbus (reference only) | [`tokio-modbus`](https://github.com/slowtec/tokio-modbus) | 0.17.0 | 2025-10-22 | MIT OR Apache-2.0 | 477k | Not used — the own-stack rule is unchanged |
+
+### 9.2 Decisions mapped to the backlog
+
+| ID | Decision | Rationale |
+|----|----------|-----------|
+| G-01 | Pure core logic, no new dependencies | Policy engine is logic, not I/O; must be testable without hardware |
+| G-02 | `rumqttc` + `prost`; local broker, opt-in publish | No mature Sparkplug B Rust library: JSON path first, Protobuf second, own thin codec |
+| G-03 | `async-opcua` in server mode, `server` feature only | Active upstream; start with None/Sign security, document the X.509 workflow |
+| G-04 | Vue 3 + the existing REST/WS API; no new backend | Lowest risk, reuses the v1.0 IPC contract |
+| G-05 | Defer; track `bacnet-rs` until 1.0 or a contributing community | Pre-1.0 stack in a safety-adjacent path is a supply-chain risk |
+| G-06 | In-tree stable traits now (E-01 seams), `extism` + pinned `wasmtime` later | No raw dylib ABI; WASM capabilities match our data-transform-only plugin model |
+
+### 9.3 Licence compatibility (GPL-3.0 application)
+
+MPL-2.0 (`async-opcua`), Apache-2.0 (`rumqttc`, `wasmtime`, `prost`), MIT and
+BSD-3-Clause (`extism`) are all GPL-3.0-compatible: none adds a restriction to
+the combined work, and MPL-2.0 copyleft is file-level. The exception to watch is
+EPL-2.0 (`paho-mqtt`) — its patent-retaliation and exclusion clauses need
+explicit review before adoption, which is why `rumqttc` is preferred. Runtime
+plugins must ship their own licence notices; the WASM sandbox is not a linking
+exemption.
+
+### 9.4 New risks discovered
+
+| Risk | Mitigation |
+|------|------------|
+| OPC UA upstream is 0.x and may break its API between minors | Pin the exact version and isolate it behind our own adapter trait |
+| `bacnet-rs` is 0.3.x with a small community | Keep G-05 behind a feature flag; revisit after 1.0 or implement a minimal read-only BACnet/IP subset ourselves |
+| No mature Sparkplug B Rust implementation | Own thin Protobuf encoder validated against Tahu test vectors; never invent a custom payload |
+| wasmtime publishes RCs frequently | Pin a stable release in `Cargo.lock`, bump deliberately, never track `*` |
+
+### 9.5 Sources (addendum)
+
+15. https://crates.io/api/v1/crates/async-opcua · https://github.com/freeopcua/async-opcua
+16. https://crates.io/api/v1/crates/opcua
+17. https://crates.io/api/v1/crates/rumqttc
+18. https://crates.io/api/v1/crates/paho-mqtt
+19. https://crates.io/api/v1/crates/bacnet-rs · https://github.com/bacnet-rs/bacnet-rs
+20. https://crates.io/api/v1/crates/bacnet
+21. https://api.github.com/search/repositories?q=sparkplug+rust · https://sparkplug.eclipse.org/specification/
+22. https://crates.io/api/v1/crates/prost
+23. https://crates.io/api/v1/crates/extism · https://crates.io/api/v1/crates/wasmtime
+24. https://crates.io/api/v1/crates/tokio-modbus
+
+---
+
+## 10. Sources
 
 1. https://github.com/thingsboard/thingsboard-gateway
 2. https://streampipes.apache.org

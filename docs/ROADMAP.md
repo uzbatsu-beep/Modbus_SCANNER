@@ -1,13 +1,14 @@
 # Дорожная карта / Roadmap
 
 > Обоснование приоритетов и рыночный контекст: [RESEARCH.md](RESEARCH.md) /
-> [RESEARCH.ru.md](RESEARCH.ru.md); исследование платформы v2.0:
+> [RESEARCH.ru.md](RESEARCH.ru.md); исследование платформы v2.0 и выбор
+> библиотек (§9):
 > [RESEARCH_V2.md](RESEARCH_V2.md) / [RESEARCH_V2.ru.md](RESEARCH_V2.ru.md).
 > Детальные задачи и критерии готовности выполненных этапов: [PLAN.md](PLAN.md) /
 > [PLAN.ru.md](PLAN.ru.md).
 > История изменений: [CHANGELOG.md](../CHANGELOG.md).
 
-**Дата обновления:** 2026-11-19 · **Текущий релиз:** v0.1.1 · **Ветка:** `main`
+**Дата обновления:** 2026-11-19 · **Текущий релиз:** v1.0.0 · **Ветка:** `main`
 
 ---
 
@@ -18,12 +19,12 @@
 | **v0.1.0** — MVP | ✅ релиз | Протокол RTU/ASCII/TCP/UDP, транспорты, движок сканера, UI, экспорт, документация |
 | **v0.2** — Field Discovery | ✅ в v0.1.1 | Автосвип baud/чётности, адаптивный register scan, классификация IP, FC43, экспорт по устройству, валидация MBAP tx id, выбор ADU, журнал зондов |
 | **v0.3** — Decode & Monitor | ✅ в v0.1.1 | Декодер типов и byte order, именованные теги, проекты с историей, live-мониторинг и тренды, raw TX/RX-журнал, файловые логгеры, diff сканов, RU/EN UI и светлая тема |
-| **v1.0** — Ecosystem & Automation | ✅ завершён | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, генерация типов, тесты и CI на 3 ОС |
-| **v1.1** — Diagnostics | 📋 запланирован | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting |
+| **v1.0.0** — Ecosystem & Automation | ✅ релиз | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, генерация типов, тесты и CI на 3 ОС; MSI + NSIS в GitHub Release |
+| **v1.1** — Diagnostics | 📋 следующий | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting, quiet mode |
 | **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
-| **v2.0** — Platform | 💡 исследование | Шлюзы MQTT/OPC UA/REST/BACnet, web-компаньон, политики IEC 62443, плагины |
+| **v2.0** — Platform | 💡 исследование + выбор стека | Шлюзы MQTT/OPC UA, web-компаньон, политики IEC 62443, плагины; BACnet отложен (см. §9 RESEARCH_V2) |
 
-**Качество на текущий момент:** `cargo check` и `npm run tauri build` — без предупреждений; CI зелёный на Windows-msvc и Ubuntu; Windows-инсталляторы (NSIS + MSI) загружены в Release v0.1.1.
+**Качество на текущий момент:** `cargo check` и `npm run tauri build` — без предупреждений; CI зелёный на Windows / Linux / macOS; Windows-инсталляторы (NSIS + MSI) загружены в Release v1.0.0; все 6 проверок релизного workflow зелёные.
 
 ---
 
@@ -69,13 +70,18 @@
 | D-06 | Пассивный fingerprinting (прослушивание трафика) как исследовательский прототип | IEEE 11471618, MOSTO: активное сканирование OT опасно |
 | D-07 | «Тихий» режим с жёстким rate-limit и проверкой авторизации | IEC 62443, NIS2 |
 
+**Критерии выхода v1.1:** 0 write-запросов в контуре discovery (интеграционный
+тест в CI); FC support map для одного устройства строится ≤ 60 с; XLSX открывается
+в Excel/LibreOffice; quiet mode детерминированно ограничивает частоту опроса и
+требует явного подтверждения пользователя.
+
 ---
 
 ## 5. v1.2 — Workflow & Reliability (3–4 недели, приоритет P1)
 
 - Шаблоны сканов и расписание (cron-like) с запуском через CLI/API.
 - Рабочее пространство из нескольких проектов, сравнение проектов между файлами.
-- Генератор отчётов HTML/PDF с графиками трендов и diff-ผล.
+- Генератор отчётов HTML/PDF с графиками трендов и сравнением сканов (diff).
 - Автосохранение результатов после каждого цикла, восстановление после сбоя.
 - Горячие клавиши, доступность (ARIA, контраст светлой темы).
 - Ротация диагностических логов самого приложения.
@@ -84,18 +90,21 @@
 
 ## 6. v2.0 — Platform (8–12 недель, приоритет P2)
 
-Исследование завершено: [RESEARCH_V2.md](RESEARCH_V2.md) /
-[RESEARCH_V2.ru.md](RESEARCH_V2.ru.md). Приоритеты ниже основаны на нём.
+Исследование завершено, включая выбор библиотек:
+[RESEARCH_V2.md](RESEARCH_V2.md) §9 / [RESEARCH_V2.ru.md](RESEARCH_V2.ru.md) §9.
+Приоритеты ниже основаны на нём.
 
-| ID | Задача | Оценка |
-|----|--------|--------|
-| G-01 | Движок политик: allowlist зон/целей, quiet mode, read-only, подтверждение авторизации | 9/M/High |
-| G-02 | MQTT-паблишер (JSON + Sparkplug B) в локальный брокер, opt-in | 8/L/Medium |
-| G-03 | OPC UA-сервер: карта тегов как адресное пространство, подпись/шифрование | 8/L/Medium |
-| G-04 | Web-компаньон для просмотра проектов и трендов через локальный REST/WS API | 7/M/Low |
-| G-05 | BACnet/IP-коннектор (read-only объекты, COV) | 6/L/Medium |
-| G-06 | Plugin SDK: стабильные трейты + WASM-песочница для декодеров/транспортов | 6/L/High |
+| ID | Задача | Оценка | Выбор стека (§9) |
+|----|--------|--------|------------------|
+| G-01 | Движок политик: allowlist зон/целей, quiet mode, read-only, подтверждение авторизации | 9/M/High | ядро без новых зависимостей |
+| G-02 | MQTT-паблишер (JSON + Sparkplug B) в локальный брокер, opt-in | 8/L/Medium | `rumqttc` + `prost`, свой кодек Sparkplug |
+| G-03 | OPC UA-сервер: карта тегов как адресное пространство, подпись/шифрование | 8/L/Medium | `async-opcua` (server, зафиксировать версию) |
+| G-04 | Web-компаньон для просмотра проектов и трендов через локальный REST/WS API | 7/M/Low | Vue 3 + существующий API |
+| G-05 | BACnet/IP-коннектор (read-only объекты, COV) — отложен | 6/L/Medium | наблюдение за `bacnet-rs` 0.3.x, feature-флаг |
+| G-06 | Plugin SDK: стабильные трейты + WASM-песочница для декодеров/транспортов | 6/L/High | in-tree трейты → `extism` + `wasmtime` |
 
+Порядок работ: **G-01 → G-04 → G-02 → G-03 → G-06 → G-05** (быстрый выигрыш и
+низкий риск сначала; BACnet — последним из-за незрелости стека 0.3.x).
 Расширение протоколов (DNP3, EtherNet/IP) — только после стабилизации ядра.
 Ключевые ограничения: никакого pass-through, никакой телеметрии, MQTT только по
 opt-in с локальным брокером по умолчанию; WASM вместо сырых dylib.
@@ -155,19 +164,20 @@ opt-in с локальным брокером по умолчанию; WASM вм
 
 ## 11. English summary
 
-**Status:** v0.1.1 released; v0.2 (field discovery) and v0.3 (decode & monitor)
-are complete. Next milestones:
+**Status:** v1.0.0 released with Windows installers (NSIS + MSI); all six CI
+and release checks are green on Windows/Linux/macOS. Next milestones:
 
-- **v1.0 Ecosystem** — decouple the engine from Tauri (`EventSink`), headless
-  CLI, local REST/WebSocket API, device profiles, Modbus TLS (port 802),
-  release automation, generated IPC types, mock-transport tests and a 3-OS CI.
-- **v1.1 Diagnostics** — FC08/07/0B/0C, read-only FC support map, contiguous
-  range detection, bitfield decoding presets, CSV/XLSX reports, passive
-  fingerprinting and a quiet OT mode.
+- **v1.1 Diagnostics (next)** — FC08/07/0B/0C, read-only FC support map,
+  contiguous range detection, bitfield decoding presets, CSV/XLSX reports,
+  passive fingerprinting and a quiet OT mode. Exit: zero discovery writes,
+  ≤60 s FC map, deterministic rate limiting.
 - **v1.2 Workflow** — scan templates/schedules, multi-project workspace,
   HTML/PDF reports, autosave/crash recovery, hotkeys/accessibility.
-- **v2.0 Platform** — Modbus→MQTT/OPC UA/REST/BACnet gateways, web companion,
-  IEC 62443 zone-aware policies, plugin architecture.
+- **v2.0 Platform** — Modbus→MQTT/OPC UA gateways, web companion, IEC 62443
+  zone-aware policies, plugin architecture; BACnet deferred. Library choices
+  are backed by live registry data in [RESEARCH_V2.md](RESEARCH_V2.md) §9:
+  `rumqttc` + an own Sparkplug encoder, pinned `async-opcua` in server mode,
+  `extism`/`wasmtime` for WASM plugins, `bacnet-rs` on a watchlist.
 
 Priorities are derived from [RESEARCH.md](RESEARCH.md) (official specs, field
 tools, community and academic sources). Hard rules stay unchanged: read-only
