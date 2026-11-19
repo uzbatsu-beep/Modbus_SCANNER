@@ -275,6 +275,17 @@ fn verify_and_parse(
     Ok(pdu)
 }
 
+/// Reject broadcast destinations encoded directly inside a caller-supplied ADU.
+/// Checking only target.unit_id is insufficient in full-ADU mode.
+fn is_raw_broadcast(kind: TransportKind, payload: &[u8]) -> bool {
+    match kind {
+        TransportKind::Rtu | TransportKind::Udp => payload.first() == Some(&0),
+        TransportKind::Tcp => payload.get(6) == Some(&0),
+        TransportKind::Ascii => payload.len() >= 3 &&
+            payload[0] == b':' && payload[1] == b'0' && payload[2] == b'0',
+    }
+}
+
 /// All interpretations and float hints for 1–2 selected raw registers (P3-01/02).
 #[tauri::command]
 pub fn inspect_registers(values: Vec<u16>) -> DecodeResult {
@@ -482,6 +493,9 @@ pub async fn send_raw_frame(
     if adu.is_empty() {
         return Err("empty frame".into());
     }
+    if req.is_full_adu && is_raw_broadcast(req.target.kind, &adu) {
+        return Err("broadcast raw ADU (unit 0) is blocked".into());
+    }
 
     match manual_transact(&req, adu.clone(), 8).await {
         Ok((resp, rtt)) => Ok(ManualResponse {
@@ -511,6 +525,14 @@ fn _suppress(_t: &TransportError, _u: &UnitId) {}
 #[cfg(test)]
 mod reliability_tests {
     use super::*;
+
+    #[test]
+    fn full_raw_adu_cannot_bypass_broadcast_protection() {
+        assert!(is_raw_broadcast(TransportKind::Rtu, &[0, 6, 0, 0]));
+        assert!(is_raw_broadcast(TransportKind::Ascii, b":00060000"));
+        assert!(is_raw_broadcast(TransportKind::Tcp, &[0, 1, 0, 0, 0, 6, 0, 6]));
+        assert!(!is_raw_broadcast(TransportKind::Tcp, &[0, 1, 0, 0, 0, 6, 1, 6]));
+    }
 
     #[test]
     fn validates_function_quantity_and_address_bounds() {
