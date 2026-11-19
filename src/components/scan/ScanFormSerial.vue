@@ -56,7 +56,8 @@ function toggleParity(parity: ParitySerde) {
 const canStart = computed(
   () =>
     form.port_name.length > 0 &&
-    form.unit_from >= 0 &&
+    form.unit_from >= 1 &&
+    form.unit_to >= 1 &&
     form.unit_to <= 247 &&
     form.unit_from <= form.unit_to &&
     (!autoSweep.value ||
@@ -228,9 +229,9 @@ function start() {
 
     <div class="form-row">
       <label>{{ t("unitRange") }}</label>
-      <input v-model.number="form.unit_from" type="number" min="0" max="247" :disabled="scanner.isRunning" />
+      <input v-model.number="form.unit_from" type="number" min="1" max="247" :disabled="scanner.isRunning" />
       <span>—</span>
-      <input v-model.number="form.unit_to" type="number" min="0" max="247" :disabled="scanner.isRunning" />
+      <input v-model.number="form.unit_to" type="number" min="1" max="247" :disabled="scanner.isRunning" />
       <span class="hint">{{ t("broadcastHint") }}</span>
     </div>
 

@@ -9,4 +9,8 @@ export type WriteRequest = { target: ManualTarget, function: number, start_addre
 /**
  * Values to write (registers) or one value (coil: 0/1).
  */
-values: Array<number>, timing: ManualTiming | null, };
+values: Array<number>, 
+/**
+ * Opt-in for a single manual write (false for older clients).
+ */
+confirm_write: boolean, timing: ManualTiming | null, };

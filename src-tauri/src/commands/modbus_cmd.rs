@@ -64,6 +64,9 @@ pub struct WriteRequest {
     pub start_address: u16,
     /// Values to write (registers) or one value (coil: 0/1).
     pub values: Vec<u16>,
+    /// Opt-in for a single manual write (false for older clients).
+    #[serde(default)]
+    pub confirm_write: bool,
     pub timing: Option<ManualTiming>,
 }
 
@@ -76,6 +79,9 @@ pub struct RawFrameRequest {
     pub adu_hex: String,
     /// If false, `adu_hex` is a PDU and the ADU is built automatically.
     pub is_full_adu: bool,
+    /// An arbitrary raw frame requires an explicit per-request opt-in.
+    #[serde(default)]
+    pub confirm_unsafe: bool,
     pub timing: Option<ManualTiming>,
 }
 
@@ -281,12 +287,39 @@ pub fn decode_register(values: Vec<u16>, spec: DecodeSpec) -> Option<DecodedValu
     decode(&values, &spec)
 }
 
+/// Validate address and size before constructing any read PDU.
+fn validate_read(function: u8, address: u16, quantity: u16) -> Result<(), String> {
+    let max = match function {
+        0x01 | 0x02 => 2_000,
+        0x03 | 0x04 => 125,
+        _ => return Err(format!("unsupported read function {function:#04x}")),
+    };
+    if quantity == 0 || quantity > max || address as u32 + quantity as u32 > 65_536 {
+        return Err(format!("invalid read address/quantity ({address}, {quantity})"));
+    }
+    Ok(())
+}
+
+fn validate_write(function: u8, address: u16, values: &[u16]) -> Result<(), String> {
+    let ok = match function {
+        0x05 => values.len() == 1 && values[0] <= 1,
+        0x06 => values.len() == 1,
+        0x10 => (1..=123).contains(&values.len()),
+        _ => return Err(format!("unsupported write function {function:#04x}")),
+    };
+    if !ok || address as u32 + values.len() as u32 > 65_536 {
+        return Err(format!("invalid write address/value count ({address}, {})", values.len()));
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn read_registers(
     state: State<'_, AppState>,
     req: ReadRequest,
 ) -> Result<ManualResponse, String> {
     let _ = &state;
+    validate_read(req.function, req.start_address, req.quantity)?;
     let expected_fc = req.function;
     let pdu = match expected_fc {
         0x01 => request::read_coils(req.start_address, req.quantity),
@@ -359,6 +392,11 @@ pub async fn write_registers(
     req: WriteRequest,
 ) -> Result<ManualResponse, String> {
     let _ = &state;
+    if !req.confirm_write { return Err("explicit write confirmation required".into()); }
+    if matches!(req.target.kind, TransportKind::Rtu | TransportKind::Ascii) && req.target.unit_id == 0 {
+        return Err("broadcast writes (unit 0) are blocked".into());
+    }
+    validate_write(req.function, req.start_address, &req.values)?;
     let expected_fc = req.function;
     let pdu = match expected_fc {
         0x05 => {
@@ -428,6 +466,10 @@ pub async fn send_raw_frame(
     req: RawFrameRequest,
 ) -> Result<ManualResponse, String> {
     let _ = &state;
+    if !req.confirm_unsafe { return Err("explicit unsafe-frame confirmation required".into()); }
+    if matches!(req.target.kind, TransportKind::Rtu | TransportKind::Ascii) && req.target.unit_id == 0 {
+        return Err("broadcast raw requests are blocked".into());
+    }
     let bytes = hex::decode(req.adu_hex.trim().replace(' ', ""))
         .map_err(|e| format!("bad hex: {e}"))?;
 
@@ -464,3 +506,23 @@ pub async fn send_raw_frame(
 /// Suppress unused import warnings for types used only in signatures.
 #[allow(dead_code)]
 fn _suppress(_t: &TransportError, _u: &UnitId) {}
+
+
+#[cfg(test)]
+mod reliability_tests {
+    use super::*;
+
+    #[test]
+    fn validates_function_quantity_and_address_bounds() {
+        assert!(validate_read(0x03, 0, 125).is_ok());
+        assert!(validate_read(0x03, 0, 126).is_err());
+        assert!(validate_read(0x03, 0, 0).is_err());
+        assert!(validate_read(0x01, u16::MAX, 2).is_err());
+        assert!(validate_read(0x10, 0, 1).is_err());
+        assert!(validate_write(0x10, 0, &vec![0; 123]).is_ok());
+        assert!(validate_write(0x10, 0, &vec![0; 124]).is_err());
+        assert!(validate_write(0x10, 0, &[]).is_err());
+        assert!(validate_write(0x05, 0, &[2]).is_err());
+        assert!(validate_write(0x10, u16::MAX, &[1, 2]).is_err());
+    }
+}
