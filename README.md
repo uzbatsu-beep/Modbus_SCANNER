@@ -61,6 +61,7 @@ console and register map).
 - [IPC API](docs/API.md) — commands and events with payload schemas
 - [Development](docs/DEVELOPMENT.md) — setup, build, tests, conventions
 - [Research](docs/RESEARCH.md) — market/community/academic findings and sources
+- [v2.0 Platform research](docs/RESEARCH_V2.md) — gateways, web companion, IEC 62443, plugins
 - [Development plan](docs/PLAN.md) — prioritized phases v0.2 → v1.0
 - [Roadmap](docs/ROADMAP.md) — current status and next steps
 - [Security](docs/SECURITY.md) — safety of writing to unknown devices

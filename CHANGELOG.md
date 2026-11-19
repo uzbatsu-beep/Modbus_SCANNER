@@ -21,6 +21,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - E-01: framework-agnostic scanner core (`EventSink`, `TrafficSink`, `SampleSink`); Tauri is isolated in `bridge.rs`, enabling a future CLI/headless mode
 
 ### Docs
+- Added v2.0 platform research (gateways, Sparkplug B/OPC UA/BACnet, IEC 62443 policies, plugin architecture) and a prioritised G-01…G-06 backlog
 - Refreshed the development roadmap with v1.0–v2.0 milestones, scoring, KPIs and risks
 
 ## [0.1.1] - 2026-11-19
