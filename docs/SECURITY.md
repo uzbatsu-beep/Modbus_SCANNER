@@ -4,24 +4,26 @@
 
 During discovery the scanner sends **only read function codes** (FC01–FC04).
 This is intentional: scanning an unknown device must never change its state.
-Write functions (FC05, FC06, FC0F, FC10) are available only in the Manual tab and
-only after an explicit user action.
+Manual write functions (FC05, FC06, FC10) are available only in the Manual tab.
+As of v1.0.1, each write and raw-frame operation requires explicit confirmation
+in the UI and a per-request opt-in field verified by Rust. Serial broadcast writes
+to unit 0 are blocked. This mitigates accidental writes but does not constitute
+authentication or authorization against compromised frontend code.
 
 При обнаружении сканер отправляет **только функции чтения** (FC01–FC04) — сканирование
-неизвестного устройства не должно менять его состояние. Функции записи доступны
-только во вкладке Manual и только после явного действия пользователя.
+неизвестного устройства не должно менять его состояние. Функции записи FC05/06/10 доступны только во вкладке Manual после подтверждения;
+Rust проверяет флаг согласия для каждого запроса. Broadcast-запись (unit 0)
+запрещена. Эти проверки защищают от случайной записи, но не заменяют авторизацию.
 
 ## Broadcast / Broadcast
 
 Serial unit id `0` is a broadcast address. Devices do not answer broadcast reads,
-so it is excluded from meaningful scans. A **broadcast write** (Manual tab, unit 0)
-affects **every device on the bus** — never use it unless you are certain of the
-consequences. Unit ids 248–255 are reserved by the Modbus specification.
+so it is excluded from meaningful scans. A **broadcast write** (unit 0) affects **every device on the bus**
+and is blocked in the v1.0.1 manual backend. Unit ids 248–255 are reserved by the Modbus specification.
 
 Последовательный адрес `0` — broadcast. Устройства не отвечают на broadcast-чтение,
-поэтому он бесполезен при сканировании. **Broadcast-запись** (Manual, unit 0)
- затрагивает **все устройства на шине** — применяйте её только если полностью
- понимаете последствия. Адреса 248–255 зарезервированы спецификацией.
+поэтому он бесполезен при сканировании. **Broadcast-запись** (unit 0) затрагивает **все устройства на шине**;
+в v1.0.1 ручной обработчик блокирует такую отправку. Адреса 248–255 зарезервированы спецификацией.
 
 ## Gateways / Шлюзы
 

@@ -14,4 +14,8 @@ adu_hex: string,
 /**
  * If false, `adu_hex` is a PDU and the ADU is built automatically.
  */
-is_full_adu: boolean, timing: ManualTiming | null, };
+is_full_adu: boolean, 
+/**
+ * An arbitrary raw frame requires an explicit per-request opt-in.
+ */
+confirm_unsafe: boolean, timing: ManualTiming | null, };

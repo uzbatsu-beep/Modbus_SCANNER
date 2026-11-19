@@ -8,7 +8,7 @@
 //!   measures the response time.
 
 use ts_rs::TS;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -149,18 +149,26 @@ pub async fn test_serial_port(params: TestSerialParams) -> Result<TestSerialResu
             SerialMode::Rtu => crate::modbus::rtu::encode(UnitId(1), &request::read_holding_registers(0, 1)),
             SerialMode::Ascii => crate::modbus::ascii::encode(UnitId(1), &request::read_holding_registers(0, 1)),
         };
-        match transport
-            .transact(&probe, Duration::from_millis(800), 7)
-            .await
-        {
+        let started = Instant::now();
+        match transport.transact(&probe, Duration::from_millis(800), 7).await {
             Ok(resp) => {
-                result.modbus_responded = true;
-                result.rtt_us = Some(0);
                 result.response_hex = Some(hex::encode(&resp));
+                let valid = match params.mode {
+                    SerialMode::Rtu => crate::modbus::rtu::decode(&resp)
+                        .map(|frame| frame.unit_id.0 == 1 && (frame.pdu.function() == 0x03 || frame.pdu.is_exception())),
+                    SerialMode::Ascii => crate::modbus::ascii::decode(&resp)
+                        .map(|frame| frame.unit_id.0 == 1 && (frame.pdu.function() == 0x03 || frame.pdu.is_exception())),
+                };
+                match valid {
+                    Ok(true) => {
+                        result.modbus_responded = true;
+                        result.rtt_us = Some(started.elapsed().as_micros());
+                    }
+                    Ok(false) => result.error = Some("unexpected Modbus response (unit/function)".into()),
+                    Err(e) => result.error = Some(format!("invalid Modbus frame: {e}")),
+                }
             }
-            Err(e) => {
-                result.error = Some(e.to_string());
-            }
+            Err(e) => result.error = Some(e.to_string()),
         }
     }
 

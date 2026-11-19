@@ -82,18 +82,24 @@ async function doRead() {
 }
 
 async function doWrite() {
+  const values = form.write_vals
+    .split(/[\s,;]+/)
+    .filter((s) => s.length > 0)
+    .map((s) => Number.parseInt(s, 16));
+  if (values.length === 0 || values.some((v) => !Number.isInteger(v) || v < 0 || v > 0xffff)) {
+    window.alert(t("invalidWriteValues"));
+    return;
+  }
+  if (!window.confirm(t("confirmWrite"))) return;
   busy.value = true;
   lastAction.value = `write fc=${form.write_fc.toString(16)} addr=${form.write_addr}`;
   try {
-    const values = form.write_vals
-      .split(/[\s,;]+/)
-      .filter((s) => s.length > 0)
-      .map((s) => parseInt(s, 16));
     lastResponse.value = await api.modbus.write({
       target: buildTarget(),
       function: form.write_fc,
       start_address: form.write_addr,
       values,
+      confirm_write: true,
       timing: buildTiming(),
     });
   } catch (e) {
@@ -104,6 +110,7 @@ async function doWrite() {
 }
 
 async function doRaw() {
+  if (!window.confirm(t("confirmUnsafe"))) return;
   busy.value = true;
   lastAction.value = `raw "${form.raw_hex}"`;
   try {
@@ -111,6 +118,7 @@ async function doRaw() {
       target: buildTarget(),
       adu_hex: form.raw_hex,
       is_full_adu: form.raw_full_adu,
+      confirm_unsafe: true,
       timing: buildTiming(),
     });
   } catch (e) {
@@ -197,6 +205,7 @@ onMounted(() => {
         <label class="short">Адрес</label>
         <input v-model.number="form.write_addr" type="number" min="0" max="65535" />
       </div>
+      <div class="hint">{{ t("writeSafetyHint") }}</div>
       <div class="form-row">
         <label>{{ t("valuesHex") }}</label>
         <input v-model="form.write_vals" placeholder="0x1234, 0xABCD или 1234 ABCD" class="wide" />

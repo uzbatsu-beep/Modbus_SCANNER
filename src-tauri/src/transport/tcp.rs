@@ -112,11 +112,12 @@ impl TcpTransport {
         if protocol_id != 0 {
             return Err(TransportError::Other(format!("bad protocol id {protocol_id}")));
         }
-        if !(1..=254).contains(&length) {
+        // Length counts Unit ID + PDU; the Unit ID is already in the 7-byte header.
+        if !(2..=254).contains(&length) {
             return Err(TransportError::Other(format!("bad mbap length {length}")));
         }
 
-        let mut rest = vec![0u8; length as usize];
+        let mut rest = vec![0u8; length as usize - 1];
         self.stream.read_exact(&mut rest).await?;
         let mut frame = header.to_vec();
         frame.extend_from_slice(&rest);
@@ -178,5 +179,56 @@ impl Transport for TcpTransport {
             TcpFraming::Mbap => self.read_mbap().await,
             TcpFraming::Rtu => self.read_rtu().await,
         }
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tokio::net::TcpListener;
+
+    #[tokio::test]
+    async fn mbap_reads_exact_pdu_without_waiting_for_extra_byte() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut req = [0u8; 12];
+            socket.read_exact(&mut req).await.unwrap();
+            assert_eq!(req, [0x12, 0x34, 0, 0, 0, 6, 1, 3, 0, 0, 0, 1]);
+            socket.write_all(&[0x12, 0x34, 0, 0, 0, 5, 1, 3, 2, 0x12, 0x34]).await.unwrap();
+        });
+        let mut client = TcpTransport::connect(TcpConfig {
+            host: "127.0.0.1".into(),
+            port,
+            connect_timeout: Duration::from_millis(500),
+            ..TcpConfig::default()
+        }).await.unwrap();
+        let reply = client.transact(
+            &[0x12, 0x34, 0, 0, 0, 6, 1, 3, 0, 0, 0, 1],
+            Duration::from_millis(500),
+            11,
+        ).await.unwrap();
+        assert_eq!(reply, vec![0x12, 0x34, 0, 0, 0, 5, 1, 3, 2, 0x12, 0x34]);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn mbap_rejects_length_without_pdu() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            socket.write_all(&[0, 1, 0, 0, 0, 1, 1]).await.unwrap();
+        });
+        let mut client = TcpTransport::connect(TcpConfig {
+            host: "127.0.0.1".into(),
+            port,
+            connect_timeout: Duration::from_millis(500),
+            ..TcpConfig::default()
+        }).await.unwrap();
+        assert!(client.read_mbap().await.is_err());
+        server.await.unwrap();
     }
 }
