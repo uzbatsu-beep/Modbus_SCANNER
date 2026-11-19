@@ -679,6 +679,51 @@ pub(crate) fn verify_adu(
 }
 
 #[cfg(test)]
+mod mock_pipeline_tests {
+    use super::*;
+    use crate::modbus::frame::request;
+    use crate::transport::mock::MockTransport;
+    use crate::transport::Transport;
+
+    #[tokio::test]
+    async fn build_transact_verify_with_mock_transport() {
+        let params = ScanParams {
+            timeout_ms: 100,
+            ..Default::default()
+        };
+        let engine = EngineParams::from_scan_params(&params);
+        let tx = 0x1234u16;
+        let adu = build_adu(
+            TransportKind::Tcp,
+            1,
+            &request::read_holding_registers(0, 1),
+            engine.clone(),
+            tx,
+        );
+        // Valid MBAP response: FC03, byte count 2, value 0x002A.
+        let response = mbap_frame(1, &[0x03, 0x02, 0x00, 0x2A], tx);
+        let mut mock = MockTransport::new(vec![Ok(response)]);
+
+        let raw = mock
+            .transact(&adu, Duration::from_millis(100), 8)
+            .await
+            .unwrap();
+        let pdu = verify_adu(TransportKind::Tcp, 1, 0x03, &raw, tx, engine).unwrap();
+        assert_eq!(pdu.to_bytes(), vec![0x03, 0x02, 0x00, 0x2A]);
+        assert_eq!(mock.sent.lock().unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn transaction_id_mismatch_is_rejected() {
+        let params = ScanParams::default();
+        let engine = EngineParams::from_scan_params(&params);
+        let response = mbap_frame(1, &[0x03, 0x02, 0x00, 0x2A], 0x9999);
+        let err = verify_adu(TransportKind::Tcp, 1, 0x03, &response, 0x1234, engine).unwrap_err();
+        assert!(err.to_string().contains("transaction"));
+    }
+}
+
+#[cfg(test)]
 mod mbap_tests {
     use super::*;
 

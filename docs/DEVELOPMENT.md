@@ -104,6 +104,19 @@ See `src-tauri/src/scanner/strategies.rs` for target enumeration,
 `scanner/engine.rs` for execution, and `scanner/types.rs` for the parameter
 schema. Update docs/API + ROADMAP when the contract changes.
 
+## Tests (E-08)
+
+Unit tests cover the protocol layer (CRC/LRC, PDU/ADU, decoding), scan
+strategies (baud sweep, register blocks, diff) and the engine pipeline with an
+in-memory `MockTransport` (`src-tauri/src/transport/mock.rs`) — no hardware or
+network required. CI runs `cargo test --lib` on **Windows, Linux and macOS**;
+frontend typecheck/build and generated-binding freshness are verified on every
+push as well.
+
+On a local Windows-gnu toolchain the test executable may fail to start with
+`0xc0000139` (WebView2 loader). Use `cargo test --lib` on the MSVC toolchain
+or rely on CI.
+
 ## Generated IPC types (E-07)
 
 `src/types/ipc.ts` is a facade over `src/types/generated/`, which is generated

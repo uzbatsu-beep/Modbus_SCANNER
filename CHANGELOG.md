@@ -11,6 +11,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- E-08: in-memory MockTransport engine tests and CI matrix extended to macOS (v1.0 complete)
 - E-07: generated TypeScript IPC bindings from Rust via `ts-rs` (`npm run gen:types`, 67 files, facade, CI freshness check)
 - E-06: tag-triggered GitHub Actions release workflow (MSI/NSIS build, artifact upload, GH Release with assets)
 - E-05: Modbus Security TLS (port 802) with webpki root validation and optional mutual TLS (`--tls`, `ScanParams.tls`)

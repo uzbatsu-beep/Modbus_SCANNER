@@ -69,7 +69,8 @@ E-03 ✅ (local REST + WebSocket API on 127.0.0.1, shared engine, loopback only)
 E-04 ✅ (device profiles: CSV/JSON import, FC43 identity matching, auto tag setup),
 E-05 ✅ (Modbus Security: TLS on port 802, webpki roots, optional mutual TLS),
 E-06 ✅ (tag-triggered GitHub Actions release with MSI/NSIS assets),
-E-07 ✅ (`ts-rs` bindings generated from Rust into `src/types/generated`, facade + CI check).
+E-07 ✅ (`ts-rs` bindings generated from Rust into `src/types/generated`, facade + CI check),
+E-08 ✅ (in-memory `MockTransport` engine tests, CI matrix extended to macOS). v1.0 is complete.
 
 **v0.3:** P3-01 ✅ (decoder: int/uint/float32/ASCII × 4 byte orders),
 P3-02 ✅ (labelled float hypotheses), P3-03 ✅ (named tags with scaling, stored

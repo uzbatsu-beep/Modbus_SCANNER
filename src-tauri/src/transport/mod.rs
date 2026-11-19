@@ -79,6 +79,8 @@ pub trait Transport: Send {
     }
 }
 
+#[cfg(test)]
+pub mod mock;
 pub mod serial;
 pub mod tcp;
 pub mod tls;

@@ -17,7 +17,7 @@
 | **v0.1.0** — MVP | ✅ релиз | Протокол RTU/ASCII/TCP/UDP, транспорты, движок сканера, UI, экспорт, документация |
 | **v0.2** — Field Discovery | ✅ в v0.1.1 | Автосвип baud/чётности, адаптивный register scan, классификация IP, FC43, экспорт по устройству, валидация MBAP tx id, выбор ADU, журнал зондов |
 | **v0.3** — Decode & Monitor | ✅ в v0.1.1 | Декодер типов и byte order, именованные теги, проекты с историей, live-мониторинг и тренды, raw TX/RX-журнал, файловые логгеры, diff сканов, RU/EN UI и светлая тема |
-| **v1.0** — Ecosystem & Automation | 🔄 в работе (E-01…E-07 готовы) | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, генерация типов, тесты и CI |
+| **v1.0** — Ecosystem & Automation | ✅ завершён | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, генерация типов, тесты и CI на 3 ОС |
 | **v1.1** — Diagnostics | 📋 запланирован | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting |
 | **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
 | **v2.0** — Platform | 💡 исследование | Шлюзы MQTT/OPC UA/REST/BACnet, web-компаньон, политики IEC 62443, плагины |
@@ -50,7 +50,7 @@
 | E-05 ✅ | Modbus Security (TLS, порт 802, X.509) — исследование и MVP-поддержка | Готово: `tokio-rustls`, MBAP в TLS, webpki CA, mTLS, CLI `--tls`, UI-чекбокс | L | — |
 | E-06 ✅ | Автоматизация Release: пересборка инсталляторов и загрузка ассетов в GitHub Actions | Готово: `release.yml` по тегу `v*`, Windows build → artifact → GH Release | S | — |
 | E-07 ✅ | Генерация `src/types/ipc.ts` из Rust (`ts-rs` или свой генератор схем) | Готово: 67 файлов в `src/types/generated`, фасад, `npm run gen:types`, CI-проверка | M | — |
-| E-08 | Юнит-тесты стратегий/движка с mock-транспортом; CI-матрица Linux/macOS | Надёжность и кросс-платформенность | M | E-01 |
+| E-08 ✅ | Юнит-тесты стратегий/движка с mock-транспортом; CI-матрица Linux/macOS | Готово: `MockTransport`, тесты конвейера build→transact→verify, CI на Windows/Linux/macOS | M | E-01 |
 
 **Критерии выхода v1.0:** CLI собирает отчёт без GUI; API отвечает на `/health` и `/scan`; профиль применяется к найденному устройству по Vendor/Product; релиз публикуется кнопкой в CI; все IPC-типы генерируются; тесты проходят на 3 ОС.
 
