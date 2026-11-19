@@ -49,8 +49,8 @@ jobs:
       - name: Verify manifest versions
         run: node scripts/check-release-version.mjs
 
-      - name: Frontend typecheck
-        run: npm run typecheck
+      - name: Build frontend (typecheck + actual dist for Tauri tests)
+        run: npm run build
 
       - name: Rust protocol regression tests
         working-directory: src-tauri
