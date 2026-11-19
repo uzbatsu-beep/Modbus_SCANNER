@@ -1,0 +1,228 @@
+//! Deterministic end-to-end Modbus TCP field scenarios.
+//!
+//! Uses a loopback fixture with real TCP sockets, the production scanner engine,
+//! MBAP parsing, classification, and register-map logic. No OT equipment needed.
+//! All listener ports are ephemeral and no traffic leaves localhost.
+
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpListener;
+use tokio::task::JoinHandle;
+
+use crate::modbus::common::TransportKind;
+use super::engine::ScannerHandle;
+use super::types::{DeviceTarget, IpTargetClass, ProbeResult, RegisterRange, ScanParams, ScanTarget};
+use super::EventSink;
+
+#[derive(Clone, Copy)]
+enum Reply {
+    Data,
+    Exception(u8),
+    WrongTransaction,
+    Silent,
+    Fragmented,
+}
+
+struct TestSlave {
+    port: u16,
+    requests: Arc<Mutex<Vec<Vec<u8>>>>,
+    task: JoinHandle<()>,
+}
+
+async fn test_slave(replies: Vec<Reply>) -> TestSlave {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind loopback fixture");
+    let port = listener.local_addr().unwrap().port();
+    let requests: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
+    let observed = requests.clone();
+    let task = tokio::spawn(async move {
+        for reply in replies {
+            let (mut stream, _) = tokio::time::timeout(
+                Duration::from_secs(5),
+                listener.accept(),
+            )
+            .await
+            .expect("scanner did not connect to fixture")
+            .expect("accept loopback connection");
+
+            let mut mbap = [0u8; 7];
+            stream.read_exact(&mut mbap).await.expect("read MBAP");
+            assert_eq!(u16::from_be_bytes([mbap[2], mbap[3]]), 0);
+            let length = u16::from_be_bytes([mbap[4], mbap[5]]);
+            assert!((2..=254).contains(&length), "invalid MBAP length {length}");
+            let mut pdu = vec![0u8; length as usize - 1];
+            stream.read_exact(&mut pdu).await.expect("read PDU");
+            let mut adu = mbap.to_vec();
+            adu.extend_from_slice(&pdu);
+            observed.lock().unwrap().push(adu);
+
+            if matches!(reply, Reply::Silent) {
+                // Connection stays open beyond the scan response timeout.
+                tokio::time::sleep(Duration::from_millis(250)).await;
+                continue;
+            }
+
+            let function = pdu[0];
+            let response_pdu = match reply {
+                Reply::Exception(code) => vec![function | 0x80, code],
+                Reply::Data | Reply::WrongTransaction | Reply::Fragmented => match function {
+                    0x01 | 0x02 => vec![function, 1, 1],
+                    0x03 | 0x04 => {
+                        assert!(pdu.len() >= 5, "short read request");
+                        let quantity = u16::from_be_bytes([pdu[3], pdu[4]]);
+                        assert!((1..=125).contains(&quantity));
+                        let mut response = vec![function, (2 * quantity) as u8];
+                        for i in 0..quantity {
+                            response.extend_from_slice(&(0x002Au16 + i).to_be_bytes());
+                        }
+                        response
+                    }
+                    other => panic!("write or unsupported function in discovery: {other:#04x}"),
+                },
+                Reply::Silent => unreachable!(),
+            };
+
+            let mut tx_id = u16::from_be_bytes([mbap[0], mbap[1]]);
+            if matches!(reply, Reply::WrongTransaction) {
+                tx_id = tx_id.wrapping_add(1);
+            }
+            let mut response = Vec::with_capacity(7 + response_pdu.len());
+            response.extend_from_slice(&tx_id.to_be_bytes());
+            response.extend_from_slice(&[0, 0]); // Protocol ID = Modbus
+            response.extend_from_slice(&((1 + response_pdu.len()) as u16).to_be_bytes());
+            response.push(mbap[6]); // unit ID
+            response.extend_from_slice(&response_pdu);
+
+            if matches!(reply, Reply::Fragmented) {
+                // Exercise TCP fragmentation between MBAP and the register payload.
+                stream.write_all(&response[..8]).await.expect("write partial response");
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                stream.write_all(&response[8..]).await.expect("write remaining response");
+            } else {
+                stream.write_all(&response).await.expect("write response");
+            }
+        }
+    });
+    TestSlave { port, requests, task }
+}
+
+fn single_tcp(port: u16, register_plan: Vec<RegisterRange>) -> ScanTarget {
+    ScanTarget::SingleDevice {
+        target: DeviceTarget {
+            kind: TransportKind::Tcp,
+            endpoint: "127.0.0.1".into(),
+            port: Some(port),
+            unit_id: 1,
+            serial: None,
+            serial_mode: None,
+        },
+        register_plan,
+    }
+}
+
+fn safe_params(functions: Vec<u8>) -> ScanParams {
+    ScanParams {
+        timeout_ms: 100,
+        request_gap_ms: 0,
+        retries: 0,
+        probe_functions: functions,
+        identify_devices: false,
+        ip_concurrency: 1,
+        ..ScanParams::default()
+    }
+}
+
+async fn scan(target: ScanTarget, params: ScanParams) -> super::types::ScanResults {
+    let handle = ScannerHandle::new();
+    handle.start(EventSink::null(), target, params).await.expect("start scan");
+    handle.wait_finished(Duration::from_secs(4)).await.expect("scan completion")
+}
+
+async fn observed(slave: TestSlave) -> Vec<Vec<u8>> {
+    slave.task.await.expect("fixture completed without panic");
+    slave.requests.lock().unwrap().clone()
+}
+
+#[tokio::test]
+async fn readonly_discovery_fcs_are_01_02_03_04_only() {
+    let fixture = test_slave(vec![Reply::Data; 4]).await;
+    let requests = fixture.requests.clone();
+    let results = scan(single_tcp(fixture.port, Vec::new()), safe_params(vec![1, 2, 3, 4])).await;
+    observed(fixture).await;
+
+    let sent = requests.lock().unwrap();
+    assert_eq!(sent.len(), 4);
+    assert_eq!(sent.iter().map(|adu| adu[7]).collect::<Vec<_>>(), [1, 2, 3, 4]);
+    assert!(sent.iter().all(|adu| (1..=4).contains(&adu[7])));
+    assert_eq!(results.stats.requests_sent, 4);
+    assert_eq!(results.stats.responses_ok, 4);
+    assert_eq!(results.records.len(), 1);
+    assert_eq!(results.ip_targets[0].class, IpTargetClass::ValidModbus);
+}
+
+#[tokio::test]
+async fn register_map_reads_real_mbap_and_fragmented_response() {
+    let fixture = test_slave(vec![Reply::Data, Reply::Fragmented]).await;
+    let target = single_tcp(fixture.port, vec![RegisterRange {
+        function: 0x03, start: 10, quantity: 2,
+    }]);
+    let results = scan(target, safe_params(vec![0x03])).await;
+    let requests = observed(fixture).await;
+
+    assert_eq!(requests.len(), 2);
+    assert!(requests.iter().all(|adu| adu[7] == 0x03));
+    assert_eq!(requests[1][8..], [0, 10, 0, 2]);
+    assert_eq!(results.stats.responses_ok, 2);
+    let regs = &results.records[0].registers;
+    assert_eq!(regs["03:000a"].raw, 0x002A);
+    assert_eq!(regs["03:000b"].raw, 0x002B);
+}
+
+#[tokio::test]
+async fn modbus_exception_still_identifies_slave() {
+    let fixture = test_slave(vec![Reply::Exception(0x02)]).await;
+    let results = scan(single_tcp(fixture.port, Vec::new()), safe_params(vec![0x03])).await;
+    observed(fixture).await;
+
+    assert_eq!(results.stats.responses_exception, 1);
+    assert_eq!(results.records.len(), 1);
+    assert!(matches!(results.records[0].probes.get(&0x03), Some(ProbeResult::Exception { code: 2, .. })));
+    assert_eq!(results.ip_targets[0].class, IpTargetClass::ValidModbus);
+}
+
+#[tokio::test]
+async fn wrong_mbap_transaction_is_not_a_discovered_device() {
+    let fixture = test_slave(vec![Reply::WrongTransaction]).await;
+    let results = scan(single_tcp(fixture.port, Vec::new()), safe_params(vec![0x03])).await;
+    observed(fixture).await;
+
+    assert_eq!(results.stats.requests_sent, 1);
+    assert_eq!(results.stats.transport_errors, 1);
+    assert!(results.records.is_empty());
+    assert_eq!(results.ip_targets[0].class, IpTargetClass::PortOpenNoModbus);
+}
+
+#[tokio::test]
+async fn open_but_silent_tcp_port_is_not_a_discovered_device() {
+    let fixture = test_slave(vec![Reply::Silent]).await;
+    let results = scan(single_tcp(fixture.port, Vec::new()), safe_params(vec![0x03])).await;
+    observed(fixture).await;
+
+    assert_eq!(results.stats.requests_sent, 1);
+    assert_eq!(results.stats.timeouts, 1);
+    assert!(results.records.is_empty());
+}
+
+#[tokio::test]
+async fn disallow_write_function_in_discovery_before_network_io() {
+    let target = single_tcp(502, Vec::new());
+    let handle = ScannerHandle::new();
+    let error = handle.start(EventSink::null(), target, safe_params(vec![0x03, 0x06]))
+        .await
+        .expect_err("write function must not enter scan engine");
+    assert!(error.contains("read-only"));
+    assert_eq!(handle.status(), super::types::ScanStatus::Failed);
+}
