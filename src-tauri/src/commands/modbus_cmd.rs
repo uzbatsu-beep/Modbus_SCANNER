@@ -272,7 +272,7 @@ fn verify_and_parse(
     if !pdu.is_exception() && pdu.function() != expected_fc {
         return Err(ModbusError::UnexpectedFunction(pdu.function()));
     }
-    Ok(pdu)
+    Ok(pdu.into_response())
 }
 
 /// Reject broadcast destinations encoded directly inside a caller-supplied ADU.
@@ -525,6 +525,20 @@ fn _suppress(_t: &TransportError, _u: &UnitId) {}
 #[cfg(test)]
 mod reliability_tests {
     use super::*;
+
+    #[test]
+    fn manual_tcp_response_exposes_register_data() {
+        // Tx=0, protocol=0, length=5 (UnitId+FC+byteCount+2 data bytes).
+        let adu = [0, 0, 0, 0, 0, 5, 1, 3, 2, 0x12, 0x34];
+        let response = verify_and_parse(TransportKind::Tcp, 1, 0x03, &adu).unwrap();
+        match response {
+            Pdu::Response { function, data } => {
+                assert_eq!(function, 0x03);
+                assert_eq!(crate::modbus::frame::response::parse_registers(&data).unwrap(), [0x1234]);
+            }
+            other => panic!("expected typed response, got {other:?}"),
+        }
+    }
 
     #[test]
     fn full_raw_adu_cannot_bypass_broadcast_protection() {

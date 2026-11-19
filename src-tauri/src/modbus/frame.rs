@@ -141,6 +141,16 @@ impl Pdu {
         matches!(self, Pdu::Exception { .. })
     }
 
+    /// Wire frames do not encode their direction. RTU/ASCII decoders and
+    /// from_bytes return a generic Request for regular frames; consumers
+    /// verifying a received reply must explicitly tag it as Response.
+    pub fn into_response(self) -> Self {
+        match self {
+            Pdu::Request { function, data } => Pdu::Response { function, data },
+            other => other,
+        }
+    }
+
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             Pdu::Request { function, data } => {
@@ -178,6 +188,22 @@ impl Pdu {
             function,
             data: bytes[1..].to_vec(),
         })
+    }
+}
+
+#[cfg(test)]
+mod response_direction_tests {
+    use super::*;
+
+    #[test]
+    fn normal_wire_pdu_is_tagged_as_response_at_receive_boundary() {
+        let raw = [3, 2, 0, 42];
+        let pdu = Pdu::from_bytes(&raw).unwrap();
+        assert!(matches!(pdu, Pdu::Request { .. }));
+        let response = pdu.into_response();
+        assert!(matches!(response, Pdu::Response { function: 3, data } if data == [2, 0, 42]));
+        assert_eq!(Pdu::from_bytes(&[0x83, 0x02]).unwrap().into_response(),
+                   Pdu::Exception { function: 3, code: 2 });
     }
 }
 

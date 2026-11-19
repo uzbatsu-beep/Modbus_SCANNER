@@ -924,7 +924,7 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
 /// Parse a probe result into a `ProbeResult` (ok / exception).
 pub fn classify_response(function: u8, pdu: &[u8], rtt_us: u128) -> ProbeResult {
     use crate::modbus::frame::Pdu;
-    match Pdu::from_bytes(pdu) {
+    match Pdu::from_bytes(pdu).map(Pdu::into_response) {
         Ok(p) if p.is_exception() => {
             if let Pdu::Exception { code, .. } = p {
                 ProbeResult::Exception {

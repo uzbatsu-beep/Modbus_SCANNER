@@ -680,7 +680,8 @@ pub(crate) fn verify_adu(
     if fc != expected_fc {
         return Err(TransportError::Modbus(ModbusError::UnexpectedFunction(fc)));
     }
-    Ok(pdu)
+    // Pdu::from_bytes is direction-neutral and returns Request by default.
+    Ok(pdu.into_response())
 }
 
 #[cfg(test)]

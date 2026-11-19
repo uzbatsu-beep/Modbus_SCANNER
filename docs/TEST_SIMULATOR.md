@@ -51,6 +51,7 @@ This smoke suite is also executed as a separate named CI step in
 - **Write function observed on discovery wire:** P0; production safety violation.
 - **Valid fragmented response rejected:** P1; reliability regression.
 - **Exception treated as missing device:** P1; false negative on unsupported register.
+- **PDU decoder returns an empty map for valid FC03/04:** P0; read-response direction must be preserved. Discovered by SIM-02 and covered by a direct manual-TCP regression test.
 - **Timeout misclassified as valid device:** P1; false positive.
 
 Keep diagnostics and raw frame captures with test results when reporting
