@@ -67,5 +67,5 @@ jobs:
           draft: false
           prerelease: false
           files: |
-            dist-installers/*.exe
-            dist-installers/*.msi
+            dist-installers/**/*.exe
+            dist-installers/**/*.msi
