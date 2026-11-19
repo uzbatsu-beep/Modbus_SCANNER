@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
 
 use crate::modbus::common::SerialMode;
@@ -159,31 +159,34 @@ impl SerialTransport {
     /// - RTU: no fixed terminator — use the silent interval (no new bytes for N ms);
     /// - ASCII: read until CRLF (b'\r' b'\n').
     async fn read_frame_raw(&mut self, quiet: Duration) -> TransportResult<Vec<u8>> {
-        let mut tmp = [0u8; 512];
+        read_frame_from(&mut self.stream, &mut self.rx_buf, self.mode, quiet).await
+    }
+}
 
-        loop {
-            let wait = tokio::time::timeout(quiet, self.stream.read(&mut tmp)).await;
-            match wait {
-                Err(_) => {
-                    // Silence terminates an RTU response only AFTER bytes arrived.
-                    // Before the first byte (or while ASCII waits for CRLF), rely on
-                    // the outer Transport::transact response timeout.
-                    if self.mode == SerialMode::Rtu && !self.rx_buf.is_empty() {
-                        return Ok(std::mem::take(&mut self.rx_buf));
-                    }
-                    continue;
+/// The generic reader makes delayed-first-byte and fragmented-ASCII cases
+/// testable without physical RS-485 hardware.
+async fn read_frame_from<R: AsyncRead + Unpin>(
+    stream: &mut R,
+    rx_buf: &mut Vec<u8>,
+    mode: SerialMode,
+    quiet: Duration,
+) -> TransportResult<Vec<u8>> {
+    let mut tmp = [0u8; 512];
+    loop {
+        match tokio::time::timeout(quiet, stream.read(&mut tmp)).await {
+            Err(_) => {
+                // Before the first byte the outer request timeout controls the wait.
+                // A partial ASCII frame must wait for CRLF, not a short quiet gap.
+                if mode == SerialMode::Rtu && !rx_buf.is_empty() {
+                    return Ok(std::mem::take(rx_buf));
                 }
-                Ok(Err(e)) => return Err(TransportError::Io(e)),
-                Ok(Ok(0)) => return Err(TransportError::Closed),
-                Ok(Ok(n)) => {
-                    self.rx_buf.extend_from_slice(&tmp[..n]);
-                    if self.mode == SerialMode::Ascii {
-                        // ASCII: check for CRLF terminator
-                        if self.rx_buf.ends_with(b"\r\n") && self.rx_buf.len() >= 5 {
-                            let frame = std::mem::take(&mut self.rx_buf);
-                            return Ok(frame);
-                        }
-                    }
+            }
+            Ok(Err(e)) => return Err(TransportError::Io(e)),
+            Ok(Ok(0)) => return Err(TransportError::Closed),
+            Ok(Ok(n)) => {
+                rx_buf.extend_from_slice(&tmp[..n]);
+                if mode == SerialMode::Ascii && rx_buf.len() >= 5 && rx_buf.ends_with(b"\r\n") {
+                    return Ok(std::mem::take(rx_buf));
                 }
             }
         }
@@ -249,6 +252,39 @@ impl Transport for SerialTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn rtu_response_can_start_after_initial_silence() {
+        let (mut tx, mut rx) = tokio::io::duplex(64);
+        let writer = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            tx.write_all(&[1, 3, 2, 0, 42]).await.unwrap();
+        });
+        let mut buf = Vec::new();
+        let frame = tokio::time::timeout(
+            Duration::from_millis(300),
+            read_frame_from(&mut rx, &mut buf, SerialMode::Rtu, Duration::from_millis(5)),
+        ).await.unwrap().unwrap();
+        assert_eq!(frame, vec![1, 3, 2, 0, 42]);
+        writer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn ascii_waits_for_crlf_even_after_short_silence() {
+        let (mut tx, mut rx) = tokio::io::duplex(64);
+        let writer = tokio::spawn(async move {
+            tx.write_all(b":01030200").await.unwrap();
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            tx.write_all(b"2AF0\r\n").await.unwrap();
+        });
+        let mut buf = Vec::new();
+        let frame = tokio::time::timeout(
+            Duration::from_millis(300),
+            read_frame_from(&mut rx, &mut buf, SerialMode::Ascii, Duration::from_millis(5)),
+        ).await.unwrap().unwrap();
+        assert_eq!(frame, b":010302002AF0\r\n");
+        writer.await.unwrap();
+    }
 
     #[test]
     fn rtu_gap_is_based_on_actual_character_duration() {
