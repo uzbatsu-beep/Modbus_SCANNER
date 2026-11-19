@@ -128,6 +128,9 @@ cargo test --lib         # protocol unit tests
 
 ## Status
 
+**In review:** v1.0.1 release candidate with TCP/RTU framing fixes, strict bounds and safer manual writes. Publication awaits PR review and field validation.
+
+
 The protocol layer, transports, scanner engine and UI are implemented, and the
 project is released as **v1.0.0** (headless CLI, local REST/WS API, device
 profiles, Modbus TLS, automated releases, generated IPC types, mock tests and

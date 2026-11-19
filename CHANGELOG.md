@@ -19,6 +19,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Audit: progress counters no longer double-count timeouts; stale architecture/protocol docs, broken `lint` script and misleading Cargo comment corrected
 
+## [1.0.1] - release candidate (PR #1)
+
+### Fixed
+- Fixed TCP MBAP framing: Length includes the Unit ID byte already consumed in the 7-byte header.
+- Serial RTU waits for the first byte until the configured response timeout and uses baud-correct t3.5; ASCII waits for CRLF.
+- Bounds CIDR allocations to /16 or narrower and handles /0 safely.
+- Single-device scans now accept TCP/UDP targets, preserving serial RTU/ASCII modes.
+- Validates register read/write counts, serial unit IDs and 16-bit address boundaries; fixes overflow at register 65535.
+- Serial port test validates Modbus response CRC/LRC, address and FC, and reports measured RTT.
+
+### Safety
+- Manual writes and raw frames now require a UI confirmation and a per-request opt-in enforced by Rust.
+- Serial broadcast writes (unit 0) are blocked; automated discovery remains read-only.
+
 ## [1.0.0] - 2026-11-19
 
 ### Added
@@ -78,6 +92,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - GitHub Actions CI: frontend typecheck/build, backend check/tests on Windows and Linux
 
 [Unreleased]: https://github.com/uzbatsu-beep/Modbus_SCANNER/compare/v1.0.0...HEAD
+[1.0.1]: https://github.com/uzbatsu-beep/Modbus_SCANNER/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v1.0.0
 [0.1.1]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.1
 [0.1.0]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.0

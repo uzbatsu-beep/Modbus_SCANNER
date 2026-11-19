@@ -464,14 +464,15 @@ impl RegisterScanStrategy {
         let parts = parts.min(block.len);
         let base = block.len / parts;
         let rem = block.len % parts;
-        let mut cursor = block.start;
+        // The end-exclusive cursor may reach 65536 at the last register.
+        let mut cursor = u32::from(block.start);
         for i in 0..parts {
             let len = base + if i < rem { 1 } else { 0 };
             if len == 0 {
                 continue;
             }
-            self.queue.push_back(Block { start: cursor, len });
-            cursor += len;
+            self.queue.push_back(Block { start: cursor as u16, len });
+            cursor += u32::from(len);
         }
     }
 
@@ -510,14 +511,13 @@ impl RegisterScanStrategy {
     pub fn new(spec: RegisterScanParams, _params: ScanParams) -> Self {
         let batch = Self::batch_for(&spec);
         let mut queue = std::collections::VecDeque::new();
-        let mut cursor = spec.start;
-        while cursor <= spec.end {
-            let len = batch.min(spec.end.saturating_sub(cursor) + 1);
-            queue.push_back(Block { start: cursor, len });
-            if cursor == u16::MAX {
-                break;
-            }
-            cursor += len;
+        // u32 arithmetic permits the full 0..=65535 address space.
+        let mut cursor = u32::from(spec.start);
+        let end = u32::from(spec.end);
+        while cursor <= end {
+            let len = u32::from(batch).min(end - cursor + 1) as u16;
+            queue.push_back(Block { start: cursor as u16, len });
+            cursor += u32::from(len);
         }
         Self {
             spec,
@@ -959,6 +959,28 @@ pub fn classify_response(function: u8, pdu: &[u8], rtt_us: u128) -> ProbeResult 
 #[cfg(test)]
 mod reliability_tests {
     use super::*;
+
+    #[test]
+    fn full_register_address_space_does_not_overflow() {
+        let target = DeviceTarget {
+            kind: crate::modbus::common::TransportKind::Tcp,
+            endpoint: "127.0.0.1".into(), port: Some(502),
+            unit_id: 1, serial: None, serial_mode: None,
+        };
+        let scan = RegisterScanParams {
+            target, function: 3, start: 0, end: u16::MAX,
+            mode: RegisterScanMode::Balanced, batch: 100,
+        };
+        let mut s = RegisterScanStrategy::new(scan, ScanParams::default());
+        let mut last = 0u32;
+        let mut count = 0;
+        while let Some(WorkItem::RegisterRead { start, quantity, .. }) = s.next_item() {
+            last = start as u32 + quantity as u32;
+            count += 1;
+        }
+        assert_eq!(last, 65_536);
+        assert!(count > 600);
+    }
 
     #[test]
     fn rejects_oversized_cidr_before_allocation() {
