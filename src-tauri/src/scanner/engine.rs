@@ -257,13 +257,13 @@ impl ScannerHandle {
             let results = self.results.clone();
             let status_tx = self.status_tx.clone();
 
-            let _ = self.status_tx.send(ScanStatus::Preparing);
+            let _ = self.status_tx.send_replace(ScanStatus::Preparing);
             let _ = status_tx;
 
             let engine_params = EngineParams::from_scan_params(&params);
             let strategy = build_strategy(target, params)
                 .map_err(|e| {
-                    let _ = self.status_tx.send(ScanStatus::Failed);
+                    let _ = self.status_tx.send_replace(ScanStatus::Failed);
                     e
                 })?;
 
@@ -323,7 +323,7 @@ async fn engine_task(
     let mut ip_tasks: tokio::task::JoinSet<ProbeOutcome> = tokio::task::JoinSet::new();
     let mut want_stop = false;
 
-    let _ = status_tx.send(ScanStatus::Running);
+    let _ = status_tx.send_replace(ScanStatus::Running);
     emit_event(&sink, &ScanEvent::StatusChanged {
         status: ScanStatus::Running,
         message: "scanning started".into(),
@@ -336,12 +336,12 @@ async fn engine_task(
                 ControlMsg::Stop => {
                     want_stop = true;
                     ip_tasks.abort_all();
-                    let _ = status_tx.send(ScanStatus::Stopped);
+                    let _ = status_tx.send_replace(ScanStatus::Stopped);
                     break 'main;
                 }
                 ControlMsg::Pause => {
                     let _ = pause_tx.send(true);
-                    let _ = status_tx.send(ScanStatus::Paused);
+                    let _ = status_tx.send_replace(ScanStatus::Paused);
                     emit_event(&sink, &ScanEvent::StatusChanged {
                         status: ScanStatus::Paused,
                         message: "scanning paused".into(),
@@ -349,7 +349,7 @@ async fn engine_task(
                 }
                 ControlMsg::Resume => {
                     let _ = pause_tx.send(false);
-                    let _ = status_tx.send(ScanStatus::Running);
+                    let _ = status_tx.send_replace(ScanStatus::Running);
                     emit_event(&sink, &ScanEvent::StatusChanged {
                         status: ScanStatus::Running,
                         message: "scanning resumed".into(),
@@ -384,7 +384,7 @@ async fn engine_task(
                     if let Some(ControlMsg::Stop) = msg {
                         want_stop = true;
                         ip_tasks.abort_all();
-                        let _ = status_tx.send(ScanStatus::Stopped);
+                        let _ = status_tx.send_replace(ScanStatus::Stopped);
                         break;
                     }
                 }
@@ -514,7 +514,7 @@ async fn engine_task(
         let mut r = results.write();
         r.stats.finished_ms = Some(now_ms());
     }
-    let _ = status_tx.send(status);
+    let _ = status_tx.send_replace(status);
 
     let r = results.read();
     emit_event(&sink, &ScanEvent::Finished {

@@ -68,4 +68,8 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib
 
+      - name: Protocol smoke — loopback Modbus field simulator
+        working-directory: src-tauri
+        run: cargo test --lib scanner::field_tests -- --nocapture
+
   # Full installers are built on release tags to keep CI fast.

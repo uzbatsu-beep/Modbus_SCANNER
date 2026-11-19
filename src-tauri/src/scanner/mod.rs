@@ -16,6 +16,9 @@ pub mod monitor;
 pub mod strategies;
 pub mod types;
 
+#[cfg(test)]
+mod field_tests;
+
 use std::sync::Arc;
 
 use types::{MonitorValueState, TrafficRecord};
