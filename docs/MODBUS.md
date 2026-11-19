@@ -116,6 +116,16 @@ transaction-id validation as TCP.
 The diagnostic codes (0x07, 0x08, 0x0B, 0x0C) and device identification 0x2B
 are serial-only in the spec and are **not yet exposed** in the UI (see ROADMAP).
 
+## 4a. Modbus Security / TLS (E-05)
+
+The official Modbus Security specification wraps the MBAP ADU in TLS on port
+**802**. `ScanParams.tls = { client_cert?, client_key? }` enables it; the same
+MBAP framing and transaction-id validation apply inside the tunnel. Server
+certificates are verified against the webpki root set; an optional PEM client
+certificate/key enables mutual TLS. Self-signed devices need their CA trusted
+by the system. Set `tcp_framing = "rtu"` only if the gateway expects a raw RTU
+frame (not typical for Modbus Security).
+
 ## 4b. Device identification (FC43 / MEI 0x0E, P2-05)
 
 Request PDU (read category 1 = basic identification):

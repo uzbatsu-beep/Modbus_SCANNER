@@ -102,7 +102,7 @@ impl MonitorHandle {
             defaults.retries = 0;
             let engine = EngineParams::from_scan_params(&defaults);
 
-            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine));
+            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine.clone()));
             Ok(())
         }
     }
@@ -148,7 +148,7 @@ async fn monitor_task(
                 ensure_serial_settings(&mut serial_transport, &mut serial_signature, &watch.target).await;
             }
             let tx = next_transaction_id();
-            let adu = build_adu(watch.target.kind, watch.target.unit_id, &pdu, engine, tx);
+            let adu = build_adu(watch.target.kind, watch.target.unit_id, &pdu, engine.clone(), tx);
             let timeout = engine.timeout;
             let hint = 3 + (watch.quantity as usize) * 2;
 
@@ -192,6 +192,7 @@ async fn monitor_task(
                     port: watch.target.port.unwrap_or(502),
                     connect_timeout: timeout,
                     framing: engine.tcp_framing,
+                tls: engine.tls.clone(),
                 })
                 .await
                 {
@@ -214,7 +215,7 @@ async fn monitor_task(
             };
 
             let parsed = result.ok().and_then(|resp| {
-                let pdu = verify_adu(watch.target.kind, watch.target.unit_id, watch.function, &resp, tx, engine).ok()?;
+                let pdu = verify_adu(watch.target.kind, watch.target.unit_id, watch.function, &resp, tx, engine.clone()).ok()?;
                 if pdu.is_exception() {
                     return None;
                 }

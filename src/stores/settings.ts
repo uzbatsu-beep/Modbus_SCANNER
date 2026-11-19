@@ -20,6 +20,7 @@ const DEFAULT_CONFIG: Config = {
     identify_devices: true,
     tcp_framing: "mbap",
     udp_mbap: false,
+    tls: null,
   },
   last_serial: null,
   last_tcp_host: null,

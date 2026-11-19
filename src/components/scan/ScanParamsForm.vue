@@ -19,6 +19,13 @@ const tcpFraming = computed({
   },
 });
 
+const tlsEnabled = computed({
+  get: () => params.value.tls != null,
+  set: (enabled: boolean) => {
+    params.value.tls = enabled ? { client_cert: null, client_key: null } : null;
+  },
+});
+
 function toggleProbe(fc: number) {
   const i = params.value.probe_functions.indexOf(fc);
   if (i >= 0) params.value.probe_functions.splice(i, 1);
@@ -74,6 +81,19 @@ function toggleProbe(fc: number) {
       <label class="short">{{ t("udpMbap") }}</label>
       <input type="checkbox" v-model="params.udp_mbap" :disabled="scanner.isRunning" />
       <span class="hint">{{ t("tcpAduHint") }}</span>
+    </div>
+
+    <div class="form-row">
+      <label>{{ t("tlsTitle") }}</label>
+      <input type="checkbox" v-model="tlsEnabled" :disabled="scanner.isRunning" />
+      <span class="hint">{{ t("tlsHint") }}</span>
+    </div>
+
+    <div v-if="tlsEnabled" class="form-row">
+      <label>{{ t("tlsCert") }}</label>
+      <input v-model="params.tls!.client_cert" class="wide" placeholder="client.pem" :disabled="scanner.isRunning" />
+      <label class="short">{{ t("tlsKey") }}</label>
+      <input v-model="params.tls!.client_key" class="wide" placeholder="client.key" :disabled="scanner.isRunning" />
     </div>
 
     <div class="hint">

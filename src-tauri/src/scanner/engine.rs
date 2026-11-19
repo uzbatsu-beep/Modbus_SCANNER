@@ -20,6 +20,7 @@ use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
 use crate::modbus::frame::{parse_device_identification, read_device_identification, Pdu};
 use crate::transport::serial::{SerialPortConfig, SerialTransport};
 use crate::transport::tcp::{TcpFraming, TcpTransport};
+use crate::transport::tls::TlsParams;
 use crate::transport::udp::UdpTransport;
 use crate::transport::{Transport, TransportError};
 
@@ -39,7 +40,7 @@ pub enum ControlMsg {
 ///
 /// All values are clamped once at scan start, so the engine task and its workers
 /// use identical settings for every request.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EngineParams {
     /// Response/connect timeout for a single request.
     pub timeout: Duration,
@@ -55,6 +56,8 @@ pub struct EngineParams {
     pub tcp_framing: TcpFraming,
     /// MBAP framing for UDP instead of the default RTU-style ADU.
     pub udp_mbap: bool,
+    /// Modbus Security TLS options.
+    pub tls: Option<TlsParams>,
 }
 
 impl EngineParams {
@@ -67,6 +70,7 @@ impl EngineParams {
             identify_devices: p.identify_devices,
             tcp_framing: p.tcp_framing,
             udp_mbap: p.udp_mbap,
+            tls: p.tls.clone(),
         }
     }
 }
@@ -300,6 +304,8 @@ async fn engine_task(
     status_tx: watch::Sender<ScanStatus>,
 ) {
     let total = strategy.total();
+    let request_gap = engine.request_gap;
+    let ip_concurrency = engine.ip_concurrency;
     let mut done: u64 = 0;
     let mut serial_transport: Option<SerialTransport> = None;
     // Serial settings currently held by `serial_transport`; a sweep changes
@@ -394,7 +400,7 @@ async fn engine_task(
             WorkItem::Probe { target, function, pdu } => {
                 if matches!(target.kind, TransportKind::Tcp | TransportKind::Udp) {
                     // Respect the cap strictly: wait for a free slot before spawning.
-                    while ip_tasks.len() >= engine.ip_concurrency && !want_stop {
+                    while ip_tasks.len() >= ip_concurrency && !want_stop {
                         match ip_tasks.join_next().await {
                             Some(Ok(outcome)) => {
                                 let stop_on_found = strategy.stop_on_found();
@@ -419,6 +425,7 @@ async fn engine_task(
                     // Each IP probe owns its transport: safe to run concurrently.
                     let task_sink = sink.clone();
                     let task_results = results.clone();
+                    let task_engine = engine.clone();
                     ip_tasks.spawn(async move {
                         let mut unused_serial = None;
                         execute_probe(
@@ -428,7 +435,7 @@ async fn engine_task(
                             function,
                             &pdu,
                             &task_results,
-                            engine,
+                            task_engine,
                         )
                         .await
                     });
@@ -442,7 +449,7 @@ async fn engine_task(
                         function,
                         &pdu,
                         &results,
-                        engine,
+                        engine.clone(),
                     )
                     .await;
                     let stop_on_found = strategy.stop_on_found();
@@ -455,7 +462,7 @@ async fn engine_task(
                 if let WorkItem::RegisterRead { target, .. } = &item {
                     ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
                 }
-                let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine).await;
+                let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine.clone()).await;
                 if let Some(outcome) = outcome {
                     for follow in strategy.on_register_read(&item, outcome) {
                         pending.push_back(follow);
@@ -467,8 +474,8 @@ async fn engine_task(
         }
 
         // Inter-request gap from ScanParams (applies to all work items).
-        if !engine.request_gap.is_zero() {
-            tokio::time::sleep(engine.request_gap).await;
+        if !request_gap.is_zero() {
+            tokio::time::sleep(request_gap).await;
         }
     }
 
@@ -484,7 +491,7 @@ async fn engine_task(
         if let WorkItem::RegisterRead { target, .. } = &item {
             ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
         }
-        let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine).await;
+        let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine.clone()).await;
         if let Some(outcome) = outcome {
             for follow in strategy.on_register_read(&item, outcome) {
                 pending.push_back(follow);
@@ -707,7 +714,7 @@ async fn execute_probe(
 ) -> ProbeOutcome {
     results.write().stats.requests_sent += 1;
     let transaction_id = next_transaction_id();
-    let adu = build_adu(target.kind, target.unit_id, pdu, engine, transaction_id);
+    let adu = build_adu(target.kind, target.unit_id, pdu, engine.clone(), transaction_id);
 
     let mut attempts = 0u32;
     let retries = engine.retries;
@@ -768,6 +775,7 @@ async fn execute_probe(
                 port: target.port.unwrap_or(502),
                 connect_timeout: timeout,
                 framing: engine.tcp_framing,
+            tls: engine.tls.clone(),
             })
             .await
             {
@@ -807,7 +815,7 @@ async fn execute_probe(
         match res {
             Ok(resp) => {
                 let rtt = started.elapsed().as_micros();
-                match verify_adu(target.kind, target.unit_id, function, &resp, transaction_id, engine) {
+                match verify_adu(target.kind, target.unit_id, function, &resp, transaction_id, engine.clone()) {
                     Ok(p) => {
                         let result = super::strategies::classify_response(function, &p.to_bytes(), rtt);
                         let is_found = matches!(result, ProbeResult::Ok { .. } | ProbeResult::Exception { .. });
@@ -878,7 +886,7 @@ async fn execute_probe(
                                 emit_event(sink, &ScanEvent::DeviceFound { record: rec });
                             }
                             // P2-05: ask the device who it is (best-effort).
-                            identify_device(sink, serial_transport, target, results, &key, engine).await;
+                            identify_device(sink, serial_transport, target, results, &key, engine.clone()).await;
                             // The register plan is scheduled by the engine (it owns
                             // the strategy and the shared serial transport).
                             emit_probe_completed(sink, &key, function, &result);
@@ -975,7 +983,7 @@ async fn execute_work(
                 *quantity,
                 pdu,
                 results,
-                engine,
+                engine.clone(),
             )
             .await,
         )
@@ -997,7 +1005,7 @@ async fn execute_register_read(
     engine: EngineParams,
 ) -> RegisterReadOutcome {
     let transaction_id = next_transaction_id();
-    let adu = build_adu(target.kind, target.unit_id, pdu, engine, transaction_id);
+    let adu = build_adu(target.kind, target.unit_id, pdu, engine.clone(), transaction_id);
     let timeout = engine.timeout;
     let started = Instant::now();
 
@@ -1014,6 +1022,7 @@ async fn execute_register_read(
             port: target.port.unwrap_or(502),
             connect_timeout: timeout,
             framing: engine.tcp_framing,
+        tls: engine.tls.clone(),
         })
         .await
         {
@@ -1072,7 +1081,7 @@ async fn execute_register_read(
         function,
         &resp,
         transaction_id,
-        engine,
+        engine.clone(),
     ) {
         Ok(p) if !p.is_exception() => {
             let data = match &p {
@@ -1247,7 +1256,7 @@ async fn identify_device(
         target.kind,
         target.unit_id,
         &read_device_identification(1, 0),
-        engine,
+        engine.clone(),
         transaction_id,
     );
     let timeout = engine.timeout;
@@ -1262,6 +1271,7 @@ async fn identify_device(
             port: target.port.unwrap_or(502),
             connect_timeout: timeout,
             framing: engine.tcp_framing,
+        tls: engine.tls.clone(),
         })
         .await
         {
@@ -1296,7 +1306,7 @@ async fn identify_device(
         Ok(r) => r,
         Err(_) => return,
     };
-    let pdu = match verify_adu(target.kind, target.unit_id, 0x2B, &resp, transaction_id, engine) {
+    let pdu = match verify_adu(target.kind, target.unit_id, 0x2B, &resp, transaction_id, engine.clone()) {
         Ok(p) if !p.is_exception() => p,
         _ => return,
     };

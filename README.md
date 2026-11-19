@@ -91,6 +91,9 @@ src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --tcp-port 
 # raw RTU over TCP, UDP, custom timeouts
 src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
 src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --udp --udp-mbap
+
+# Modbus Security (TLS port 802, optional mutual TLS)
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --tls --tls-cert client.pem --tls-key client.key
 ```
 
 Run `modbus-scanner scan --help` for all options. With no subcommand the desktop

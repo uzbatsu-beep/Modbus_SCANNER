@@ -11,6 +11,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- E-05: Modbus Security TLS (port 802) with webpki root validation and optional mutual TLS (`--tls`, `ScanParams.tls`)
 - E-04: reusable device profiles (CSV/JSON import, FC43 identity matching, one-click tag setup, Profiles tab)
 - E-03: local REST + WebSocket API (loopback only) with `/health`, scan control/results/traffic endpoints, WS event stream, `serve` CLI subcommand and Tauri lifecycle commands
 - E-02: headless `scan` CLI with JSON reports, serial auto-sweep and TCP/UDP targets (same engine as GUI)

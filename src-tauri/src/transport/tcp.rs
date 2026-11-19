@@ -11,10 +11,13 @@
 use std::time::Duration;
 
 use async_trait::async_trait;
+use rustls::pki_types::ServerName;
 use serde::{Deserialize, Serialize};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
+use tokio_rustls::TlsConnector;
 
+use super::tls::{build_client_config, TlsParams};
 use super::{Transport, TransportError, TransportResult};
 
 /// Wire format used on a TCP connection.
@@ -44,6 +47,9 @@ pub struct TcpConfig {
     /// Wire format (MBAP by default).
     #[serde(default)]
     pub framing: TcpFraming,
+    /// Modbus Security: wrap the connection in TLS (standard port 802).
+    #[serde(default)]
+    pub tls: Option<TlsParams>,
 }
 
 impl Default for TcpConfig {
@@ -53,14 +59,19 @@ impl Default for TcpConfig {
             port: 502,
             connect_timeout: Duration::from_millis(2000),
             framing: TcpFraming::Mbap,
+            tls: None,
         }
     }
 }
 
+/// Combined stream trait so plain and TLS streams share one boxed type.
+pub trait AsyncStream: AsyncRead + AsyncWrite + Send + Unpin {}
+impl<T: AsyncRead + AsyncWrite + Send + Unpin> AsyncStream for T {}
+
 /// Modbus TCP client transport.
 pub struct TcpTransport {
     config: TcpConfig,
-    stream: TcpStream,
+    stream: Box<dyn AsyncStream>,
 }
 
 impl TcpTransport {
@@ -73,6 +84,20 @@ impl TcpTransport {
         };
         // TCP_NODELAY: important for low-latency scanning.
         stream.set_nodelay(true)?;
+
+        let stream: Box<dyn AsyncStream> = match &config.tls {
+            Some(tls) => {
+                let client_config = build_client_config(tls).map_err(TransportError::Other)?;
+                let domain = ServerName::try_from(config.host.clone())
+                    .map_err(|e| TransportError::Other(format!("invalid TLS server name: {e}")))?;
+                let tls_stream = TlsConnector::from(client_config)
+                    .connect(domain, stream)
+                    .await
+                    .map_err(TransportError::Io)?;
+                Box::new(tls_stream)
+            }
+            None => Box::new(stream),
+        };
         Ok(Self { config, stream })
     }
 
@@ -121,7 +146,13 @@ impl TcpTransport {
 #[async_trait]
 impl Transport for TcpTransport {
     fn name(&self) -> String {
-        format!("tcp://{}:{} ({:?})", self.config.host, self.config.port, self.config.framing)
+        format!(
+            "{}://{}:{} ({:?})",
+            if self.config.tls.is_some() { "tcps" } else { "tcp" },
+            self.config.host,
+            self.config.port,
+            self.config.framing
+        )
     }
 
     async fn reset(&mut self) -> TransportResult<()> {

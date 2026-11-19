@@ -149,7 +149,8 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
   probe_functions: number[]; stop_on_first: boolean;
   register_plan: Array<{ function, start, quantity }>;
   ip_concurrency: number; identify_devices?: boolean;
-  tcp_framing?: "mbap"|"rtu"; udp_mbap?: boolean }
+  tcp_framing?: "mbap"|"rtu"; udp_mbap?: boolean;
+  tls?: { client_cert?: string|null; client_key?: string|null } | null }
 ```
 
 ### Manual Modbus commands

@@ -12,6 +12,7 @@ use crate::modbus::common::TransportKind;
 use crate::modbus::decode::DecodeSpec;
 use crate::modbus::frame::DeviceIdentification;
 use crate::transport::tcp::TcpFraming;
+use crate::transport::tls::TlsParams;
 use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
 
 pub use crate::modbus::common::SerialMode;
@@ -206,6 +207,9 @@ pub struct ScanParams {
     /// Use MBAP framing for UDP instead of the default RTU-style ADU.
     #[serde(default)]
     pub udp_mbap: bool,
+    /// Modbus Security: wrap TCP connections in TLS (port 802 by convention).
+    #[serde(default)]
+    pub tls: Option<TlsParams>,
 }
 
 fn default_identify_devices() -> bool {
@@ -225,6 +229,7 @@ impl Default for ScanParams {
             identify_devices: true,
             tcp_framing: TcpFraming::Mbap,
             udp_mbap: false,
+            tls: None,
         }
     }
 }

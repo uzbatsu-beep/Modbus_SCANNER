@@ -81,4 +81,5 @@ pub trait Transport: Send {
 
 pub mod serial;
 pub mod tcp;
+pub mod tls;
 pub mod udp;

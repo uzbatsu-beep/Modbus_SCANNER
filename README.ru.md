@@ -91,6 +91,9 @@ src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --tcp-port 
 # RTU поверх TCP / UDP, свои тайминги
 src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
 src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --udp --udp-mbap
+
+# Modbus Security (TLS, порт 802; опционально взаимная аутентификация)
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --tls --tls-cert client.pem --tls-key client.key
 ```
 
 Полный список: `modbus-scanner scan --help`. Без подкоманды запускается десктопное

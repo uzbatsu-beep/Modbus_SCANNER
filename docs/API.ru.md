@@ -148,7 +148,8 @@ spec: DecodeSpec, unit?, description? }`. Сопоставление identity р
   probe_functions: number[]; stop_on_first: boolean;
   register_plan: Array<{ function, start, quantity }>;
   ip_concurrency: number; identify_devices?: boolean;
-  tcp_framing?: "mbap"|"rtu"; udp_mbap?: boolean }
+  tcp_framing?: "mbap"|"rtu"; udp_mbap?: boolean;
+  tls?: { client_cert?: string|null; client_key?: string|null } | null }
 ```
 
 ### Ручные команды Modbus

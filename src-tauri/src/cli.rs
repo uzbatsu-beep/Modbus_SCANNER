@@ -17,6 +17,7 @@ use crate::scanner::types::{
 use crate::scanner::{EventSink, ScannerHandle};
 use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
 use crate::transport::tcp::TcpFraming;
+use crate::transport::tls::TlsParams;
 
 #[derive(Debug, Parser)]
 #[command(name = "modbus-scanner", version, about = "Modbus RTU/ASCII/TCP/UDP scanner")]
@@ -79,6 +80,18 @@ pub struct ScanArgs {
     /// Use raw RTU over TCP instead of MBAP
     #[arg(long)]
     pub rtu_over_tcp: bool,
+    /// Modbus Security: wrap TCP in TLS (default port 802)
+    #[arg(long)]
+    pub tls: bool,
+    /// TLS port when --tls is set and --tcp-port is not given (default 802)
+    #[arg(long, default_value_t = 802)]
+    pub tls_port: u16,
+    /// PEM client certificate (mutual TLS)
+    #[arg(long)]
+    pub tls_cert: Option<PathBuf>,
+    /// PEM client private key (mutual TLS)
+    #[arg(long)]
+    pub tls_key: Option<PathBuf>,
 
     /// Response timeout in ms (default 800)
     #[arg(long)]
@@ -154,7 +167,11 @@ fn build_target(args: &ScanArgs) -> Result<ScanTarget, String> {
         return Ok(ScanTarget::IpRange {
             from: ip.clone(),
             to: args.ip_to.clone(),
-            port: args.tcp_port,
+            port: if args.tls && args.tcp_port == 502 {
+                args.tls_port
+            } else {
+                args.tcp_port
+            },
             kind: if args.udp { IpTransportKind::Udp } else { IpTransportKind::Tcp },
         });
     }
@@ -184,6 +201,10 @@ fn build_params(args: &ScanArgs) -> ScanParams {
     } else {
         TcpFraming::Mbap
     };
+    params.tls = args.tls.then(|| TlsParams {
+        client_cert: args.tls_cert.clone(),
+        client_key: args.tls_key.clone(),
+    });
     params
 }
 
@@ -244,6 +265,10 @@ mod tests {
             udp: false,
             udp_mbap: false,
             rtu_over_tcp: false,
+            tls: false,
+            tls_port: 802,
+            tls_cert: None,
+            tls_key: None,
             timeout_ms: None,
             gap_ms: None,
             retries: None,
@@ -281,6 +306,10 @@ mod tests {
             udp: true,
             udp_mbap: false,
             rtu_over_tcp: false,
+            tls: false,
+            tls_port: 802,
+            tls_cert: None,
+            tls_key: None,
             timeout_ms: None,
             gap_ms: None,
             retries: None,

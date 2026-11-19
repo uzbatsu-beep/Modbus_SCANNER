@@ -65,6 +65,11 @@ export interface SerialAuto {
   sweep: SerialSweepParams;
 }
 
+export interface TlsParams {
+  client_cert?: string | null;
+  client_key?: string | null;
+}
+
 export type RegisterScanMode = "quick" | "balanced" | "deep";
 
 /** P2-03: adaptive register/coil map scan on a single device. */
@@ -138,6 +143,8 @@ export interface ScanParams {
   tcp_framing?: "mbap" | "rtu";
   /** MBAP framing for UDP instead of the default RTU-style ADU. */
   udp_mbap?: boolean;
+  /** Modbus Security (TLS, port 802); null = plain TCP. */
+  tls?: TlsParams | null;
 }
 
 export type ProbeResult =

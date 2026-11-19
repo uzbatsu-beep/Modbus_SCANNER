@@ -90,6 +90,10 @@ const ru = {
   rtuOverTcp: "RTU over TCP (сырой кадр + CRC)",
   udpMbap: "MBAP для UDP",
   tcpAduHint: "иначе UDP передаёт RTU-кадр",
+  tlsTitle: "Modbus Security (TLS)",
+  tlsHint: "порт 802, сертификат сервера проверяется через доверенные CA",
+  tlsCert: "Клиентский сертификат (PEM)",
+  tlsKey: "Клиентский ключ (PEM)",
   timingHint:
     "Рекомендации: RTU @9600 → timeout 500–1000 мс; шина с 10+ устройствами → gap 20–50 мс; IP → timeout 200–500 мс, concurrency 32–64.",
 
@@ -372,6 +376,10 @@ const en: Record<TranslationKey, string> = {
   rtuOverTcp: "RTU over TCP (raw frame + CRC)",
   udpMbap: "MBAP for UDP",
   tcpAduHint: "otherwise UDP sends an RTU frame",
+  tlsTitle: "Modbus Security (TLS)",
+  tlsHint: "port 802, server certificate verified against trusted CAs",
+  tlsCert: "Client certificate (PEM)",
+  tlsKey: "Client key (PEM)",
   timingHint:
     "Recommendations: RTU @9600 → timeout 500–1000 ms; bus with 10+ devices → gap 20–50 ms; IP → timeout 200–500 ms, concurrency 32–64.",
 
