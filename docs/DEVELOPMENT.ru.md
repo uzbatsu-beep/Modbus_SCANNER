@@ -103,6 +103,21 @@ Rust собранный тестовый бинарник завершается
 `scanner/engine.rs` (исполнение) и `scanner/types.rs` (схема параметров).
 При изменении контракта обновите docs/API и ROADMAP.
 
+## Генерация IPC-типов (E-07)
+
+`src/types/ipc.ts` — фасад над `src/types/generated/`, которые генерируются из
+Rust через `ts-rs`. После изменения любого IPC-типа выполните:
+
+```bash
+npm run gen:types     # cd src-tauri && cargo run --bin gen_bindings
+npm run typecheck
+```
+
+CI перегенерирует биндинги и упадёт, если `src/types/generated/` не актуален.
+Вручную в `ipc.ts` живут только UI-константы (`FC`, `FC_NAMES`, `BAUD_RATES`).
+Поля `u64`/`u128` аннотируются `#[ts(type = "number")]`, потому что JSON
+сериализует их как JS-числа.
+
 ## Карта файлов
 
 | Путь | Назначение |

@@ -1,5 +1,6 @@
 //! Device profile commands (E-04): reusable register maps matched by FC43 identity.
 
+use ts_rs::TS;
 use serde::Deserialize;
 use tauri::{AppHandle, State};
 
@@ -9,7 +10,7 @@ use crate::scanner::types::{
 };
 use crate::state::AppState;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ProfileFormat {
     Csv,

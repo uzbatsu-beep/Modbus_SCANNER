@@ -1,23 +1,24 @@
 //! Shared protocol types: UnitId, Address, Quantity, protocol errors.
 
+use ts_rs::TS;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 /// Modbus unit (slave) identifier. RTU: 0-247 (0 = broadcast), TCP: 0-255.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub struct UnitId(pub u8);
 
 /// Register/coil address (0..=65535). Note: in the PDU the address is 0-based,
 /// in "Modbus data model" notation (1..=65536) it is shifted by 1.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
 pub struct Address(pub u16);
 
 /// Quantity of coils/registers to read/write.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct Quantity(pub u16);
 
 /// Modbus transport kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum TransportKind {
     /// Modbus RTU over serial (binary + CRC-16)
@@ -31,7 +32,7 @@ pub enum TransportKind {
 }
 
 /// Serial framing mode (RTU vs ASCII).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum SerialMode {
     /// Binary frames + CRC-16.
@@ -41,7 +42,7 @@ pub enum SerialMode {
 }
 
 /// Modbus protocol-level errors.
-#[derive(Debug, Clone, Error, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Error, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub enum ModbusError {
     /// Illegal function code (exception 0x01)
     #[error("illegal function (0x01)")]

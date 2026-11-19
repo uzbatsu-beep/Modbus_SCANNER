@@ -64,7 +64,9 @@ function removeLogger(id: string) {
 
 const available = computed(() => {
   if (!devices.selected) return [];
-  return Object.values(devices.selected.registers).sort((a, b) => a.address - b.address);
+  return Object.values(devices.selected.registers)
+    .flatMap((r) => (r ? [r] : []))
+    .sort((a, b) => a.address - b.address);
 });
 
 function addWatch() {

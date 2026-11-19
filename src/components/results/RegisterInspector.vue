@@ -7,6 +7,7 @@ import type {
   ByteOrder,
   DataType,
   DecodeResult,
+  DecodedValue,
   DeviceRecord,
   TagDefinition,
 } from "@/types/ipc";
@@ -52,10 +53,9 @@ const valueNames: Record<DataType, string> = {
   ascii: "ASCII",
 };
 
-function formatValue(value: { kind: string; value: number | string }): string {
+function formatValue(value: DecodedValue): string {
   if (value.kind === "float") {
-    const v = Number(value.value);
-    return Number.isInteger(v) ? v.toFixed(2) : String(v);
+    return Number.isInteger(value.value) ? value.value.toFixed(2) : String(value.value);
   }
   return String(value.value);
 }
@@ -76,9 +76,9 @@ async function refresh() {
     const width = ["int32", "uint32", "float32"].includes(tag.spec.data_type) ? 2 : 1;
     const raws: number[] = [];
     for (let i = 0; i < width; i++) {
-      const reg = Object.values(props.record.registers).find(
-        (r) => r.address === tag.address + i
-      );
+      const reg = Object.values(props.record.registers)
+        .flatMap((r) => (r ? [r] : []))
+        .find((r) => r.address === tag.address + i);
       raws.push(reg?.raw ?? 0);
     }
     if (raws.some((v) => v === 0) && width === 2) continue;
@@ -106,8 +106,8 @@ async function saveTag() {
       divider: Number(form.divider) || 1,
       offset: Number(form.offset),
     },
-    unit: form.unit.trim() || undefined,
-    description: undefined,
+    unit: form.unit.trim() || null,
+    description: null,
   };
   settings.config.tags = [
     ...(settings.config.tags ?? []).filter(

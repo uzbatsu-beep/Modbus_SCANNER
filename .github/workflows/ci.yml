@@ -58,6 +58,12 @@ jobs:
         working-directory: src-tauri
         run: cargo check
 
+      - name: Verify generated IPC bindings are up to date
+        working-directory: src-tauri
+        run: |
+          cargo run --bin gen_bindings
+          git -C .. diff --exit-code -- src/types/generated
+
       - name: cargo test
         working-directory: src-tauri
         run: cargo test --lib

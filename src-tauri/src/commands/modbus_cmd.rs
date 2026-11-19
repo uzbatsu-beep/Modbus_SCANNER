@@ -3,6 +3,7 @@
 //! These are for the "Manual / Debug" tab of the UI: one-shot requests
 //! against a single device with full control over the PDU.
 
+use ts_rs::TS;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
@@ -21,7 +22,7 @@ use crate::transport::{Transport, TransportError};
 use crate::state::AppState;
 
 /// Manual command target (one device).
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
 pub struct ManualTarget {
     pub kind: TransportKind,
     /// Serial: port name; TCP/UDP: host.
@@ -34,7 +35,7 @@ pub struct ManualTarget {
 }
 
 /// Manual command timing.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
 pub struct ManualTiming {
     pub timeout_ms: u32,
     #[serde(default = "default_retries")]
@@ -45,7 +46,7 @@ fn default_retries() -> u32 {
     0
 }
 /// Read request: one function code, address, quantity.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
 pub struct ReadRequest {
     pub target: ManualTarget,
     /// Function code: 0x01..=0x04.
@@ -56,7 +57,7 @@ pub struct ReadRequest {
 }
 
 /// Write request.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
 pub struct WriteRequest {
     pub target: ManualTarget,
     pub function: u8,
@@ -67,7 +68,7 @@ pub struct WriteRequest {
 }
 
 /// Raw frame request: full ADU bytes (hex) sent as is.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
 pub struct RawFrameRequest {
     pub target: ManualTarget,
     /// Hex string of the raw ADU (without CRC for RTU — computed automatically;
@@ -79,7 +80,7 @@ pub struct RawFrameRequest {
 }
 
 /// Manual command response.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 pub struct ManualResponse {
     pub ok: bool,
     /// Error message (if !ok).
@@ -91,6 +92,7 @@ pub struct ManualResponse {
     /// Raw response ADU hex.
     pub response_hex: Option<String>,
     /// Roundtrip in microseconds.
+    #[ts(type = "number | null")]
     pub rtt_us: Option<u128>,
 }
 

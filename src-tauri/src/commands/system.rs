@@ -1,11 +1,12 @@
 //! System commands: app info, log level.
 
+use ts_rs::TS;
 use serde::Serialize;
 use tauri::State;
 
 use crate::state::AppState;
 
-#[derive(Serialize)]
+#[derive(Serialize, TS)]
 pub struct AppInfo {
     pub name: &'static str,
     pub version: &'static str,

@@ -2,6 +2,8 @@
 
 use std::path::PathBuf;
 
+use ts_rs::TS;
+
 use tauri::{AppHandle, State};
 
 use crate::scanner::engine::{ControlMsg, ScannerHandle};
@@ -64,7 +66,7 @@ pub fn clear_results(state: State<'_, AppState>) -> Result<(), String> {
 }
 
 /// Export format.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ExportFormat {
     Csv,

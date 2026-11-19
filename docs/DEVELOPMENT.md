@@ -104,6 +104,21 @@ See `src-tauri/src/scanner/strategies.rs` for target enumeration,
 `scanner/engine.rs` for execution, and `scanner/types.rs` for the parameter
 schema. Update docs/API + ROADMAP when the contract changes.
 
+## Generated IPC types (E-07)
+
+`src/types/ipc.ts` is a facade over `src/types/generated/`, which is generated
+from Rust with `ts-rs`. After changing any IPC type run:
+
+```bash
+npm run gen:types     # cd src-tauri && cargo run --bin gen_bindings
+npm run typecheck
+```
+
+CI regenerates the bindings and fails if `src/types/generated/` is out of date.
+Only UI constants (`FC`, `FC_NAMES`, `BAUD_RATES`) live in `ipc.ts` by hand.
+`u64`/`u128` fields are annotated with `#[ts(type = "number")]` because JSON
+serializes them as JavaScript numbers.
+
 ## File map (quick)
 
 | Path | Purpose |

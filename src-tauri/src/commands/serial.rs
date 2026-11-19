@@ -7,6 +7,7 @@
 //!   `test_modbus = true`, sends a probe request (FC 0x03, unit 1) and
 //!   measures the response time.
 
+use ts_rs::TS;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -20,7 +21,7 @@ use crate::transport::serial::{SerialPortConfig, SerialTransport};
 use crate::transport::Transport;
 
 /// Information about one available serial port.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SerialPortInfo {
     pub port_name: String,
     /// "usb", "pci", "bluetooth", "unknown"...
@@ -34,7 +35,7 @@ pub struct SerialPortInfo {
 }
 
 /// Parameters for `test_serial_port`.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, TS)]
 pub struct TestSerialParams {
     pub port_name: String,
     pub baud_rate: u32,
@@ -53,13 +54,14 @@ fn default_true() -> bool {
 }
 
 /// Result of `test_serial_port`.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, TS)]
 pub struct TestSerialResult {
     pub opened: bool,
     pub error: Option<String>,
     /// Modbus probe outcome (if requested).
     pub modbus_responded: bool,
     /// Response time in microseconds (probe roundtrip).
+    #[ts(type = "number | null")]
     pub rtt_us: Option<u128>,
     /// Raw response hex (if any).
     pub response_hex: Option<String>,

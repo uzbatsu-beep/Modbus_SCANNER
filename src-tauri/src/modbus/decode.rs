@@ -5,10 +5,11 @@
 //! The four classic layouts are ABCD, BADC, CDAB and DCBA, named by the order
 //! of the four bytes A B C D of the resulting 32-bit value.
 
+use ts_rs::TS;
 use serde::{Deserialize, Serialize};
 
 /// Byte/word order for a 32-bit value built from two registers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ByteOrder {
     /// Big-endian words, big-endian bytes: `(w0 << 16) | w1`.
@@ -22,7 +23,7 @@ pub enum ByteOrder {
 }
 
 /// Interpretation to apply to raw registers.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum DataType {
     Int16,
@@ -38,7 +39,7 @@ fn one() -> f64 {
 }
 
 /// User-defined decoding and engineering-unit scaling.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, TS)]
 pub struct DecodeSpec {
     pub data_type: DataType,
     pub byte_order: ByteOrder,
@@ -63,16 +64,19 @@ impl Default for DecodeSpec {
 }
 
 /// Decoded value, ready for display.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DecodedValue {
-    Integer(i64),
-    Float(f64),
-    Text(String),
+    Integer {
+        #[ts(type = "number")]
+        value: i64,
+    },
+    Float { value: f64 },
+    Text { value: String },
 }
 
 /// One possible interpretation of the selected registers.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Interpretation {
     pub data_type: DataType,
     pub byte_order: ByteOrder,
@@ -80,7 +84,7 @@ pub struct Interpretation {
 }
 
 /// A labelled hypothesis, never presented as a fact.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Suggestion {
     pub data_type: DataType,
     pub byte_order: ByteOrder,
@@ -89,7 +93,7 @@ pub struct Suggestion {
 }
 
 /// Result of the interactive inspector.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct DecodeResult {
     pub interpretations: Vec<Interpretation>,
     pub suggestions: Vec<Suggestion>,
@@ -141,7 +145,7 @@ pub fn decode(values: &[u16], spec: &DecodeSpec) -> Option<DecodedValue> {
         return if text.is_empty() {
             None
         } else {
-            Some(DecodedValue::Text(text))
+            Some(DecodedValue::Text { value: text })
         };
     }
 
@@ -154,7 +158,7 @@ pub fn decode(values: &[u16], spec: &DecodeSpec) -> Option<DecodedValue> {
             let bits = u32_from_words(values, spec.byte_order)?;
             let value = scale(f32::from_bits(bits) as f64, spec);
             return if value.is_finite() {
-                Some(DecodedValue::Float(value))
+                Some(DecodedValue::Float { value })
             } else {
                 None
             };
@@ -163,9 +167,11 @@ pub fn decode(values: &[u16], spec: &DecodeSpec) -> Option<DecodedValue> {
     };
 
     if has_scaling(spec) {
-        Some(DecodedValue::Float(scale(raw as f64, spec)))
+        Some(DecodedValue::Float {
+            value: scale(raw as f64, spec),
+        })
     } else {
-        Some(DecodedValue::Integer(raw))
+        Some(DecodedValue::Integer { value: raw })
     }
 }
 
@@ -204,7 +210,7 @@ pub fn interpret_all(values: &[u16]) -> DecodeResult {
                 };
                 if let Some(value) = decode(values, &spec) {
                     if data_type == DataType::Float32 {
-                        if let DecodedValue::Float(v) = &value {
+                        if let DecodedValue::Float { value: v } = &value {
                             // A non-integral, physically plausible float is a
                             // useful hypothesis — but still only a hypothesis.
                             if v.is_finite()
@@ -254,7 +260,7 @@ mod tests {
         )
         .unwrap();
         match value {
-            DecodedValue::Float(v) => assert!((v - 231.2).abs() < 0.01),
+            DecodedValue::Float { value: v } => assert!((v - 231.2).abs() < 0.01),
             other => panic!("expected float, got {other:?}"),
         }
         // CDAB interprets the swapped pair and yields a different number.
@@ -275,7 +281,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(value, DecodedValue::Integer(-2));
+        assert_eq!(value, DecodedValue::Integer { value: -2 });
     }
 
     #[test]
@@ -288,7 +294,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(text, DecodedValue::Text("ABC".into()));
+        assert_eq!(text, DecodedValue::Text { value: "ABC".into() });
 
         let scaled = decode(
             &[1000],
@@ -301,7 +307,7 @@ mod tests {
             },
         )
         .unwrap();
-        assert_eq!(scaled, DecodedValue::Float(102.0));
+        assert_eq!(scaled, DecodedValue::Float { value: 102.0 });
     }
 
     #[test]

@@ -5,12 +5,13 @@
 //! - ASCII ADU: `':' + [slave id + PDU as hex] + [LRC (1)] + CRLF`
 //! - TCP ADU:   MBAP header `[tx id (2)][protocol=0 (2)][length (2)][unit id (1)]` + PDU
 
+use ts_rs::TS;
 use serde::{Deserialize, Serialize};
 
 use super::common::{ModbusError, Quantity, UnitId};
 
 /// Supported Modbus function codes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[repr(u8)]
 pub enum FunctionCode {
     /// Read Coils (0x01)
@@ -181,14 +182,14 @@ impl Pdu {
 }
 
 /// One identification object returned by FC43/MEI14.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DeviceIdObject {
     pub id: u8,
     pub value: String,
 }
 
 /// Parsed Read Device Identification response (FC43 / MEI 0x0E).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct DeviceIdentification {
     /// Requested category: 1 basic, 2 regular, 3 extended, 4 individual object.
     pub read_code: u8,

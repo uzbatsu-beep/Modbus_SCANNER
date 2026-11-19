@@ -72,7 +72,8 @@ function toggleAddress(address: number) {
 const selectedValues = computed(() => {
   if (!dev.value) return [];
   const byAddress = new Map(
-    Object.values(dev.value.registers).map((r) => [r.address, r.raw])
+    Object.values(dev.value.registers)
+      .flatMap((r) => (r ? [[r.address, r.raw] as [number, number]] : []))
   );
   return selectedAddresses.value
     .slice()
@@ -83,12 +84,15 @@ const selectedValues = computed(() => {
 const registers = computed(() => {
   if (!dev.value) return [];
   return Object.values(dev.value.registers)
+    .flatMap((r) => (r ? [r] : []))
     .sort((a, b) => a.function - b.function || a.address - b.address);
 });
 
 const probes = computed(() => {
   if (!dev.value) return [];
-  return Object.entries(dev.value.probes).map(([fc, p]) => ({ fc: Number(fc), p }));
+  return Object.entries(dev.value.probes).flatMap(([fc, p]) =>
+    p ? [{ fc: Number(fc), p }] : []
+  );
 });
 
 async function exportResults() {

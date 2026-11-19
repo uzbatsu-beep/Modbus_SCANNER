@@ -5,6 +5,7 @@
 //! certificate enables mutual TLS. Self-signed devices must have their CA
 //! installed in the OS trust store (or use a client cert signed by a trusted CA).
 
+use ts_rs::TS;
 use std::fs::File;
 use std::io::BufReader;
 use std::path::PathBuf;
@@ -14,7 +15,7 @@ use rustls::{ClientConfig, RootCertStore};
 use serde::{Deserialize, Serialize};
 
 /// TLS options; `None` in `TcpConfig` means plain Modbus TCP.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct TlsParams {
     /// PEM certificate chain for mutual TLS.
     #[serde(default)]

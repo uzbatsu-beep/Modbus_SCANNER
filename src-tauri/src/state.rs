@@ -7,6 +7,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
 use crate::scanner::types::{
     now_ms, DeviceProfile, LogFormat, LoggerConfig, LoggerStatus, MonitorValueState,
@@ -293,7 +294,7 @@ impl crate::scanner::SampleSink for LoggerHandle {
 }
 
 /// Application configuration, persisted via `config` commands.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(default)]
 pub struct Config {
     /// General.

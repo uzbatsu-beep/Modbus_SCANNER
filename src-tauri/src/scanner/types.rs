@@ -3,6 +3,7 @@
 //! Everything here is `Serialize + Deserialize` + `Clone` and is mirrored on the
 //! frontend in `src/types/ipc.ts`.
 
+use ts_rs::TS;
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -18,7 +19,7 @@ use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
 pub use crate::modbus::common::SerialMode;
 
 /// What to scan: the target space.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ScanTarget {
     /// Serial: scan a range of unit (slave) ids on one port.
@@ -56,7 +57,7 @@ pub enum ScanTarget {
 }
 
 /// Framing (data bits / parity / stop bits) for a serial sweep.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 pub struct SerialFraming {
     pub data_bits: DataBitsSerde,
     pub parity: ParitySerde,
@@ -64,7 +65,7 @@ pub struct SerialFraming {
 }
 
 /// Parameters for a two-phase serial settings sweep (P2-01).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SerialSweepParams {
     pub port_name: String,
     pub mode: SerialMode,
@@ -105,7 +106,7 @@ impl SerialSweepParams {
 }
 
 /// Serial port parameters (IPC form).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SerialPortParams {
     pub port_name: String,
     pub baud_rate: u32,
@@ -115,7 +116,7 @@ pub struct SerialPortParams {
 }
 
 /// Adaptive register-scan strategy (field-practice strategies).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum RegisterScanMode {
     /// Blocks of `batch`; a failed block is split into fifths once, then refined to singles.
@@ -133,7 +134,7 @@ impl Default for RegisterScanMode {
 }
 
 /// Parameters for an adaptive register-map scan.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RegisterScanParams {
     pub target: DeviceTarget,
     /// Function code: 0x01..=0x04.
@@ -149,7 +150,7 @@ pub struct RegisterScanParams {
 }
 
 /// IP transport kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum IpTransportKind {
     Tcp,
@@ -157,7 +158,7 @@ pub enum IpTransportKind {
 }
 
 /// One device address (serial unit id or IP + unit id for gateways).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct DeviceTarget {
     pub kind: TransportKind,
     /// Serial: port name; TCP/UDP: host.
@@ -171,7 +172,7 @@ pub struct DeviceTarget {
 }
 
 /// A register/coil range to probe with a function code.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, TS)]
 pub struct RegisterRange {
     /// Function code (0x01..=0x04 typically).
     pub function: u8,
@@ -182,7 +183,7 @@ pub struct RegisterRange {
 }
 
 /// How to scan (timing and behaviour).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ScanParams {
     /// Response timeout per request.
     pub timeout_ms: u32,
@@ -235,7 +236,7 @@ impl Default for ScanParams {
 }
 
 /// Result of a single probe (one request to one target).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
 pub enum ProbeResult {
     /// Device answered with data.
@@ -246,6 +247,7 @@ pub enum ProbeResult {
         /// Raw response PDU (hex) for the raw view.
         raw_hex: String,
         /// Round-trip time in microseconds.
+        #[ts(type = "number")]
         rtt_us: u128,
     },
     /// Device answered with a Modbus exception.
@@ -254,6 +256,7 @@ pub enum ProbeResult {
         code: u8,
         /// Human-readable error (Russian/English by i18n on the frontend).
         message: String,
+        #[ts(type = "number")]
         rtt_us: u128,
     },
     /// No response (timeout x retries).
@@ -268,7 +271,7 @@ pub enum ProbeResult {
 }
 
 /// One register description inside a reusable device profile (E-04).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ProfileRegister {
     pub function: u8,
     pub address: u16,
@@ -281,7 +284,7 @@ pub struct ProfileRegister {
 }
 
 /// A reusable register map matched by FC43 identity.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct DeviceProfile {
     pub id: String,
     pub vendor: String,
@@ -343,7 +346,7 @@ impl DeviceProfile {
 }
 
 /// A named register tag with decoding/scaling (P3-03).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TagDefinition {
     pub device_key: String,
     pub address: u16,
@@ -356,7 +359,7 @@ pub struct TagDefinition {
 }
 
 /// One discovered device + all its collected data.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct DeviceRecord {
     /// Unique target key, e.g. "rtu:COM3:1", "tcp:192.168.1.5:502:1".
     pub key: String,
@@ -369,13 +372,15 @@ pub struct DeviceRecord {
     #[serde(default)]
     pub device_identification: Option<DeviceIdentification>,
     /// First seen timestamp (unix ms).
+    #[ts(type = "number")]
     pub first_seen_ms: u64,
     /// Last activity timestamp (unix ms).
+    #[ts(type = "number")]
     pub last_seen_ms: u64,
 }
 
 /// A single scanned register value.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RegisterValue {
     pub function: u8,
     pub address: u16,
@@ -384,11 +389,12 @@ pub struct RegisterValue {
     /// Decoded views for the UI.
     pub as_hex: String,
     /// RTT of the read.
+    #[ts(type = "number")]
     pub rtt_us: u128,
 }
 
 /// Scan status for the UI.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ScanStatus {
     /// Not started.
@@ -408,25 +414,30 @@ pub enum ScanStatus {
 }
 
 /// Live progress for the UI (emitted as event `scan:progress`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ScanProgress {
     pub status: ScanStatus,
     /// Total work items (targets x probes).
+    #[ts(type = "number")]
     pub total: u64,
     /// Completed work items.
+    #[ts(type = "number")]
     pub done: u64,
     /// Devices found so far.
+    #[ts(type = "number")]
     pub found: u64,
     /// Current target being probed (display string).
     pub current: String,
     /// Errors so far (timeouts, io).
+    #[ts(type = "number")]
     pub errors: u64,
     /// Elapsed time in ms.
+    #[ts(type = "number")]
     pub elapsed_ms: u64,
 }
 
 /// Event emitted to the frontend: `scan:event` (device found, status change...).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScanEvent {
     StatusChanged {
@@ -449,9 +460,13 @@ pub enum ScanEvent {
         status: IpTargetStatus,
     },
     Finished {
+        #[ts(type = "number")]
         total: u64,
+        #[ts(type = "number")]
         found: u64,
+        #[ts(type = "number")]
         errors: u64,
+        #[ts(type = "number")]
         elapsed_ms: u64,
     },
 }
@@ -465,7 +480,7 @@ pub fn now_ms() -> u64 {
 }
 
 /// What we learned about one scanned IP endpoint (P2-04).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum IpTargetClass {
     /// At least one valid Modbus answer (data or exception).
@@ -497,7 +512,7 @@ impl IpTargetClass {
 }
 
 /// Aggregated classification for one `ip:port` endpoint.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct IpTargetStatus {
     pub endpoint: String,
     pub port: u16,
@@ -507,11 +522,12 @@ pub struct IpTargetStatus {
     pub responses_exception: u32,
     pub timeouts: u32,
     pub transport_errors: u32,
+    #[ts(type = "number")]
     pub last_seen_ms: u64,
 }
 
 /// Kind of change for one register between two scans (P3-08).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum ChangeKind {
     Added,
@@ -521,7 +537,7 @@ pub enum ChangeKind {
 }
 
 /// One register-level difference.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct RegisterDiff {
     pub device_key: String,
     pub function: u8,
@@ -532,7 +548,7 @@ pub struct RegisterDiff {
 }
 
 /// Per-device diff counters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct DeviceDiff {
     pub device_key: String,
     pub added: u32,
@@ -541,7 +557,7 @@ pub struct DeviceDiff {
 }
 
 /// Result of comparing two scan snapshots.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ScanDiff {
     pub left_label: String,
     pub right_label: String,
@@ -557,7 +573,7 @@ pub struct ScanDiff {
 }
 
 /// Output format of a file logger.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum LogFormat {
     Csv,
@@ -566,7 +582,7 @@ pub enum LogFormat {
 }
 
 /// File rotation policy.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "snake_case")]
 pub enum RotationMode {
     /// Single file, no rotation.
@@ -580,7 +596,7 @@ pub enum RotationMode {
 }
 
 /// One file logger attached to monitor samples (P3-07).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct LoggerConfig {
     pub id: String,
     pub path: String,
@@ -598,23 +614,27 @@ fn default_logger_enabled() -> bool {
 }
 
 /// Runtime status of a file logger.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct LoggerStatus {
     pub id: String,
     pub path: String,
     pub format: LogFormat,
     pub rotation: RotationMode,
     pub enabled: bool,
+    #[ts(type = "number")]
     pub records_written: u64,
     pub current_file: String,
+    #[ts(type = "number | null")]
     pub last_write_ms: Option<u64>,
     pub error: Option<String>,
 }
 
 /// One raw Modbus exchange for protocol debugging (P3-06).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TrafficRecord {
+    #[ts(type = "number")]
     pub id: u64,
+    #[ts(type = "number")]
     pub timestamp_ms: u64,
     pub kind: TransportKind,
     pub endpoint: String,
@@ -624,13 +644,14 @@ pub struct TrafficRecord {
     pub tx_hex: String,
     /// Raw response ADU, if any.
     pub rx_hex: Option<String>,
+    #[ts(type = "number")]
     pub rtt_us: u128,
     /// `ok`, `timeout`, `error`, `invalid_response`...
     pub status: String,
 }
 
 /// One register address watched by the live monitor (P3-05).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorWatch {
     pub key: String,
     pub target: DeviceTarget,
@@ -644,15 +665,17 @@ pub struct MonitorWatch {
 }
 
 /// One poll result for a watch.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorSample {
+    #[ts(type = "number")]
     pub timestamp_ms: u64,
     pub values: Vec<u16>,
+    #[ts(type = "number")]
     pub rtt_us: u128,
 }
 
 /// Aggregated state of a watched register.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorValueState {
     pub key: String,
     pub name: String,
@@ -667,26 +690,30 @@ pub struct MonitorValueState {
 }
 
 /// Event emitted once per monitor poll cycle.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorUpdate {
     pub values: Vec<MonitorValueState>,
+    #[ts(type = "number")]
     pub cycle_ms: u64,
 }
 
 /// One saved scan snapshot inside a project (P3-04).
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct ScanSnapshot {
+    #[ts(type = "number")]
     pub timestamp_ms: u64,
     pub label: String,
     pub results: ScanResults,
 }
 
 /// A portable project: devices, tag map and scan history in one file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct Project {
     pub name: String,
     pub version: u32,
+    #[ts(type = "number")]
     pub created_ms: u64,
+    #[ts(type = "number")]
     pub updated_ms: u64,
     pub results: ScanResults,
     pub tags: Vec<TagDefinition>,
@@ -694,7 +721,7 @@ pub struct Project {
 }
 
 /// Result of the whole scan session (returned by `get_scan_results`).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct ScanResults {
     pub records: Vec<DeviceRecord>,
     #[serde(default)]
@@ -702,14 +729,21 @@ pub struct ScanResults {
     pub stats: ScanStats,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, TS)]
 pub struct ScanStats {
+    #[ts(type = "number")]
     pub requests_sent: u64,
+    #[ts(type = "number")]
     pub responses_ok: u64,
+    #[ts(type = "number")]
     pub responses_exception: u64,
+    #[ts(type = "number")]
     pub timeouts: u64,
+    #[ts(type = "number")]
     pub transport_errors: u64,
+    #[ts(type = "number | null")]
     pub started_ms: Option<u64>,
+    #[ts(type = "number | null")]
     pub finished_ms: Option<u64>,
 }
 

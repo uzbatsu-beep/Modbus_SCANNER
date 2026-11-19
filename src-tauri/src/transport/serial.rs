@@ -5,6 +5,7 @@
 //! - inter-frame silent interval (t3.5) enforcement;
 //! - RX buffer pre-flush on each transaction (stale data discard).
 
+use ts_rs::TS;
 use std::time::Duration;
 
 use async_trait::async_trait;
@@ -17,7 +18,7 @@ use crate::modbus::common::SerialMode;
 use super::{Transport, TransportError, TransportResult};
 
 /// Serial port parameters.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct SerialPortConfig {
     /// Port name, e.g. "COM3" (Windows) or "/dev/ttyUSB0" (Linux).
     pub port_name: String,
@@ -27,11 +28,12 @@ pub struct SerialPortConfig {
     pub stop_bits: StopBitsSerde,
     /// Inter-frame silent interval enforcement mode (RTU t3.5).
     /// On modern baud rates (>= 19200) the spec fixes t3.5 = 1.75 ms.
+    #[ts(type = "number")]
     pub frame_gap: Duration,
 }
 
 /// Serializable serial enum wrappers (tokio_serial enums are not Serialize).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum DataBitsSerde {
     Five,
@@ -40,7 +42,7 @@ pub enum DataBitsSerde {
     Eight,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ParitySerde {
     None,
@@ -48,7 +50,7 @@ pub enum ParitySerde {
     Even,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum StopBitsSerde {
     One,
