@@ -259,6 +259,8 @@ mod tests {
         let writer = tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(40)).await;
             tx.write_all(&[1, 3, 2, 0, 42]).await.unwrap();
+            // Keep the simulated serial line open so t3.5 silence, not EOF, terminates the frame.
+            tokio::time::sleep(Duration::from_millis(30)).await;
         });
         let mut buf = Vec::new();
         let frame = tokio::time::timeout(
