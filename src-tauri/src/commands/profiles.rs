@@ -95,10 +95,14 @@ fn column<'a>(header: &[&str], row: &'a [&str], name: &str) -> &'a str {
 
         let register = ProfileRegister {
             function: column(&header, &row, "function").parse::<u8>().unwrap_or(3),
-            address: column(&header, &row, "address")
-                .trim_start_matches("0x")
-                .parse::<u16>()
-                .map_err(|e| format!("bad address: {e}"))?,
+            address: {
+                let raw = column(&header, &row, "address").trim();
+                if let Some(hex) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
+                    u16::from_str_radix(hex, 16).map_err(|e| format!("bad hex address: {e}"))?
+                } else {
+                    raw.parse::<u16>().map_err(|e| format!("bad address: {e}"))?
+                }
+            },
             name: column(&header, &row, "tag_name").to_string(),
             spec: DecodeSpec {
                 data_type: data_type(column(&header, &row, "data_type"))?,

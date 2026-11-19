@@ -1,5 +1,6 @@
 [package]
 name = "modbus-scanner"
+default-run = "modbus-scanner"
 version = "1.0.0"
 description = "Modbus RTU/ASCII/TCP/UDP scanner - cross-platform desktop tool"
 authors = ["uzbatsu-beep <uzbatsu@gmail.com>"]
