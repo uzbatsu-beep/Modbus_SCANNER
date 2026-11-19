@@ -97,6 +97,16 @@ Run `modbus-scanner scan --help` for all options. With no subcommand the desktop
 app starts. The CLI uses an `EventSink` instead of Tauri, so GUI and CLI share
 exactly the same scanning logic.
 
+A local REST + WebSocket API is available (loopback only):
+
+```bash
+modbus-scanner.exe serve --port 8787
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/api/v1/results
+```
+
+See [docs/API.md](docs/API.md) for endpoints and the WebSocket event stream.
+
 Production build:
 
 ```bash

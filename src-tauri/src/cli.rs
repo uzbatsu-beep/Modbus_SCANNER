@@ -29,6 +29,12 @@ pub struct Cli {
 pub enum Commands {
     /// Run a scan without the GUI and print/write a JSON report
     Scan(ScanArgs),
+    /// Start the local REST + WebSocket API on 127.0.0.1
+    Serve {
+        /// Listening port (default 8787)
+        #[arg(long, default_value_t = 8787)]
+        port: u16,
+    },
 }
 
 #[derive(Debug, clap::Args)]

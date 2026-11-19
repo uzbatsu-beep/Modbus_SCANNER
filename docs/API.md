@@ -7,6 +7,27 @@ All command errors arrive as human-readable `String`s. The typed wrappers live
 in `src/api/mod.ts`; the payload types in `src/types/ipc.ts` (TypeScript mirror of
 `src-tauri/src/scanner/types.rs`).
 
+## Local REST + WebSocket API (E-03)
+
+Started with `modbus-scanner serve --port 8787` or from the desktop app via the
+`start_api_server` Tauri command. Binds to **127.0.0.1 only**, no authentication
+by default. All scan endpoints reuse the same `ScannerHandle` as the GUI.
+
+| Method | Path | Result |
+|--------|------|--------|
+| GET | `/health` | `{status:"ok", service, version, timestamp_ms}` |
+| GET | `/api/v1/status` | `{status, progress}` |
+| GET | `/api/v1/results` | `ScanResults` |
+| GET | `/api/v1/traffic` | last 2000 `TrafficRecord`s |
+| POST | `/api/v1/scan` | body `{target: ScanTarget, params: ScanParams}` → `{status:"started"}` |
+| POST | `/api/v1/scan/stop` | stop the current scan |
+| POST | `/api/v1/scan/pause` | pause |
+| POST | `/api/v1/scan/resume` | resume |
+| WS | `/api/v1/events` | JSON messages `{event, payload}` (scan:event, scan:progress, monitor:update, traffic:record) |
+
+Tauri commands for the in-app server: `start_api_server(port)`, `stop_api_server`,
+`get_api_status() -> port | null`.
+
 ## Commands
 
 ### System
@@ -15,6 +36,9 @@ in `src/api/mod.ts`; the payload types in `src/types/ipc.ts` (TypeScript mirror 
 |---------|------|---------|
 | `get_app_info` | — | `{name, version, rustc, debug}` |
 | `get_log_level` | — | `string` (value of `RUST_LOG`) |
+| `start_api_server` | `port: number` | `void` (starts the local REST/WS server) |
+| `stop_api_server` | — | `void` |
+| `get_api_status` | — | `number \| null` (listening port) |
 
 ### Serial ports
 

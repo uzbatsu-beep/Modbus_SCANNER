@@ -7,6 +7,27 @@
 `src/api/mod.ts`, типы полезных данных — `src/types/ipc.ts` (зеркало
 `src-tauri/src/scanner/types.rs`).
 
+## Локальный REST + WebSocket API (E-03)
+
+Запускается через `modbus-scanner serve --port 8787` или командой Tauri
+`start_api_server` из десктопного приложения. Слушает **только 127.0.0.1**, без
+авторизации по умолчанию. Все эндпоинты используют тот же `ScannerHandle`, что и GUI.
+
+| Метод | Путь | Результат |
+|-------|------|-----------|
+| GET | `/health` | `{status:"ok", service, version, timestamp_ms}` |
+| GET | `/api/v1/status` | `{status, progress}` |
+| GET | `/api/v1/results` | `ScanResults` |
+| GET | `/api/v1/traffic` | последние 2000 `TrafficRecord` |
+| POST | `/api/v1/scan` | тело `{target: ScanTarget, params: ScanParams}` → `{status:"started"}` |
+| POST | `/api/v1/scan/stop` | остановить текущий скан |
+| POST | `/api/v1/scan/pause` | пауза |
+| POST | `/api/v1/scan/resume` | продолжить |
+| WS | `/api/v1/events` | JSON-сообщения `{event, payload}` (scan:event, scan:progress, monitor:update, traffic:record) |
+
+Команды Tauri для встроенного сервера: `start_api_server(port)`, `stop_api_server`,
+`get_api_status() -> port | null`.
+
 ## Команды
 
 ### Система
@@ -15,6 +36,9 @@
 |---------|-----------|---------|
 | `get_app_info` | — | `{name, version, rustc, debug}` |
 | `get_log_level` | — | `string` (значение `RUST_LOG`) |
+| `start_api_server` | `port: number` | `void` (запуск локального REST/WS-сервера) |
+| `stop_api_server` | — | `void` |
+| `get_api_status` | — | `number \| null` (порт) |
 
 ### Последовательные порты
 

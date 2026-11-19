@@ -64,7 +64,8 @@ per-probe log ✅ done. v0.2 is complete.
 
 **v1.0:** E-01 ✅ (engine and monitor decoupled from Tauri via `EventSink`,
 `TrafficSink` and `SampleSink`; `bridge.rs` is the only Tauri-aware module),
-E-02 ✅ (headless `scan` CLI with JSON report; uses `EventSink::null()`).
+E-02 ✅ (headless `scan` CLI with JSON report; uses `EventSink::null()`),
+E-03 ✅ (local REST + WebSocket API on 127.0.0.1, shared engine, loopback only).
 
 **v0.3:** P3-01 ✅ (decoder: int/uint/float32/ASCII × 4 byte orders),
 P3-02 ✅ (labelled float hypotheses), P3-03 ✅ (named tags with scaling, stored

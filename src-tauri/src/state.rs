@@ -15,8 +15,10 @@ use crate::scanner::types::{
 
 /// Shared application state, injected into Tauri as managed state.
 pub struct AppState {
-    /// Scanner engine handle
-    pub scanner: crate::scanner::ScannerHandle,
+    /// Scanner engine handle (shared with the local API server)
+    pub scanner: Arc<crate::scanner::ScannerHandle>,
+    /// Local API server handle, if running
+    pub api: parking_lot::Mutex<Option<crate::api::ApiServerHandle>>,
     /// Live register monitor handle
     pub monitor: crate::scanner::monitor::MonitorHandle,
     /// Raw Modbus traffic log

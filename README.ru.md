@@ -97,6 +97,16 @@ src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --udp --udp-mbap
 приложение. CLI использует `EventSink` вместо Tauri, поэтому логика сканирования
 полностью общая.
 
+Локальный REST + WebSocket API (только loopback):
+
+```bash
+modbus-scanner.exe serve --port 8787
+curl http://127.0.0.1:8787/health
+curl http://127.0.0.1:8787/api/v1/results
+```
+
+Список эндпоинтов и поток событий — в [docs/API.ru.md](docs/API.ru.md).
+
 Production-сборка:
 
 ```bash

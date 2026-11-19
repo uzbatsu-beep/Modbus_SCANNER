@@ -23,6 +23,20 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        Some(Commands::Serve { port }) => {
+            tracing_subscriber::fmt()
+                .with_env_filter(
+                    tracing_subscriber::EnvFilter::try_from_default_env()
+                        .unwrap_or_else(|_| "info".into()),
+                )
+                .with_writer(std::io::stderr)
+                .init();
+            let runtime = tokio::runtime::Runtime::new().expect("failed to create tokio runtime");
+            if let Err(error) = runtime.block_on(modbus_scanner_lib::api::serve_headless(port)) {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
+        }
         None => modbus_scanner_lib::run(),
     }
 }

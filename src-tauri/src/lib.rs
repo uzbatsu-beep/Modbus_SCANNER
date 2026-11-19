@@ -7,6 +7,7 @@
 //! - `commands` - Tauri IPC commands (frontend API boundary)
 //! - `state`  - shared application state (Mutex<AppState>)
 
+pub mod api;
 pub mod bridge;
 pub mod cli;
 pub mod commands;
@@ -33,7 +34,8 @@ pub fn run() {
         .setup(|app| {
             use state::AppState;
             app.manage(AppState {
-                scanner: scanner::ScannerHandle::new(),
+                scanner: std::sync::Arc::new(scanner::ScannerHandle::new()),
+                api: parking_lot::Mutex::new(None),
                 monitor: scanner::monitor::MonitorHandle::new(),
                 traffic: std::sync::Arc::new(state::TrafficLogHandle::new()),
                 loggers: std::sync::Arc::new(state::LoggerHandle::new()),
@@ -45,6 +47,9 @@ pub fn run() {
             // system
             commands::system::get_app_info,
             commands::system::get_log_level,
+            commands::system::start_api_server,
+            commands::system::stop_api_server,
+            commands::system::get_api_status,
             // serial
             commands::serial::list_serial_ports,
             commands::serial::test_serial_port,
