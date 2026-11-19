@@ -841,6 +841,15 @@ fn register_work(target: &DeviceTarget, r: &RegisterRange) -> Option<WorkItem> {
 
 /// Build a strategy from the IPC scan target.
 pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn ScanStrategy + Send>, String> {
+    // Field safety invariant: discovery may issue only FC01..FC04. Never silently
+    // skip unsupported codes or accept an empty probe plan. Adaptive register
+    // scanning has an independently validated read-only FC.
+    if !matches!(&target, ScanTarget::RegisterScan { .. }) {
+        if params.probe_functions.is_empty() ||
+            params.probe_functions.iter().any(|fc| !matches!(fc, 0x01..=0x04)) {
+            return Err("discovery requires a non-empty read-only probe list (FC01..FC04)".into());
+        }
+    }
     match target {
         ScanTarget::UnitIdRange {
             from,
@@ -915,7 +924,7 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
 /// Parse a probe result into a `ProbeResult` (ok / exception).
 pub fn classify_response(function: u8, pdu: &[u8], rtt_us: u128) -> ProbeResult {
     use crate::modbus::frame::Pdu;
-    match Pdu::from_bytes(pdu) {
+    match Pdu::from_bytes(pdu).map(Pdu::into_response) {
         Ok(p) if p.is_exception() => {
             if let Pdu::Exception { code, .. } = p {
                 ProbeResult::Exception {

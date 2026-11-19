@@ -19,6 +19,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 - Audit: progress counters no longer double-count timeouts; stale architecture/protocol docs, broken `lint` script and misleading Cargo comment corrected
 
+### Added — PR #2 (field validation)
+- Deterministic loopback Modbus TCP fixture for full scanner discovery, register reads,
+  split MBAP payloads, exceptions, wrong transaction IDs and silent endpoints.
+- Cross-platform CI protocol-smoke job; no external hardware or network required.
+
+### Fixed — PR #2
+- Rejected empty/unsafe discovery FC configurations before any network access.
+- Normal Modbus read replies are explicitly tagged as PDU Response (not a generic Request), restoring decoded register data in scanner and manual reads.
+- Scan status uses watch send_replace so CLI/API callers receive terminal status
+  even if no watch receiver was active when the scan began.
+
 ## [1.0.1] - release candidate (PR #1)
 
 ### Fixed

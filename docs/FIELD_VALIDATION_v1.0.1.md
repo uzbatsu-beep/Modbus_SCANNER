@@ -1,8 +1,30 @@
 # v1.0.1 — Field validation / Проверка на оборудовании
 
-**Release gate:** This checklist must be executed on a test bench before merging PR #1 and publishing v1.0.1. GitHub Actions verify source/test consistency but do not prove physical RS-485 or production-network safety.
+**Release gate:** PR #1 has been merged. Before publishing v1.0.1, run the checks below on an isolated test bench. PR #2 adds deterministic TCP loopback CI tests; these do not prove physical RS-485 or production-network safety.
 
-**Условие выпуска:** перед слиянием PR #1 и публикацией v1.0.1 пройти испытания на стенде. Зелёный CI не заменяет проверки реальных устройств.
+**Условие выпуска:** PR #1 уже слит; перед публикацией v1.0.1 необходимо пройти испытания на стенде. PR #2 добавляет TCP-симулятор для CI; зелёный CI не заменяет проверки реальных устройств.
+
+## Automated protocol coverage / Автоматическое покрытие
+
+The `scanner::field_tests` module runs on 127.0.0.1 with random ephemeral TCP ports.
+It verifies the full path from ScanTarget to the real scanner engine, actual socket,
+MBAP framing, response classification, register map, and scan completion.
+
+| Automated scenario | Expected outcome |
+|---|---|
+| FC01/02/03/04 discovery | All outbound frames are reads; no FC05/06/0F/10 |
+| FC03 map read + fragmented TCP reply | Correct registers, no extra-byte timeout |
+| Modbus exception 02 | Identifies Modbus endpoint, records exception |
+| Wrong Transaction ID | No false device discovery |
+| Connected but silent target | Timeout, no false device discovery |
+| Invalid FC list (e.g. 03 + 06) | Rejected before opening a socket |
+
+Run locally: `cd src-tauri && cargo test --lib scanner::field_tests -- --nocapture`.
+GitHub CI executes it on Windows, Linux and macOS. Tests contain no physical
+serial connection and never send packets outside the local loopback interface.
+
+**Not automated:** RS-485 signal integrity, USB adapter behavior, baud/parity
+compatibility, real firmware error handling, field safety acceptance.
 
 ## Test environment / Стенд
 
