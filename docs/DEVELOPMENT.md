@@ -158,14 +158,27 @@ Both QA and official release builds verify version manifest consistency.
 
 ## Release process (E-06)
 
-Releases are automated by `.github/workflows/release.yml`:
+The official release is **manual, gated, and fails closed**. Do **not**
+publish by pushing a `v*` tag: this event no longer triggers a Release.
 
-1. Bump the version in `package.json`, `package-lock.json`, `Cargo.toml`,
-   `Cargo.lock` and `tauri.conf.json`; add a `CHANGELOG.md` section.
-2. Commit and push to `main`, then create and push an annotated tag `vX.Y.Z`.
-3. The workflow builds the Windows installers on `windows-latest`
-   (`npm ci` → `npm run tauri build`), uploads them as an artifact, and creates
-   a GitHub Release from the tag with the MSI and NSIS files attached.
+1. Prepare all matching version manifests and `CHANGELOG.md` in an approved
+   PR, merge it to `main`, and wait for successful CI + Windows QA on the
+   **exact merged main SHA**.
+2. Complete isolated physical hardware acceptance and attach the signed-off
+   evidence to a repository GitHub Issue.
+3. Confirm active branch and tag Rulesets, and a `production-release`
+   environment with independent required reviewers, prevent self-review,
+   main-only deployment and `OT_RELEASE_APPROVAL_GATE` environment secret.
+4. Manually run **Release (manual, protected)** on `main` with tag, QA run ID,
+   bench PASS flag and GitHub issue URL. The preflight verifies version,
+   main SHA, 5 CI checks, QA artifact, rulesets and evidence; the Windows
+   builder packages EXE/MSI with SHA256 and build metadata.
+5. An independent GitHub reviewer approves the `production-release` job.
+   Only then can GitHub Release and its new tag be created.
+
+See [release governance (EN)](RELEASE_GATES.md) and
+[release governance (RU)](RELEASE_GATES.ru.md) for detailed activation
+instructions. A committed ruleset JSON is not an active GitHub setting.
 
 Local equivalent: `npm run tauri build`; artifacts are in
 `src-tauri/target/release/bundle/{msi,nsis}/`. The Windows target requires

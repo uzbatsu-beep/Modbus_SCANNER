@@ -2,8 +2,11 @@ name: Windows QA installers (no release)
 
 on:
   workflow_dispatch:
-  # Allow validation of stacked PRs (e.g. PR #7 targeting PR #6).
-  # Remains an artifact-only workflow: no tagging or GitHub Release.
+  # QA of the *actual main commit* is required by the release gate.
+  # Produces an artifact only; never creates a tag or Release.
+  push:
+    branches: [main]
+  # Also validate pending PRs; these PR artifacts are not release-ready.
   pull_request:
     paths:
       - ".github/workflows/windows-qa.yml"

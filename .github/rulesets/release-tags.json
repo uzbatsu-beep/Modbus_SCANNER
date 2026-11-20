@@ -1,0 +1,25 @@
+{
+  "name": "Release tags v* — prevent rewrite and deletion (PR #9)",
+  "target": "tag",
+  "enforcement": "active",
+  "bypass_actors": [],
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "refs/tags/v*"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "deletion"
+    },
+    {
+      "type": "update"
+    },
+    {
+      "type": "non_fast_forward"
+    }
+  ]
+}

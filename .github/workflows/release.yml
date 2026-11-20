@@ -1,78 +1,192 @@
-name: Release
+name: Release (manual, protected)
 
+# Deliberately NO push.tags trigger: creating a tag alone must NEVER publish.
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Exact version tag, e.g. v1.0.1'
+        required: true
+        type: string
+      qa_run_id:
+        description: 'Successful Windows QA run on the exact HEAD of main'
+        required: true
+        type: string
+      bench_passed:
+        description: 'Physical isolated Modbus bench acceptance passed'
+        required: true
+        default: false
+        type: boolean
+      bench_evidence_url:
+        description: 'GitHub issue with signed-off physical bench evidence'
+        required: true
+        type: string
 
 permissions:
-  contents: write
+  contents: read
+  actions: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-${{ inputs.tag }}
   cancel-in-progress: false
 
 jobs:
-  build-windows:
-    name: Build Windows installers
-    runs-on: windows-latest
+  preflight:
+    name: Release gate (CI, QA, Rulesets, bench)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify manifest versions
+        run: node scripts/check-release-version.mjs
+      - name: Verify release-gate implementation tests
+        run: node --test scripts/verify-release-gates.test.mjs
+      - name: Verify main SHA, active Rulesets, 5 CI checks, QA and evidence
+        run: node scripts/verify-release-gates.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          QA_RUN_ID: ${{ inputs.qa_run_id }}
+          BENCH_PASSED: ${{ inputs.bench_passed }}
+          BENCH_EVIDENCE_URL: ${{ inputs.bench_evidence_url }}
 
+  build-windows:
+    name: Release installers (EXE + MSI)
+    needs: preflight
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-
       - uses: dtolnay/rust-toolchain@stable
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: src-tauri -> target
-
-      - name: Install frontend dependencies
+      - name: Locked frontend install
         run: npm ci
-
-      - name: Verify tag and manifest versions
+      - name: Verify manifests
         run: node scripts/check-release-version.mjs
-
-      - name: Rust protocol regression tests
+      - name: Build frontend before Rust tests
+        run: npm run build
+      - name: Rust regression tests
         working-directory: src-tauri
         run: cargo test --lib
-
-      - name: Build Tauri app (MSI + NSIS)
+      - name: Build Windows NSIS and MSI installers
         run: npm run tauri build -- --bundles nsis,msi
-
-      - name: List artifacts
+      - name: Stage exactly two installers and SHA256 manifest
         shell: pwsh
-        run: Get-ChildItem -Recurse -File src-tauri/target/release/bundle | Select-Object FullName, Length
-
-      - name: Upload installers
-        uses: actions/upload-artifact@v4
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $files = @(Get-ChildItem src-tauri/target/release/bundle -Recurse -File |
+            Where-Object { $_.Extension -in @(".exe", ".msi") })
+          if ($files.Count -ne 2 -or @($files | Where-Object Extension -eq ".exe").Count -ne 1 -or
+              @($files | Where-Object Extension -eq ".msi").Count -ne 1) {
+            throw "Expected exactly one EXE and one MSI; got $($files.Count)"
+          }
+          New-Item -ItemType Directory -Force release-dist | Out-Null
+          $hashes = @()
+          foreach ($file in $files) {
+            if (-not $file.Name.Contains("_$version")) {
+              throw "Installer version mismatch: $($file.Name) vs $version"
+            }
+            Copy-Item $file.FullName "release-dist/$($file.Name)"
+            $hash = (Get-FileHash $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $hashes += "$hash  $($file.Name)"
+          }
+          $hashes | Set-Content release-dist/SHA256SUMS.txt -Encoding utf8
+          @(
+            "Modbus Scanner release candidate - source: ${{ github.sha }}"
+            "Version: $version"
+            "QA run: ${{ inputs.qa_run_id }}"
+            "Bench evidence: ${{ inputs.bench_evidence_url }}"
+            "Build: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          ) | Set-Content release-dist/BUILD-INFO.txt -Encoding utf8
+      - uses: actions/upload-artifact@v4
         with:
-          name: windows-installers
-          path: |
-            src-tauri/target/release/bundle/nsis/*.exe
-            src-tauri/target/release/bundle/msi/*.msi
+          name: release-installers-verified
+          path: release-dist/*
           if-no-files-found: error
+          retention-days: 30
 
-  release:
-    name: Publish GitHub Release
-    needs: build-windows
+  publish:
+    name: Publish (independent environment approval)
+    needs: [preflight, build-windows]
     runs-on: ubuntu-latest
+    # Configure Required Reviewers, prevent self-review and restricted
+    # deployment branches in Settings > Environments. The environment
+    # secret is an additional fail-closed provisioning check.
+    environment:
+      name: production-release
+      url: ${{ github.server_url }}/${{ github.repository }}/releases
+    permissions:
+      contents: write
+      actions: read
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Enforce provisioned approval environment
+        shell: bash
+        env:
+          APPROVAL_GATE: ${{ secrets.OT_RELEASE_APPROVAL_GATE }}
+        run: |
+          if [[ -z "$APPROVAL_GATE" ]]; then
+            echo "::error::production-release environment secret is missing; publication disabled"
+            exit 1
+          fi
+      - name: Recheck gates after environment approval and build
+        run: node scripts/verify-release-gates.mjs
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          QA_RUN_ID: ${{ inputs.qa_run_id }}
+          BENCH_PASSED: ${{ inputs.bench_passed }}
+          BENCH_EVIDENCE_URL: ${{ inputs.bench_evidence_url }}
       - uses: actions/download-artifact@v4
         with:
-          name: windows-installers
-          path: dist-installers
-
-      - name: Create release and upload assets
+          name: release-installers-verified
+          path: release-dist
+      - name: Validate shipped assets and checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(find release-dist -maxdepth 1 -type f -name '*.exe' | wc -l)" -eq 1
+          test "$(find release-dist -maxdepth 1 -type f -name '*.msi' | wc -l)" -eq 1
+          cd release-dist
+          sha256sum --check SHA256SUMS.txt
+      - name: Publish immutable release tag and Windows assets
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
+          tag_name: ${{ inputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ inputs.tag }}
           generate_release_notes: true
           draft: false
           prerelease: false
+          body: |
+            Source commit: ${{ github.sha }}
+            Windows QA run: ${{ inputs.qa_run_id }}
+            Bench acceptance: ${{ inputs.bench_evidence_url }}
+            Approved via protected GitHub environment: production-release
           files: |
-            dist-installers/**/*.exe
-            dist-installers/**/*.msi
+            release-dist/*.exe
+            release-dist/*.msi
+            release-dist/SHA256SUMS.txt
+            release-dist/BUILD-INFO.txt
+          fail_on_unmatched_files: true
