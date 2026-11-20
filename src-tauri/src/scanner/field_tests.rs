@@ -144,6 +144,7 @@ fn safe_params(functions: Vec<u8>) -> ScanParams {
         probe_functions: functions,
         identify_devices: false,
         ip_concurrency: 1,
+        ip_allowlist: vec!["127.0.0.1/32".into()],
         ..ScanParams::default()
     }
 }

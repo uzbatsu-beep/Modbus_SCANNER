@@ -11,6 +11,7 @@ use std::net::Ipv4Addr;
 
 use crate::modbus::common::SerialMode;
 use crate::modbus::frame::request;
+use super::safety::IpPolicy;
 
 use super::types::{
     DeviceTarget, ProbeResult, RegisterRange, RegisterScanMode, RegisterScanParams, ScanParams,
@@ -848,6 +849,8 @@ fn register_work(target: &DeviceTarget, r: &RegisterRange) -> Option<WorkItem> {
 
 /// Build a strategy from the IPC scan target.
 pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn ScanStrategy + Send>, String> {
+    // Central policy guard is reached by GUI, CLI and REST before any socket.
+    let policy = IpPolicy::new(&params)?;
     // Field safety invariant: discovery may issue only FC01..FC04. Never silently
     // skip unsupported codes or accept an empty probe plan. Adaptive register
     // scanning has an independently validated read-only FC.
@@ -880,6 +883,7 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
             Ok(Box::new(BaudSweepStrategy::new(sweep, params)))
         }
         ScanTarget::RegisterScan { scan } => {
+            policy.check_device(&scan.target)?;
             if scan.start > scan.end {
                 return Err("register scan start must not exceed end".into());
             }
@@ -905,9 +909,7 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
                 },
             }
             .ok_or_else(|| "invalid IP range (max 65536 addresses)".to_string())?;
-            if ips.is_empty() {
-                return Err("empty IP range".into());
-            }
+            let ips = policy.filter_range(ips)?;
             // IP scan: probe unit id 1 (and 255) by default — most TCP devices
             let unit_ids = if params.probe_functions.is_empty() {
                 vec![1]
@@ -917,6 +919,7 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
             Ok(Box::new(IpRangeStrategy::new(kind, port, unit_ids, ips, params)))
         }
         ScanTarget::SingleDevice { target, register_plan } => {
+            policy.check_device(&target)?;
             if matches!(target.kind, crate::modbus::common::TransportKind::Rtu |
                 crate::modbus::common::TransportKind::Ascii) && target.serial.is_none() {
                 return Err("serial params required for RTU/ASCII".into());
@@ -1012,7 +1015,10 @@ mod reliability_tests {
         };
         let mut strategy = build_strategy(
             ScanTarget::SingleDevice { target, register_plan: Vec::new() },
-            ScanParams::default(),
+            ScanParams {
+                ip_allowlist: vec!["192.168.0.10/32".into()],
+                ..ScanParams::default()
+            },
         ).unwrap();
         assert!(matches!(strategy.next_item(), Some(WorkItem::Probe { .. })));
     }
