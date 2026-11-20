@@ -13,6 +13,7 @@ const statusText = computed<Record<string, string>>(() => ({
   preparing: t("statusPreparing"),
   running: t("statusRunning"),
   paused: t("statusPaused"),
+  stopping: t("statusStopping"),
   stopped: t("statusStopped"),
   finished: t("statusFinished"),
   failed: t("startFailed"),

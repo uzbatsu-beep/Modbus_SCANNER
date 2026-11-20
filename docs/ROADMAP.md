@@ -8,7 +8,7 @@
 > [PLAN.ru.md](PLAN.ru.md).
 > История изменений: [CHANGELOG.md](../CHANGELOG.md).
 
-**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1/#2 слиты; PR #3 — Windows QA)
+**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#3 слиты; PR #4 — lifecycle/cancellation)
 
 ---
 
@@ -22,7 +22,8 @@
 | **v1.0.0** — Ecosystem & Automation | ✅ релиз | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, генерация типов, тесты и CI на 3 ОС; MSI + NSIS в GitHub Release |
 | **v1.0.1** — Reliability | ✅ PR #1 слит; релиз не опубликован | MBAP, RTU timings, CIDR bounds, write confirmation, regression tests |
 | **PR #2** — Field Validation & Diagnostics | ✅ слит в main; CI 4/4 | Loopback TCP-сценарии: обычный ответ, exception, неверный transaction ID, таймаут, фрагментация; проверка FC whitelist; отчёт для стенда |
-| **PR #3** — Windows QA installers | 🔧 подготовка | EXE/MSI тестовые установщики из PR и ручного запуска; SHA256/версия/коммит; без публикации Release |
+| **PR #3** — Windows QA installers | ✅ слит; QA CI прошёл | EXE/MSI тестовые установщики; SHA256/версия/коммит; без публикации Release |
+| **PR #4** — Scanner lifecycle & cancellation | 🔧 в разработке | Независимый сигнал Stop; отмена активных запросов; очистка pending; единый terminal status; тесты отсутствия TX после Stop |
 | **v1.1** — Diagnostics | 📋 следующий | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting, quiet mode |
 | **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
 | **v2.0** — Platform | 💡 исследование + выбор стека | Шлюзы MQTT/OPC UA, web-компаньон, политики IEC 62443, плагины; BACnet отложен (см. §9 RESEARCH_V2) |
