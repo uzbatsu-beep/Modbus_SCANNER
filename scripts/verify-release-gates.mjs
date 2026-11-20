@@ -60,7 +60,7 @@ export function validateEvidence({
     /^Bench result:\s*PASS\s*$/im.test(body),
     "bench Issue must contain exact Source SHA and Bench result: PASS");
   for (const label of ["Hardware", "Transport", "Test summary"]) {
-    requireGate(new RegExp("^" + label + ":\\s*\\S.*$", "im").test(body),
+    requireGate(new RegExp("^" + label + ":[ \\t]*\\S[^\\r\\n]*$", "im").test(body),
       "bench Issue is missing required field: " + label);
   }
   requireGate(!tagAlreadyExists && !releaseAlreadyExists,
