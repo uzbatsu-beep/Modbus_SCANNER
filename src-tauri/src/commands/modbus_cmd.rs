@@ -316,6 +316,35 @@ fn verify_and_parse(
     validate_response_function(pdu, expected_fc)
 }
 
+/// Raw frame mode intentionally permits malformed protocol fields for bench
+/// diagnostics, but empty and oversized messages are never useful and can
+/// destabilize a serial gateway or allocate excessive transport buffers.
+fn validate_raw_payload_size(
+    kind: TransportKind,
+    is_full_adu: bool,
+    payload: &[u8],
+) -> Result<(), String> {
+    if payload.is_empty() {
+        return Err("empty raw PDU/ADU is not allowed".into());
+    }
+    let maximum = if is_full_adu {
+        match kind {
+            TransportKind::Rtu | TransportKind::Udp => 256,
+            TransportKind::Ascii => 513,
+            TransportKind::Tcp => 260,
+        }
+    } else {
+        253 // PDU maximum under the Modbus application protocol
+    };
+    if payload.len() > maximum {
+        return Err(format!(
+            "raw frame size {} exceeds the {maximum}-byte limit",
+            payload.len()
+        ));
+    }
+    Ok(())
+}
+
 /// Reject broadcast destinations encoded directly inside a caller-supplied ADU.
 /// Checking only target.unit_id is insufficient in full-ADU mode.
 fn is_raw_broadcast(kind: TransportKind, payload: &[u8]) -> bool {
@@ -542,6 +571,7 @@ pub async fn send_raw_frame(
     }
     let bytes = hex::decode(req.adu_hex.trim().replace(' ', ""))
         .map_err(|e| format!("bad hex: {e}"))?;
+    validate_raw_payload_size(req.target.kind, req.is_full_adu, &bytes)?;
 
     let adu = if req.is_full_adu {
         bytes
@@ -676,6 +706,22 @@ mod write_safety_tests {
 
     fn ack(fc: u8, data: &[u8]) -> Pdu {
         Pdu::Response { function: fc, data: data.to_vec() }
+    }
+
+    #[test]
+    fn raw_payload_rejects_empty_and_oversized_frames_before_transmission() {
+        for kind in [TransportKind::Tcp, TransportKind::Rtu, TransportKind::Ascii, TransportKind::Udp] {
+            assert!(validate_raw_payload_size(kind, false, &[]).is_err());
+            assert!(validate_raw_payload_size(kind, true, &[]).is_err());
+            assert!(validate_raw_payload_size(kind, false, &[3, 0, 0, 0, 1]).is_ok());
+            assert!(validate_raw_payload_size(kind, false, &vec![3; 254]).is_err());
+        }
+        assert!(validate_raw_payload_size(TransportKind::Rtu, true, &vec![0; 256]).is_ok());
+        assert!(validate_raw_payload_size(TransportKind::Rtu, true, &vec![0; 257]).is_err());
+        assert!(validate_raw_payload_size(TransportKind::Tcp, true, &vec![0; 260]).is_ok());
+        assert!(validate_raw_payload_size(TransportKind::Tcp, true, &vec![0; 261]).is_err());
+        assert!(validate_raw_payload_size(TransportKind::Ascii, true, &vec![0; 513]).is_ok());
+        assert!(validate_raw_payload_size(TransportKind::Ascii, true, &vec![0; 514]).is_err());
     }
 
     #[test]
