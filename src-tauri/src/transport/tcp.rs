@@ -134,9 +134,10 @@ impl TcpTransport {
                 let client_config = build_client_config(tls).map_err(TransportError::Other)?;
                 let domain = ServerName::try_from(config.host.clone())
                     .map_err(|e| TransportError::Other(format!("invalid TLS server name: {e}")))?;
+                let connector = TlsConnector::from(client_config);
                 let tls_stream = tokio::time::timeout(
                     config.connect_timeout,
-                    TlsConnector::from(client_config).connect(domain, stream),
+                    connector.connect(domain, stream),
                 )
                 .await
                 .map_err(|_| TransportError::Timeout(config.connect_timeout))?
