@@ -415,3 +415,37 @@ async fn quiet_mode_includes_retry_attempts() {
     let times = timestamps.lock().unwrap();
     assert!(times[1].duration_since(times[0]) >= Duration::from_millis(430));
 }
+
+#[tokio::test]
+async fn quiet_mode_paces_tcp_connection_attempts_even_when_no_modbus_reply_exists() {
+    use super::types::IpTransportKind;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = tokio::spawn(async move {
+        let mut times = Vec::new();
+        for _ in 0..2 {
+            let (stream, _) = tokio::time::timeout(
+                Duration::from_secs(4), listener.accept()
+            ).await.expect("quiet scanner never connected").unwrap();
+            times.push(Instant::now());
+            drop(stream); // connection gets no Modbus response
+        }
+        times
+    });
+    let mut params = safe_params(vec![3]);
+    params.quiet_mode = true;
+    params.ip_concurrency = 128; // ignored in quiet mode (effective 1)
+    let target = ScanTarget::IpRange {
+        from: "127.0.0.1".into(),
+        to: None,
+        port,
+        kind: IpTransportKind::Tcp,
+    };
+    let results = scan(target, params).await;
+    let times = accepted.await.unwrap();
+    assert_eq!(times.len(), 2);
+    assert!(times[1].duration_since(times[0]) >= Duration::from_millis(430),
+        "Quiet Mode must pace TCP handshake attempts, even when no PDU is received");
+    assert_eq!(results.stats.responses_ok, 0);
+}
