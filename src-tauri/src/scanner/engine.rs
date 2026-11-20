@@ -1016,10 +1016,23 @@ async fn execute_probe(
             },
         };
 
-        let status = match &res {
-            Ok(_) => "ok",
-            Err(TransportError::Timeout(_)) => "timeout",
-            Err(_) => "error",
+        // Verify before logging the outcome. Receiving bytes is not itself
+        // a successful Modbus transaction: malformed PDU/counts must be marked
+        // "invalid" in the traffic log as well as in discovery statistics.
+        let verified = res.as_ref().ok().map(|reply| {
+            verify_adu(
+                target.kind, target.unit_id, function,
+                reply, transaction_id, engine.clone(),
+            ).map(|p| super::strategies::classify_response(
+                function, &p.to_bytes(), started.elapsed().as_micros(),
+            ))
+        });
+        let status = match (&res, &verified) {
+            (Ok(_), Some(Ok(ProbeResult::Ok { .. }))) => "ok",
+            (Ok(_), Some(Ok(ProbeResult::Exception { .. }))) => "exception",
+            (Ok(_), _) => "invalid",
+            (Err(TransportError::Timeout(_)), _) => "timeout",
+            (Err(_), _) => "error",
         };
         log_traffic(
             sink,
@@ -1032,11 +1045,12 @@ async fn execute_probe(
         );
 
         match res {
-            Ok(resp) => {
-                let rtt = started.elapsed().as_micros();
-                match verify_adu(target.kind, target.unit_id, function, &resp, transaction_id, engine.clone()) {
-                    Ok(p) => {
-                        let result = super::strategies::classify_response(function, &p.to_bytes(), rtt);
+            Ok(_) => {
+                let verified = verified.unwrap_or_else(|| {
+                    Err(TransportError::Other("missing probe verification".into()))
+                });
+                match verified {
+                    Ok(result) => {
                         let is_found = matches!(result, ProbeResult::Ok { .. } | ProbeResult::Exception { .. });
                         let is_ok = matches!(result, ProbeResult::Ok { .. });
                         let is_exception = matches!(result, ProbeResult::Exception { .. });
