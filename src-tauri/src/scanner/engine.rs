@@ -1275,10 +1275,31 @@ async fn execute_register_read(
         },
     };
 
-    let tx_status = match &res {
-        Ok(_) => "ok",
-        Err(TransportError::Timeout(_)) => "timeout",
-        Err(_) => "error",
+    // Validate once, before both traffic logging and result storage. A reply
+    // with valid MBAP but a wrong byte count must not be displayed as "ok".
+    let verified: Option<Result<Result<Vec<u16>, u8>, TransportError>> =
+        res.as_ref().ok().map(|reply| {
+            verify_adu(
+                target.kind, target.unit_id, function,
+                reply, transaction_id, engine.clone(),
+            ).and_then(|pdu| match pdu {
+                Pdu::Response { data, .. } => {
+                    crate::modbus::frame::response::parse_read_values(
+                        function, &data, quantity,
+                    ).map(Ok).map_err(TransportError::Modbus)
+                }
+                Pdu::Exception { code, .. } => Ok(Err(code)),
+                _ => Err(TransportError::Modbus(ModbusError::InvalidFrame(
+                    "register read did not return a response PDU".into()
+                ))),
+            })
+        });
+    let tx_status = match (&res, &verified) {
+        (Ok(_), Some(Ok(Ok(_)))) => "ok",
+        (Ok(_), Some(Ok(Err(_)))) => "exception",
+        (Ok(_), _) => "invalid",
+        (Err(TransportError::Timeout(_)), _) => "timeout",
+        (Err(_), _) => "error",
     };
     log_traffic(
         sink,
@@ -1290,52 +1311,27 @@ async fn execute_register_read(
         tx_status,
     );
 
-    let resp = match res {
-        Ok(r) => r,
-        Err(e) => {
-            let timed_out = matches!(e, TransportError::Timeout(_));
-            let mut r = results.write();
-            if timed_out {
-                r.stats.timeouts += 1;
-            } else {
-                r.stats.transport_errors += 1;
-            }
-            return if timed_out {
-                RegisterReadOutcome::Timeout
-            } else {
-                RegisterReadOutcome::Error
-            };
+    if let Err(e) = res {
+        let timed_out = matches!(e, TransportError::Timeout(_));
+        let mut r = results.write();
+        if timed_out {
+            r.stats.timeouts += 1;
+        } else {
+            r.stats.transport_errors += 1;
         }
-    };
+        return if timed_out {
+            RegisterReadOutcome::Timeout
+        } else {
+            RegisterReadOutcome::Error
+        };
+    }
 
     let rtt = started.elapsed().as_micros();
-    match verify_adu(
-        target.kind,
-        target.unit_id,
-        function,
-        &resp,
-        transaction_id,
-        engine.clone(),
-    ) {
-        Ok(p) if !p.is_exception() => {
-            // Never publish a register record or count a successful response
-            // until FC, advertised byte count and requested quantity agree.
-            let parsed = match &p {
-                Pdu::Response { data, .. } => {
-                    crate::modbus::frame::response::parse_read_values(function, data, quantity)
-                }
-                _ => Err(ModbusError::InvalidFrame(
-                    "register read returned a non-response PDU".into()
-                )),
-            };
-            let values = match parsed {
-                Ok(values) => values,
-                Err(error) => {
-                    tracing::warn!("invalid read response FC {function:#04x}: {error}");
-                    results.write().stats.transport_errors += 1;
-                    return RegisterReadOutcome::Malformed;
-                }
-            };
+    let parsed = verified.unwrap_or_else(|| {
+        Err(TransportError::Other("missing register read verification".into()))
+    });
+    match parsed {
+        Ok(Ok(values)) => {
             let key = format!(
                 "{}:{}:{}",
                 kind_short(target.kind),
@@ -1384,13 +1380,8 @@ async fn execute_register_read(
                 values: values.clone(),
             }
         }
-        Ok(p) => {
-            let code = match p {
-                Pdu::Exception { code, .. } => code,
-                _ => 0x02,
-            };
-            let mut r = results.write();
-            r.stats.responses_exception += 1;
+        Ok(Err(code)) => {
+            results.write().stats.responses_exception += 1;
             RegisterReadOutcome::Exception { code }
         }
         Err(e) => {
