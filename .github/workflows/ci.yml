@@ -5,7 +5,34 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
+  governance:
+    name: Governance (release gate tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify release gate positive and negative cases
+        run: node --test scripts/verify-release-gates.test.mjs
+      - name: Verify all package/Cargo/Tauri versions
+        run: node scripts/check-release-version.mjs
+      - name: Verify importable ruleset JSON parses and has expected targets
+        run: |
+          node --input-type=module -e "
+          import { readFileSync } from 'node:fs';
+          const main = JSON.parse(readFileSync('.github/rulesets/main.json', 'utf8'));
+          const tags = JSON.parse(readFileSync('.github/rulesets/release-tags.json', 'utf8'));
+          if (main.target !== 'branch' || tags.target !== 'tag' ||
+              main.enforcement !== 'active' || tags.enforcement !== 'active') {
+            throw new Error('ruleset templates are malformed');
+          }
+          "
+
   frontend:
     name: Frontend (typecheck + build)
     runs-on: ubuntu-latest
@@ -72,4 +99,5 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib scanner::field_tests -- --nocapture
 
-  # Full installers are built on release tags to keep CI fast.
+  # Installers are tested separately by Windows QA and promoted by a
+  # manual, protected Release workflow after physical bench acceptance.

@@ -8,7 +8,7 @@
 > [PLAN.ru.md](PLAN.ru.md).
 > История изменений: [CHANGELOG.md](../CHANGELOG.md).
 
-**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#5 слиты; PR #6 и #7 — Draft, последовательно)
+**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#6 и #8 слиты; PR #7 дублирует уже слитые изменения; PR #9 — защитные механизмы и release gates)
 
 ---
 
@@ -25,15 +25,16 @@
 | **PR #3** — Windows QA installers | ✅ слит; QA CI прошёл | EXE/MSI тестовые установщики; SHA256/версия/коммит; без публикации Release |
 | **PR #4** — Scanner lifecycle & cancellation | ✅ слит; CI и Windows QA прошли | Независимый сигнал Stop; отмена активных запросов; очистка pending; единый terminal status; тесты отсутствия TX после Stop |
 | **PR #5** — Strict Modbus response validation | ✅ слит; CI и Windows QA прошли | Строгая структура PDU, проверка FC/exception, точные количества бит/регистров, отсутствие ложных успешных чтений, негативные loopback-тесты |
-| **PR #6** — Safe manual I/O & transport stability | 🔧 Draft PR, не слит; CI/Windows QA успешны | Запись и Raw Frame без повторов, точная проверка FC05/06/10, RTU-over-TCP с задержками ответа, ограничение RX буферов |
-| **PR #7** — OT Safety Policy | 🔧 Draft, зависит от PR #6 | IP/CIDR allowlist, исключение адресов, общий Quiet Mode 2 req/s, Bearer/Origin защита HTTP+WS API |
+| **PR #6** — Safe manual I/O & transport stability | ✅ слит; CI/Windows QA успешны | Запись и Raw Frame без повторов, точная проверка FC05/06/10, RTU-over-TCP с задержками ответа, ограничение RX буферов |
+| **PR #7 / #8** — OT Safety Policy | ✅ изменения в main через PR #8; PR #7 дублирует работу | IP/CIDR allowlist, исключения, Quiet Mode 2 req/s, Bearer/Origin защита HTTP+WS API |
+| **PR #9** — Repository Governance & Release Gates | 🔧 Draft | Защита main/тегов через импортируемые Rulesets; обязательное независимое review; manual release с CI/QA/bench-gates и environment approval |
 | **v1.1** — Diagnostics | 📋 следующий | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting, quiet mode |
 | **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
 | **v2.0** — Platform | 💡 исследование + выбор стека | Шлюзы MQTT/OPC UA, web-компаньон, политики IEC 62443, плагины; BACnet отложен (см. §9 RESEARCH_V2) |
 
-**Кандидат v1.0.1:** PR #1–#5 уже слиты. PR #6 защищает ручные записи от автоматического повторения и стабилизирует приём ответов. PR #3 обеспечивает загрузку тестовых Windows EXE/MSI без релиза. **Официальный** тег `v1.0.1` и GitHub Release — только после зелёного CI, стендовых испытаний и отдельного утверждения. Последний публичный релиз — v1.0.0.
+**Кандидат v1.0.1:** PR #1–#6 и #8 слиты, 95 Rust-тестов и Windows QA автоматизированы. **Официальный** тег `v1.0.1` и GitHub Release допускаются только после активации Rulesets для main и v*, настройки защищённого окружения `production-release`, успешного CI/QA на точном SHA main, документированной приёмки на физическом стенде и независимого ручного утверждения. Последний публичный релиз — v1.0.0.
 
-**Качество на текущий момент:** PR #4 прошёл CI на Windows/Linux/macOS, регрессионные тесты отмены и Windows QA. PR #5 расширяет негативные тесты Modbus-ответов; итоговая проверка выполняется в GitHub Actions. Последний публичный релиз — v1.0.0; QA-пакет v1.0.1 не заменяет приёмку на реальном стенде.
+**Качество:** main до PR #9 прошёл CI (5 рабочих этапов после PR #9: Frontend, Governance и Rust на Windows/Linux/macOS). Windows QA EXE/MSI — тестовый артефакт, не доказательство стендовой приёмки. Актуальное состояние защит GitHub отслеживается отдельно от содержимого файлов Rulesets.
 
 ---
 
@@ -59,7 +60,7 @@
 | E-03 ✅ | Локальный REST + WebSocket API (`127.0.0.1`, без авторизации по умолчанию, только read) | Готово: axum, `/health`, `/api/v1/*`, WS-поток событий, CLI `serve` и Tauri-команды | L | E-01 |
 | E-04 ✅ | Профили устройств: библиотека известных register map, импорт CSV/JSON, автоподстановка декодера по FC43 | Готово: `DeviceProfile`, импорт CSV/JSON, match по identity, вкладка Profiles и подсказка в карточке | M | P3-01, P3-04 |
 | E-05 ✅ | Modbus Security (TLS, порт 802, X.509) — исследование и MVP-поддержка | Готово: `tokio-rustls`, MBAP в TLS, webpki CA, mTLS, CLI `--tls`, UI-чекбокс | L | — |
-| E-06 ✅ | Автоматизация Release: пересборка инсталляторов и загрузка ассетов в GitHub Actions | Готово: `release.yml` по тегу `v*`, Windows build → artifact → GH Release | S | — |
+| E-06 ✅ | Управляемый Release: ручной запуск после независимой приёмки | PR #9: `release.yml` только workflow_dispatch → CI/QA/ruleset/bench preflight → Windows build → protected environment → GH Release; без автопубликации по тегу | S | — |
 | E-07 ✅ | Генерация `src/types/ipc.ts` из Rust (`ts-rs` или свой генератор схем) | Готово: 67 файлов в `src/types/generated`, фасад, `npm run gen:types`, CI-проверка | M | — |
 | E-08 ✅ | Юнит-тесты стратегий/движка с mock-транспортом; CI-матрица Linux/macOS | Готово: `MockTransport`, тесты конвейера build→transact→verify, CI на Windows/Linux/macOS | M | E-01 |
 
