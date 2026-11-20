@@ -8,8 +8,9 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::State;
-use axum::http::StatusCode;
+use axum::extract::{Request, State};
+use axum::http::{header, HeaderMap, StatusCode};
+use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -43,6 +44,60 @@ struct ApiState {
     traffic: Arc<TrafficLogHandle>,
     loggers: Arc<LoggerHandle>,
     events: broadcast::Sender<Value>,
+    auth: Arc<ApiAuth>,
+}
+
+#[derive(Debug)]
+struct ApiAuth {
+    token: String,
+    port: u16,
+}
+impl ApiAuth {
+    fn from_env(port: u16) -> Result<Self, String> {
+        let token = std::env::var("MODBUS_SCANNER_API_TOKEN").map_err(|_| {
+            "local API disabled: set MODBUS_SCANNER_API_TOKEN (>= 24 characters)".to_string()
+        })?;
+        if token.len() < 24 || token.bytes().any(|c| c.is_ascii_whitespace() || c.is_ascii_control()) {
+            return Err("MODBUS_SCANNER_API_TOKEN must contain >= 24 non-whitespace ASCII characters".into());
+        }
+        Ok(Self { token, port })
+    }
+    fn permitted_origin(&self, headers: &HeaderMap) -> bool {
+        match headers.get(header::ORIGIN) {
+            None => true, // non-browser automation must still authenticate
+            Some(origin) => {
+                let origin = origin.to_str().unwrap_or("");
+                origin == format!("http://127.0.0.1:{}", self.port) ||
+                    origin == format!("http://localhost:{}", self.port)
+            }
+        }
+    }
+    fn valid_bearer(&self, headers: &HeaderMap) -> bool {
+        let provided = headers.get(header::AUTHORIZATION)
+            .and_then(|s| s.to_str().ok()).unwrap_or("");
+        let expected = format!("Bearer {}", self.token);
+        // Equal-length constant-time comparison to avoid leaking token prefix.
+        let a = provided.as_bytes();
+        let b = expected.as_bytes();
+        a.len() == b.len() &&
+            a.iter().zip(b.iter()).fold(0u8, |diff, (x, y)| diff | (x ^ y)) == 0
+    }
+}
+
+async fn authorize(
+    State(auth): State<Arc<ApiAuth>>,
+    request: Request,
+    next: Next,
+) -> Response {
+    if !auth.permitted_origin(request.headers()) {
+        return (StatusCode::FORBIDDEN, Json(json!({"error":"cross-origin API access denied"})))
+            .into_response();
+    }
+    if !auth.valid_bearer(request.headers()) {
+        return (StatusCode::UNAUTHORIZED, Json(json!({"error":"Bearer API token required"})))
+            .into_response();
+    }
+    next.run(request).await
 }
 
 #[derive(Debug, Deserialize)]
@@ -146,6 +201,7 @@ async fn websocket_loop(mut socket: WebSocket, mut rx: broadcast::Receiver<Value
 }
 
 fn router(state: ApiState) -> Router {
+    let guard = state.auth.clone();
     Router::new()
         .route("/health", get(health))
         .route("/api/v1/status", get(get_status))
@@ -156,6 +212,8 @@ fn router(state: ApiState) -> Router {
         .route("/api/v1/scan/pause", post(pause_scan))
         .route("/api/v1/scan/resume", post(resume_scan))
         .route("/api/v1/events", get(websocket))
+        // Every endpoint is protected, including WebSocket upgrade and health.
+        .route_layer(middleware::from_fn_with_state(guard, authorize))
         .with_state(state)
 }
 
@@ -166,12 +224,14 @@ pub async fn start(
     traffic: Arc<TrafficLogHandle>,
     loggers: Arc<LoggerHandle>,
 ) -> Result<ApiServerHandle, String> {
+    let auth = Arc::new(ApiAuth::from_env(port)?);
     let (tx, _) = broadcast::channel(256);
     let state = ApiState {
         scanner,
         traffic,
         loggers,
         events: tx,
+        auth,
     };
     let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port)))
         .await
@@ -202,7 +262,7 @@ pub async fn serve_headless(port: u16) -> Result<(), String> {
         Arc::new(LoggerHandle::new()),
     )
     .await?;
-    println!("Modbus Scanner API listening on http://127.0.0.1:{port}");
+    println!("Modbus Scanner API listening on http://127.0.0.1:{port} (Bearer token required)");
     println!("Press Ctrl+C to stop.");
     match tokio::signal::ctrl_c().await {
         Ok(()) => {
