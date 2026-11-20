@@ -214,7 +214,7 @@ pub fn validate_response_function(pdu: Pdu, expected_fc: u8) -> Result<Pdu, Modb
         return Err(ModbusError::UnexpectedFunction(pdu.function()));
     }
     if let Pdu::Exception { code, .. } = &pdu {
-        if !matches!(code, 0x01..=0x08 | 0x0A | 0x0B) {
+        if !matches!(*code, 0x01..=0x08 | 0x0A | 0x0B) {
             return Err(ModbusError::InvalidFrame(format!(
                 "invalid Modbus exception code {code:#04x}"
             )));
@@ -356,6 +356,12 @@ pub fn parse_device_identification(data: &[u8]) -> Result<DeviceIdentification, 
             value: String::from_utf8_lossy(&data[pos..pos + len]).into_owned(),
         });
         pos += len;
+    }
+    if pos != data.len() {
+        return Err(ModbusError::InvalidFrame(format!(
+            "FC43 object list has {} trailing bytes",
+            data.len() - pos
+        )));
     }
     Ok(DeviceIdentification {
         read_code,
@@ -579,7 +585,9 @@ mod strict_response_tests {
         assert!(parse_bits(&[1, 1, 0], 1).is_err());
         assert!(parse_bits(&[0], 1).is_err());
         assert!(parse_bits(&[1, 1], 0).is_err());
-        assert_eq!(parse_bits(&[250].into_iter().chain([0; 250]).collect::<Vec<_>>(), 2000).unwrap().len(), 2000);
+        let mut max_bits = vec![250u8];
+        max_bits.extend([0u8; 250]);
+        assert_eq!(parse_bits(&max_bits, 2_000).unwrap().len(), 2_000);
 
         // Every possible advertised count with shorter actual payloads must
         // return Result, never panic or index outside the received buffer.
