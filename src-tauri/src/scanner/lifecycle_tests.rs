@@ -33,6 +33,7 @@ fn params(functions: Vec<u8>) -> ScanParams {
         ip_concurrency: 1,
         request_gap_ms: 400,
         identify_devices: false,
+        ip_allowlist: vec!["127.0.0.1/32".into()],
         ..ScanParams::default()
     }
 }

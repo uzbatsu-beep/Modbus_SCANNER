@@ -13,6 +13,7 @@
 pub mod diff;
 pub mod engine;
 pub mod monitor;
+pub mod safety;
 pub mod strategies;
 pub mod types;
 

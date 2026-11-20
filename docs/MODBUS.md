@@ -256,6 +256,22 @@ Mismatches are reported as transport errors and do not create a device record.
   oversized or unterminated frames produce a protocol error without unbounded
   memory growth.
 
+## 7b. OT scan authorization and quiet pacing (PR #7)
+
+An empty `ip_allowlist` denies TCP/UDP scan targets; explicit IP/CIDR
+permission is needed before socket creation. Exclusions override permissions.
+All non-excluded IPs in a scan range must be authorized; single-device and
+register-scan targets are checked with the same policy. Hostnames are
+disallowed for scan destinations to avoid DNS-rebinding bypasses.
+
+Quiet Mode uses separate 500 ms shared gates for **Modbus TX** and **TCP
+connection attempts**; the effective IP concurrency is forced to 1 to
+avoid simultaneous SYN bursts. Both gates are per scan. Transmission slots
+include retries, register reads and FC43; refused TCP connections consume a
+connection slot even when no PDU is sent. An already transmitted Modbus request cannot
+be unsent; the limit is not a deterministic network scheduling guarantee
+on arbitrary industrial gateways.
+
 ## 8. Reference frames (test vectors)
 
 Read holding registers, unit 1, address 0, quantity 10:

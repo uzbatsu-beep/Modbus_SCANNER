@@ -5,7 +5,7 @@
 //! All listener ports are ephemeral and no traffic leaves localhost.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -33,6 +33,7 @@ enum Reply {
 struct TestSlave {
     port: u16,
     requests: Arc<Mutex<Vec<Vec<u8>>>>,
+    arrivals: Arc<Mutex<Vec<Instant>>>,
     task: JoinHandle<()>,
 }
 
@@ -43,6 +44,8 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
     let port = listener.local_addr().unwrap().port();
     let requests: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
     let observed = requests.clone();
+    let arrivals: Arc<Mutex<Vec<Instant>>> = Arc::new(Mutex::new(Vec::new()));
+    let times = arrivals.clone();
     let task = tokio::spawn(async move {
         for reply in replies {
             let (mut stream, _) = tokio::time::timeout(
@@ -60,6 +63,9 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
             assert!((2..=254).contains(&length), "invalid MBAP length {length}");
             let mut pdu = vec![0u8; length as usize - 1];
             stream.read_exact(&mut pdu).await.expect("read PDU");
+            // The quiet-mode gate acts on physical request TX, not on
+            // TCP connect(). Timestamp receipt of the complete Modbus PDU.
+            times.lock().unwrap().push(Instant::now());
             let mut adu = mbap.to_vec();
             adu.extend_from_slice(&pdu);
             observed.lock().unwrap().push(adu);
@@ -79,6 +85,7 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
                 Reply::ShortRegisterData => vec![function, 2, 0, 42],
                 Reply::Data | Reply::WrongTransaction | Reply::WrongFunction | Reply::Fragmented => match function {
                     0x01 | 0x02 => vec![function, 1, 1],
+                    0x2B => vec![function | 0x80, 0x01], // unsupported optional FC43
                     0x03 | 0x04 => {
                         assert!(pdu.len() >= 5, "short read request");
                         let quantity = u16::from_be_bytes([pdu[3], pdu[4]]);
@@ -119,7 +126,7 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
             }
         }
     });
-    TestSlave { port, requests, task }
+    TestSlave { port, requests, arrivals, task }
 }
 
 fn single_tcp(port: u16, register_plan: Vec<RegisterRange>) -> ScanTarget {
@@ -144,6 +151,7 @@ fn safe_params(functions: Vec<u8>) -> ScanParams {
         probe_functions: functions,
         identify_devices: false,
         ip_concurrency: 1,
+        ip_allowlist: vec!["127.0.0.1/32".into()],
         ..ScanParams::default()
     }
 }
@@ -357,4 +365,87 @@ async fn traffic_logs_are_invalid_for_corrupted_discovery_and_map_replies() {
     assert_eq!(traffic[1].status, "invalid");
     assert_eq!(results.stats.responses_ok, 1);
     assert!(results.records[0].registers.is_empty());
+}
+
+#[tokio::test]
+async fn default_ip_allowlist_blocks_network_before_socket_open() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let scanner = ScannerHandle::new();
+    let mut params = safe_params(vec![3]);
+    params.ip_allowlist.clear();
+    let error = scanner.start(EventSink::null(), single_tcp(port, Vec::new()), params)
+        .await.expect_err("empty network allowlist must deny");
+    assert!(error.contains("allowlist"), "{error}");
+    assert!(tokio::time::timeout(Duration::from_millis(100), listener.accept()).await.is_err());
+}
+
+#[tokio::test]
+async fn quiet_mode_rates_retries_and_fc43_at_two_total_requests_per_second() {
+    // Responses are generated from incoming FC rather than assuming that
+    // concurrently scheduled discovery and FC43 requests have a fixed order.
+    let fixture = test_slave(vec![Reply::Data; 4]).await;
+    let timestamps = fixture.arrivals.clone();
+    let mut params = safe_params(vec![3, 4]);
+    params.identify_devices = true;
+    params.quiet_mode = true;
+    params.ip_concurrency = 64;
+    let results = scan(single_tcp(fixture.port, Vec::new()), params).await;
+    let requests = observed(fixture).await;
+    assert_eq!(requests.len(), 4);
+    assert_eq!(results.stats.responses_ok, 2);
+    let times = timestamps.lock().unwrap();
+    for times in times.windows(2) {
+        assert!(times[1].duration_since(times[0]) >= Duration::from_millis(430),
+            "OT quiet mode sent two consecutive requests too quickly");
+    }
+}
+
+#[tokio::test]
+async fn quiet_mode_includes_retry_attempts() {
+    let fixture = test_slave(vec![Reply::Silent, Reply::Data]).await;
+    let timestamps = fixture.arrivals.clone();
+    let mut params = safe_params(vec![3]);
+    params.quiet_mode = true;
+    params.retries = 1;
+    params.timeout_ms = 100;
+    let _ = scan(single_tcp(fixture.port, Vec::new()), params).await;
+    let requests = observed(fixture).await;
+    assert_eq!(requests.len(), 2);
+    let times = timestamps.lock().unwrap();
+    assert!(times[1].duration_since(times[0]) >= Duration::from_millis(430));
+}
+
+#[tokio::test]
+async fn quiet_mode_paces_tcp_connection_attempts_even_when_no_modbus_reply_exists() {
+    use super::types::IpTransportKind;
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let accepted = tokio::spawn(async move {
+        let mut times = Vec::new();
+        for _ in 0..2 {
+            let (stream, _) = tokio::time::timeout(
+                Duration::from_secs(4), listener.accept()
+            ).await.expect("quiet scanner never connected").unwrap();
+            times.push(Instant::now());
+            drop(stream); // connection gets no Modbus response
+        }
+        times
+    });
+    let mut params = safe_params(vec![3]);
+    params.quiet_mode = true;
+    params.ip_concurrency = 128; // ignored in quiet mode (effective 1)
+    let target = ScanTarget::IpRange {
+        from: "127.0.0.1".into(),
+        to: None,
+        port,
+        kind: IpTransportKind::Tcp,
+    };
+    let results = scan(target, params).await;
+    let times = accepted.await.unwrap();
+    assert_eq!(times.len(), 2);
+    assert!(times[1].duration_since(times[0]) >= Duration::from_millis(430),
+        "Quiet Mode must pace TCP handshake attempts, even when no PDU is received");
+    assert_eq!(results.stats.responses_ok, 0);
 }

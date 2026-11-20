@@ -8,7 +8,7 @@
 > [PLAN.ru.md](PLAN.ru.md).
 > История изменений: [CHANGELOG.md](../CHANGELOG.md).
 
-**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#5 слиты; PR #6 — безопасность ручного I/O)
+**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#5 слиты; PR #6 и #7 — Draft, последовательно)
 
 ---
 
@@ -25,7 +25,8 @@
 | **PR #3** — Windows QA installers | ✅ слит; QA CI прошёл | EXE/MSI тестовые установщики; SHA256/версия/коммит; без публикации Release |
 | **PR #4** — Scanner lifecycle & cancellation | ✅ слит; CI и Windows QA прошли | Независимый сигнал Stop; отмена активных запросов; очистка pending; единый terminal status; тесты отсутствия TX после Stop |
 | **PR #5** — Strict Modbus response validation | ✅ слит; CI и Windows QA прошли | Строгая структура PDU, проверка FC/exception, точные количества бит/регистров, отсутствие ложных успешных чтений, негативные loopback-тесты |
-| **PR #6** — Safe manual I/O & transport stability | 🔧 Draft PR | Запись и Raw Frame без повторов, точная проверка FC05/06/10, RTU-over-TCP с задержками ответа, ограничение RX буферов |
+| **PR #6** — Safe manual I/O & transport stability | 🔧 Draft PR, не слит; CI/Windows QA успешны | Запись и Raw Frame без повторов, точная проверка FC05/06/10, RTU-over-TCP с задержками ответа, ограничение RX буферов |
+| **PR #7** — OT Safety Policy | 🔧 Draft, зависит от PR #6 | IP/CIDR allowlist, исключение адресов, общий Quiet Mode 2 req/s, Bearer/Origin защита HTTP+WS API |
 | **v1.1** — Diagnostics | 📋 следующий | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting, quiet mode |
 | **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
 | **v2.0** — Platform | 💡 исследование + выбор стека | Шлюзы MQTT/OPC UA, web-компаньон, политики IEC 62443, плагины; BACnet отложен (см. §9 RESEARCH_V2) |
