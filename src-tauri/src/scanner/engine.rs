@@ -17,7 +17,10 @@ use parking_lot::RwLock;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
-use crate::modbus::frame::{parse_device_identification, read_device_identification, Pdu};
+use crate::modbus::frame::{
+    parse_device_identification, parse_tcp_response, read_device_identification,
+    validate_response_function, Pdu,
+};
 use crate::transport::serial::{SerialPortConfig, SerialTransport};
 use crate::transport::tcp::{TcpFraming, TcpTransport};
 use crate::transport::tls::TlsParams;
@@ -747,35 +750,7 @@ fn mbap_frame(unit_id: u8, pdu: &[u8], transaction_id: u16) -> Vec<u8> {
 
 /// Verify an MBAP response: transaction id, protocol id, length, unit id.
 fn verify_mbap(adu: &[u8], expected_unit: u8, expected_tx: u16) -> Result<Pdu, TransportError> {
-    if adu.len() < 8 {
-        return Err(TransportError::Modbus(ModbusError::TooShort(adu.len())));
-    }
-    let transaction_id = u16::from_be_bytes([adu[0], adu[1]]);
-    if transaction_id != expected_tx {
-        return Err(TransportError::Modbus(ModbusError::TransactionIdMismatch {
-            expected: expected_tx,
-            actual: transaction_id,
-        }));
-    }
-    let protocol_id = u16::from_be_bytes([adu[2], adu[3]]);
-    if protocol_id != 0 {
-        return Err(TransportError::Other(format!("bad protocol id {protocol_id}")));
-    }
-    let length = u16::from_be_bytes([adu[4], adu[5]]) as usize;
-    if adu.len() != 6 + length {
-        return Err(TransportError::Modbus(ModbusError::InvalidFrame(format!(
-            "MBAP length {length} but {} bytes received",
-            adu.len() - 6
-        ))));
-    }
-    let unit_id = adu[6];
-    if unit_id != expected_unit {
-        return Err(TransportError::Modbus(ModbusError::UnitIdMismatch {
-            expected: expected_unit,
-            actual: unit_id,
-        }));
-    }
-    Pdu::from_bytes(&adu[7..]).map_err(TransportError::Modbus)
+    parse_tcp_response(adu, expected_unit, expected_tx).map_err(TransportError::Modbus)
 }
 
 /// Build the wire ADU, honouring the selected TCP/UDP framing.
@@ -849,15 +824,7 @@ pub(crate) fn verify_adu(
         }
     };
 
-    if pdu.is_exception() {
-        return Ok(pdu);
-    }
-    let fc = pdu.function();
-    if fc != expected_fc {
-        return Err(TransportError::Modbus(ModbusError::UnexpectedFunction(fc)));
-    }
-    // Pdu::from_bytes is direction-neutral and returns Request by default.
-    Ok(pdu.into_response())
+    validate_response_function(pdu, expected_fc).map_err(TransportError::Modbus)
 }
 
 #[cfg(test)]
@@ -1083,7 +1050,8 @@ async fn execute_probe(
                             match &result {
                                 ProbeResult::Ok { .. } => r.stats.responses_ok += 1,
                                 ProbeResult::Exception { .. } => r.stats.responses_exception += 1,
-                                _ => {}
+                                ProbeResult::TransportError { .. } => r.stats.transport_errors += 1,
+                                ProbeResult::NoResponse { .. } => r.stats.timeouts += 1,
                             }
                             if is_found {
                                 if let Some(rec) = r.records.iter_mut().find(|rec| rec.key == key) {
@@ -1311,9 +1279,23 @@ async fn execute_register_read(
         engine.clone(),
     ) {
         Ok(p) if !p.is_exception() => {
-            let data = match &p {
-                Pdu::Response { data, .. } => data.clone(),
-                _ => Vec::new(),
+            // Never publish a register record or count a successful response
+            // until FC, advertised byte count and requested quantity agree.
+            let parsed = match &p {
+                Pdu::Response { data, .. } => {
+                    crate::modbus::frame::response::parse_read_values(function, data, quantity)
+                }
+                _ => Err(ModbusError::InvalidFrame(
+                    "register read returned a non-response PDU".into()
+                )),
+            };
+            let values = match parsed {
+                Ok(values) => values,
+                Err(error) => {
+                    tracing::warn!("invalid read response FC {function:#04x}: {error}");
+                    results.write().stats.transport_errors += 1;
+                    return RegisterReadOutcome::Malformed;
+                }
             };
             let key = format!(
                 "{}:{}:{}",
@@ -1322,14 +1304,6 @@ async fn execute_register_read(
                 target.port.map(|p| p.to_string()).unwrap_or_default()
             );
             let key = format!("{key}:{}", target.unit_id);
-
-            let values: Vec<u16> = match function {
-                0x03 | 0x04 => crate::modbus::frame::response::parse_registers(&data).unwrap_or_default(),
-                0x01 | 0x02 => crate::modbus::frame::response::parse_bits(&data, quantity)
-                    .map(|bits| bits.iter().map(|&b| b as u16).collect())
-                    .unwrap_or_default(),
-                _ => Vec::new(),
-            };
 
             let mut r = results.write();
             r.stats.responses_ok += 1;
@@ -1381,10 +1355,9 @@ async fn execute_register_read(
             RegisterReadOutcome::Exception { code }
         }
         Err(e) => {
-            let mut r = results.write();
-            r.stats.transport_errors += 1;
-            let _ = e;
-            RegisterReadOutcome::Error
+            tracing::warn!("invalid Modbus read response FC {function:#04x}: {e}");
+            results.write().stats.transport_errors += 1;
+            RegisterReadOutcome::Malformed
         }
     }
 }

@@ -13,7 +13,9 @@ use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
 use crate::modbus::decode::{
     decode, interpret_all, DecodeResult, DecodeSpec, DecodedValue,
 };
-use crate::modbus::frame::{request, Pdu};
+use crate::modbus::frame::{
+    parse_tcp_response, request, response, validate_response_function, Pdu,
+};
 use crate::transport::serial::{SerialPortConfig, SerialTransport};
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
@@ -245,18 +247,8 @@ fn verify_and_parse(
             }
             f.pdu
         }
-        TransportKind::Tcp => {
-            if resp.len() < 8 {
-                return Err(ModbusError::TooShort(resp.len()));
-            }
-            if resp[6] != unit_id {
-                return Err(ModbusError::UnitIdMismatch {
-                    expected: unit_id,
-                    actual: resp[6],
-                });
-            }
-            Pdu::from_bytes(&resp[7..])?
-        }
+        // Manual requests use transaction id 0 in build_adu.
+        TransportKind::Tcp => parse_tcp_response(resp, unit_id, 0)?,
         TransportKind::Udp => {
             let f = crate::modbus::rtu::decode(resp)?;
             if f.unit_id.0 != unit_id {
@@ -269,10 +261,7 @@ fn verify_and_parse(
         }
     };
 
-    if !pdu.is_exception() && pdu.function() != expected_fc {
-        return Err(ModbusError::UnexpectedFunction(pdu.function()));
-    }
-    Ok(pdu.into_response())
+    validate_response_function(pdu, expected_fc)
 }
 
 /// Reject broadcast destinations encoded directly inside a caller-supplied ADU.
@@ -358,24 +347,32 @@ pub async fn read_registers(
                 }
             }
             Ok(p) => {
-                let data = match &p {
-                    Pdu::Response { data, .. } => data.clone(),
-                    _ => Vec::new(),
+                let parsed = match &p {
+                    Pdu::Response { data, .. } => {
+                        response::parse_read_values(expected_fc, data, req.quantity)
+                    }
+                    _ => Err(ModbusError::InvalidFrame(
+                        "manual read expected a normal response PDU".into()
+                    )),
                 };
-                let values = match expected_fc {
-                    0x01 | 0x02 => crate::modbus::frame::response::parse_bits(&data, req.quantity)
-                        .map(|bits| bits.iter().map(|&b| b as u16).collect())
-                        .unwrap_or_default(),
-                    _ => crate::modbus::frame::response::parse_registers(&data).unwrap_or_default(),
-                };
-                Ok(ManualResponse {
-                    ok: true,
-                    error: None,
-                    exception_code: None,
-                    values,
-                    response_hex: Some(hex::encode(&resp)),
-                    rtt_us: Some(rtt),
-                })
+                match parsed {
+                    Ok(values) => Ok(ManualResponse {
+                        ok: true,
+                        error: None,
+                        exception_code: None,
+                        values,
+                        response_hex: Some(hex::encode(&resp)),
+                        rtt_us: Some(rtt),
+                    }),
+                    Err(error) => Ok(ManualResponse {
+                        ok: false,
+                        error: Some(error.to_string()),
+                        exception_code: None,
+                        values: Vec::new(),
+                        response_hex: Some(hex::encode(&resp)),
+                        rtt_us: Some(rtt),
+                    }),
+                }
             }
             Err(e) => Ok(ManualResponse {
                 ok: false,
