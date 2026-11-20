@@ -43,6 +43,9 @@
             "context": "Frontend (typecheck + build)"
           },
           {
+            "context": "Governance (release gate tests)"
+          },
+          {
             "context": "Backend (cargo check + tests) (windows-latest)"
           },
           {

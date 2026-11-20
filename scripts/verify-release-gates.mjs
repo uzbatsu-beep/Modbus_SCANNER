@@ -6,6 +6,7 @@ import { pathToFileURL } from "node:url";
 
 export const REQUIRED_CHECKS = [
   "Frontend (typecheck + build)",
+  "Governance (release gate tests)",
   "Backend (cargo check + tests) (windows-latest)",
   "Backend (cargo check + tests) (ubuntu-latest)",
   "Backend (cargo check + tests) (macos-latest)",
@@ -130,7 +131,7 @@ async function main() {
     ciRuns: ci.workflow_runs, qaRun, qaJobs: qa.jobs, qaArtifacts: qaArtifacts.artifacts,
     rulesets, tagAlreadyExists: !!tagRef, releaseAlreadyExists: !!release,
   });
-  console.log("Release preflight PASS: all 4 CI checks, exact SHA QA, active rulesets, " +
+  console.log("Release preflight PASS: all 5 CI checks, exact SHA QA, active rulesets, " +
     "bench evidence and immutable tag requirements verified.");
   console.log(JSON.stringify(result, null, 2));
 }
