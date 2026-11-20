@@ -61,6 +61,8 @@ export function validateEvidence({
   for (const ruleType of ["deletion", "non_fast_forward"]) {
     requireGate(activeRule(rulesets, "branch", "refs/heads/main", ruleType),
       "main ruleset must block " + ruleType);
+  }
+  for (const ruleType of ["deletion", "update", "non_fast_forward"]) {
     requireGate(activeRule(rulesets, "tag", "refs/tags/" + tag, ruleType),
       "v* tag ruleset must block " + ruleType);
   }

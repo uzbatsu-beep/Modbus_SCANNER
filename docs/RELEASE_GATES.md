@@ -33,7 +33,8 @@ closed without the provisioned environment secret.
    the template deliberately requires an independent review instead.
 
 Import the second template `.github/rulesets/release-tags.json` to protect
-`refs/tags/v*` against **deletion and non-fast-forward updates**. Creation of
+`refs/tags/v*` against **all updates** (including fast-forward moves) and
+deletion. Tag creation is intentionally still permitted. Creation of
 new tags remains allowed, because the protected Release job creates the tag
 only after preflight and environment approval. A manually pushed tag by itself
 does not trigger publishing (no `push.tags` trigger in `release.yml`).

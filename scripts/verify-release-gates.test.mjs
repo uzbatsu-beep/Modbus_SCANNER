@@ -24,7 +24,7 @@ const branch = {
 const tags = {
   name: "tags", target: "tag", enforcement: "active",
   conditions: { ref_name: { include: ["refs/tags/v*"], exclude: [] } },
-  rules: [{ type: "deletion" }, { type: "non_fast_forward" }],
+  rules: [{ type: "deletion" }, { type: "update" }, { type: "non_fast_forward" }],
 };
 
 function fixture() {
@@ -79,7 +79,9 @@ const cases = [
       r.type === "required_status_checks" ? { ...r, parameters: {
         ...r.parameters, required_status_checks: [] } } : r) }; }, /CI jobs/],
   ["refusing mutable release tags", (f) => { f.rulesets[1] = {
-    ...f.rulesets[1], rules: [{ type: "deletion" }] }; }, /non_fast_forward/],
+    ...f.rulesets[1], rules: [{ type: "deletion" }] }; }, /update/],
+  ["refusing tag updates even if fast-forward", (f) => { f.rulesets[1] = {
+    ...f.rulesets[1], rules: [{ type: "deletion" }, { type: "non_fast_forward" }] }; }, /update/],
 ];
 for (const [name, mutate, expected] of cases) {
   test(name, () => {
