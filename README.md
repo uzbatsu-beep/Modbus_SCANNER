@@ -88,14 +88,14 @@ it with `--output`):
 src-tauri/target/release/modbus-scanner.exe scan --port COM3 --auto --output report.json
 
 # Modbus TCP subnet
-src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --tcp-port 502
+src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --allow-ip 192.168.1.0/24 --quiet-mode --tcp-port 502
 
 # raw RTU over TCP, UDP, custom timeouts
-src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
-src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --udp --udp-mbap
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --allow-ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --allow-ip 10.0.0.5 --udp --udp-mbap
 
 # Modbus Security (TLS port 802, optional mutual TLS)
-src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --tls --tls-cert client.pem --tls-key client.key
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --allow-ip 10.0.0.5 --tls --tls-cert client.pem --tls-key client.key
 ```
 
 Run `modbus-scanner scan --help` for all options. With no subcommand the desktop
@@ -105,12 +105,18 @@ exactly the same scanning logic.
 A local REST + WebSocket API is available (loopback only):
 
 ```bash
+# Set MODBUS_SCANNER_API_TOKEN in the process environment before starting.
+# Use a unique secret, at least 24 printable ASCII characters (do not commit).
 modbus-scanner.exe serve --port 8787
-curl http://127.0.0.1:8787/health
-curl http://127.0.0.1:8787/api/v1/results
+curl -H "Authorization: Bearer $MODBUS_SCANNER_API_TOKEN" http://127.0.0.1:8787/health
+curl -H "Authorization: Bearer $MODBUS_SCANNER_API_TOKEN" http://127.0.0.1:8787/api/v1/results
 ```
 
-See [docs/API.md](docs/API.md) for endpoints and the WebSocket event stream.
+All network scans require explicit allowed IP/CIDR scopes (`--allow-ip`).
+Add `--exclude-ip` for forbidden addresses and `--quiet-mode` for a global
+2 requests/second scanner transmission cap (including retries and FC43).
+The API refuses to start without its Bearer token; see
+[docs/API.md](docs/API.md) for authenticated REST and WebSocket use.
 
 Production build:
 

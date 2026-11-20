@@ -88,14 +88,14 @@ npm run tauri dev        # запуск Vite + окна Tauri
 src-tauri/target/release/modbus-scanner.exe scan --port COM3 --auto --output report.json
 
 # подсеть Modbus TCP
-src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --tcp-port 502
+src-tauri/target/release/modbus-scanner.exe scan --ip 192.168.1.0/24 --allow-ip 192.168.1.0/24 --quiet-mode --tcp-port 502
 
 # RTU поверх TCP / UDP, свои тайминги
-src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
-src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --udp --udp-mbap
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --allow-ip 10.0.0.5 --rtu-over-tcp --timeout-ms 300
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --allow-ip 10.0.0.5 --udp --udp-mbap
 
 # Modbus Security (TLS, порт 802; опционально взаимная аутентификация)
-src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --tls --tls-cert client.pem --tls-key client.key
+src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --allow-ip 10.0.0.5 --tls --tls-cert client.pem --tls-key client.key
 ```
 
 Полный список: `modbus-scanner scan --help`. Без подкоманды запускается десктопное
@@ -105,12 +105,18 @@ src-tauri/target/release/modbus-scanner.exe scan --ip 10.0.0.5 --tls --tls-cert 
 Локальный REST + WebSocket API (только loopback):
 
 ```bash
+# Set MODBUS_SCANNER_API_TOKEN in the process environment before starting.
+# Use a unique secret, at least 24 printable ASCII characters (do not commit).
 modbus-scanner.exe serve --port 8787
-curl http://127.0.0.1:8787/health
-curl http://127.0.0.1:8787/api/v1/results
+curl -H "Authorization: Bearer $MODBUS_SCANNER_API_TOKEN" http://127.0.0.1:8787/health
+curl -H "Authorization: Bearer $MODBUS_SCANNER_API_TOKEN" http://127.0.0.1:8787/api/v1/results
 ```
 
-Список эндпоинтов и поток событий — в [docs/API.ru.md](docs/API.ru.md).
+Для любого TCP/UDP-сканирования обязательно явное разрешение IP/CIDR
+(`--allow-ip`). `--exclude-ip` исключает адреса, а `--quiet-mode`
+ограничивает суммарную отправку до 2 запросов/с, включая повторы и FC43.
+Без Bearer-токена API не запускается; подробности —
+[docs/API.ru.md](docs/API.ru.md).
 
 Production-сборка:
 
