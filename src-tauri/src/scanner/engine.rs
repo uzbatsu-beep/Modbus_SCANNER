@@ -62,6 +62,9 @@ pub struct EngineParams {
     /// Modbus Security TLS options.
     pub tls: Option<TlsParams>,
     quiet_gate: Option<Arc<QuietGate>>,
+    /// Second independent limiter for TCP connection attempts, including
+    /// refused/unreachable endpoints that never get to transmit a PDU.
+    connect_gate: Option<Arc<QuietGate>>,
 }
 
 /// Shared for all worker tasks of a single scan, including retry and FC43.
@@ -81,17 +84,22 @@ impl EngineParams {
     async fn before_tx(&self) {
         if let Some(gate) = &self.quiet_gate { gate.wait().await; }
     }
+    async fn before_ip_connect(&self) {
+        if let Some(gate) = &self.connect_gate { gate.wait().await; }
+    }
     pub fn from_scan_params(p: &ScanParams) -> Self {
         Self {
             timeout: Duration::from_millis(p.timeout_ms.clamp(50, 10_000) as u64),
             retries: p.retries.min(5),
             request_gap: Duration::from_millis(p.request_gap_ms.min(1_000) as u64),
-            ip_concurrency: (p.ip_concurrency.clamp(1, 256)) as usize,
+            // OT Quiet Mode must never open dozens of simultaneous TCP sockets.
+            ip_concurrency: if p.quiet_mode { 1 } else { (p.ip_concurrency.clamp(1, 256)) as usize },
             identify_devices: p.identify_devices,
             tcp_framing: p.tcp_framing,
             udp_mbap: p.udp_mbap,
             tls: p.tls.clone(),
             quiet_gate: p.quiet_mode.then(|| Arc::new(QuietGate::new())),
+            connect_gate: p.quiet_mode.then(|| Arc::new(QuietGate::new())),
         }
     }
 }
@@ -106,6 +114,22 @@ mod ip_class_tests {
         assert!(IpTargetClass::PortOpenNoModbus.rank() > IpTargetClass::ConnectionRefused.rank());
         assert!(IpTargetClass::ConnectionRefused.rank() > IpTargetClass::Timeout.rank());
         assert!(IpTargetClass::Timeout.rank() > IpTargetClass::Unreachable.rank());
+    }
+
+    #[test]
+    fn quiet_mode_forces_one_ip_worker_and_both_connection_and_tx_gates() {
+        let mut params = ScanParams::default();
+        params.quiet_mode = true;
+        params.ip_concurrency = 128;
+        let engine = EngineParams::from_scan_params(&params);
+        assert_eq!(engine.ip_concurrency, 1);
+        assert!(engine.quiet_gate.is_some());
+        assert!(engine.connect_gate.is_some());
+        params.quiet_mode = false;
+        let normal = EngineParams::from_scan_params(&params);
+        assert_eq!(normal.ip_concurrency, 128);
+        assert!(normal.quiet_gate.is_none());
+        assert!(normal.connect_gate.is_none());
     }
 
     #[test]
@@ -963,6 +987,9 @@ async fn execute_probe(
         // P2-04: did the TCP handshake succeed? A connected socket that never
         // speaks Modbus is different from a refused/unreachable endpoint.
         let mut tcp_connected = false;
+        if target.kind == TransportKind::Tcp {
+            engine.before_ip_connect().await;
+        }
         let res: Result<Vec<u8>, TransportError> = match target.kind {
             TransportKind::Rtu | TransportKind::Ascii => {
                 let mode = match target.serial_mode {
@@ -1263,6 +1290,9 @@ async fn execute_register_read(
     let timeout = engine.timeout;
     let started = Instant::now();
 
+    if target.kind == TransportKind::Tcp {
+        engine.before_ip_connect().await;
+    }
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => {
             if serial_transport.is_none() {
@@ -1514,6 +1544,9 @@ async fn identify_device(
     );
     let timeout = engine.timeout;
     let started = Instant::now();
+    if target.kind == TransportKind::Tcp {
+        engine.before_ip_connect().await;
+    }
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
             Some(t) => { engine.before_tx().await; t.transact(&adu, timeout, 32).await },
