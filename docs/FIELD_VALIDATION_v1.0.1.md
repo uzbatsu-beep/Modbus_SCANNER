@@ -4,6 +4,8 @@
 
 **Условие выпуска:** PR #1 уже слит; перед публикацией v1.0.1 необходимо пройти испытания на стенде. PR #2 добавляет TCP-симулятор для CI; зелёный CI не заменяет проверки реальных устройств.
 
+**QA test installers / Установщики для проверки:** [Windows QA (EN)](WINDOWS_QA.md) / [Windows QA (RU)](WINDOWS_QA.ru.md). QA binaries are not an official release.
+
 ## Automated protocol coverage / Автоматическое покрытие
 
 The `scanner::field_tests` module runs on 127.0.0.1 with random ephemeral TCP ports.
@@ -28,7 +30,7 @@ compatibility, real firmware error handling, field safety acceptance.
 
 ## Test environment / Стенд
 
-- Windows 10/11 x64, build of PR #1, USB–RS485 adapter, isolated/test Modbus RTU slave and a Modbus TCP simulator or test device.
+- Windows 10/11 x64, build of the approved QA commit from [WINDOWS_QA.md](WINDOWS_QA.md), USB–RS485 adapter, isolated/test Modbus RTU slave and a Modbus TCP simulator or test device. Match the SHA256 against the CI manifest.
 - Записать модель, firmware, COM/driver, тип RS-485, адрес, скорость, биты/чётность/стоп-биты и карту доступных регистров.
 - Avoid active network scans of production subnets; for operational OT networks use explicit authorization, 1–8 IP concurrency, and conservative timeouts.
 - Do not use write tests on process equipment; use a simulator or disconnected test slave only.

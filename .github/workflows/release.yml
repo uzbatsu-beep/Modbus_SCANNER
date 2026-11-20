@@ -33,8 +33,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
+      - name: Verify tag and manifest versions
+        run: node scripts/check-release-version.mjs
+
+      - name: Rust protocol regression tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
       - name: Build Tauri app (MSI + NSIS)
-        run: npm run tauri build
+        run: npm run tauri build -- --bundles nsis,msi
 
       - name: List artifacts
         shell: pwsh

@@ -10,6 +10,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Build / Release Candidate (PR #3)
+- Separate Windows QA workflow builds NSIS EXE + MSI from the PR source without releasing or tagging; includes SHA256 checksums, commit metadata and artifact retention.
+- Consistent version validation across npm, Cargo, Tauri and optional release tag; official release workflow runs Rust regression tests before packaging.
+
 ### Added
 - RESEARCH_V2 §9: live registry data (crates.io/GitHub) on OPC UA, MQTT, BACnet and WASM libraries, GPL-3.0 licence compatibility and decisions for G-01…G-06
 

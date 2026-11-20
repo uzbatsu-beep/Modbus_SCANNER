@@ -128,7 +128,7 @@ cargo test --lib         # protocol unit tests
 
 ## Status
 
-**In review:** v1.0.1 release candidate with TCP/RTU framing fixes, strict bounds and safer manual writes. Publication awaits PR review and field validation.
+**Release candidate:** v1.0.1 protocol fixes and offline test suite are merged. A separate [Windows QA build](docs/WINDOWS_QA.md) produces test EXE/MSI installers for field validation without publishing a GitHub Release.
 
 
 The protocol layer, transports, scanner engine and UI are implemented, and the
