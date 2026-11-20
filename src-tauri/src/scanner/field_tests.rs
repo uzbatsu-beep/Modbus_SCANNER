@@ -13,8 +13,8 @@ use tokio::task::JoinHandle;
 
 use crate::modbus::common::TransportKind;
 use super::engine::ScannerHandle;
-use super::types::{DeviceTarget, IpTargetClass, ProbeResult, RegisterRange, ScanParams, ScanTarget};
-use super::EventSink;
+use super::types::{DeviceTarget, IpTargetClass, ProbeResult, RegisterRange, ScanParams, ScanTarget, TrafficRecord};
+use super::{EventSink, TrafficSink};
 
 #[derive(Clone, Copy)]
 enum Reply {
@@ -306,4 +306,55 @@ async fn corrupt_initial_register_scan_does_not_split_into_more_requests() {
     assert_eq!(requests.len(), 1, "invalid PDU must abort adaptive scan");
     assert_eq!(results.stats.transport_errors, 1);
     assert!(results.records.is_empty());
+}
+
+#[derive(Default)]
+struct CapturedTraffic {
+    records: Mutex<Vec<TrafficRecord>>,
+}
+
+impl TrafficSink for CapturedTraffic {
+    fn push(&self, record: TrafficRecord) {
+        self.records.lock().unwrap().push(record);
+    }
+}
+
+async fn scan_with_traffic(target: ScanTarget, params: ScanParams) -> (
+    super::types::ScanResults,
+    Vec<TrafficRecord>,
+) {
+    let collector = Arc::new(CapturedTraffic::default());
+    let sink = EventSink::new(Arc::new(|_, _| {}), Some(collector.clone()), None);
+    let handle = ScannerHandle::new();
+    handle.start(sink, target, params).await.expect("start");
+    let results = handle.wait_finished(Duration::from_secs(4)).await.expect("completion");
+    let traffic = collector.records.lock().unwrap().clone();
+    (results, traffic)
+}
+
+#[tokio::test]
+async fn traffic_logs_are_invalid_for_corrupted_discovery_and_map_replies() {
+    let invalid_discovery = test_slave(vec![Reply::InvalidByteCount]).await;
+    let (results, traffic) = scan_with_traffic(
+        single_tcp(invalid_discovery.port, Vec::new()),
+        safe_params(vec![3]),
+    ).await;
+    observed(invalid_discovery).await;
+    assert!(results.records.is_empty());
+    assert_eq!(traffic.len(), 1);
+    assert_eq!(traffic[0].status, "invalid");
+
+    let invalid_map = test_slave(vec![Reply::Data, Reply::ShortRegisterData]).await;
+    let (results, traffic) = scan_with_traffic(
+        single_tcp(invalid_map.port, vec![RegisterRange {
+            function: 3, start: 10, quantity: 2,
+        }]),
+        safe_params(vec![3]),
+    ).await;
+    observed(invalid_map).await;
+    assert_eq!(traffic.len(), 2);
+    assert_eq!(traffic[0].status, "ok");
+    assert_eq!(traffic[1].status, "invalid");
+    assert_eq!(results.stats.responses_ok, 1);
+    assert!(results.records[0].registers.is_empty());
 }
