@@ -20,7 +20,7 @@
 | GET | `/api/v1/results` | `ScanResults` |
 | GET | `/api/v1/traffic` | последние 2000 `TrafficRecord` |
 | POST | `/api/v1/scan` | тело `{target: ScanTarget, params: ScanParams}` → `{status:"started"}` |
-| POST | `/api/v1/scan/stop` | остановить текущий скан |
+| POST | `/api/v1/scan/stop` | запросить немедленную отмену → `{"status":"stopping"}` (проверять `/status` до `stopped`) |
 | POST | `/api/v1/scan/pause` | пауза |
 | POST | `/api/v1/scan/resume` | продолжить |
 | WS | `/api/v1/events` | JSON-сообщения `{event, payload}` (scan:event, scan:progress, monitor:update, traffic:record) |

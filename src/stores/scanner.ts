@@ -112,9 +112,17 @@ export const useScannerStore = defineStore("scanner", {
     },
 
     async start(target: Parameters<typeof api.scanner.start>[0], params: ScanParams) {
-      await api.scanner.start(target, params);
+      // Set the optimistic state *before* awaiting IPC. A very short scan may
+      // already finish by the time the start command returns.
+      const previous = this.status;
       this.status = "preparing";
-      this.addLog("info", "scan started");
+      try {
+        await api.scanner.start(target, params);
+        this.addLog("info", "scan started");
+      } catch (error) {
+        this.status = previous;
+        throw error;
+      }
     },
 
     async stop() {

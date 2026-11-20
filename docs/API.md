@@ -20,7 +20,7 @@ by default. All scan endpoints reuse the same `ScannerHandle` as the GUI.
 | GET | `/api/v1/results` | `ScanResults` |
 | GET | `/api/v1/traffic` | last 2000 `TrafficRecord`s |
 | POST | `/api/v1/scan` | body `{target: ScanTarget, params: ScanParams}` → `{status:"started"}` |
-| POST | `/api/v1/scan/stop` | stop the current scan |
+| POST | `/api/v1/scan/stop` | request immediate cancellation → `{"status":"stopping"}` (poll `/status` for terminal `stopped`) |
 | POST | `/api/v1/scan/pause` | pause |
 | POST | `/api/v1/scan/resume` | resume |
 | WS | `/api/v1/events` | JSON messages `{event, payload}` (scan:event, scan:progress, monitor:update, traffic:record) |
