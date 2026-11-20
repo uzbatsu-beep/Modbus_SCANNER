@@ -223,16 +223,9 @@ async fn monitor_task(
                     crate::modbus::frame::Pdu::Response { data, .. } => data.clone(),
                     _ => return None,
                 };
-                let values = match watch.function {
-                    0x03 | 0x04 => crate::modbus::frame::response::parse_registers(&data).ok()?,
-                    0x01 | 0x02 => crate::modbus::frame::response::parse_bits(&data, watch.quantity)
-                        .ok()?
-                        .into_iter()
-                        .map(|b| b as u16)
-                        .collect(),
-                    _ => Vec::new(),
-                };
-                Some(values)
+                crate::modbus::frame::response::parse_read_values(
+                    watch.function, &data, watch.quantity,
+                ).ok()
             });
 
             // Update in a closed scope; no guard crosses an await.

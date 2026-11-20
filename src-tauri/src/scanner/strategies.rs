@@ -48,6 +48,9 @@ pub enum RegisterReadOutcome {
     Timeout,
     /// Transport-level failure.
     Error,
+    /// Received invalid PDU/count/FC. Abort adaptive register discovery so a
+    /// broken device cannot trigger thousands of follow-up split requests.
+    Malformed,
 }
 
 /// Probe PDU builder: read N values from address 0 (device presence + access check).
@@ -592,6 +595,10 @@ impl ScanStrategy for RegisterScanStrategy {
                 self.timeouts_in_row = 0;
                 self.split_failed(block);
             }
+            RegisterReadOutcome::Malformed => {
+                self.aborted = true;
+                self.queue.clear();
+            }
         }
         Vec::new()
     }
@@ -921,42 +928,35 @@ pub fn build_strategy(target: ScanTarget, params: ScanParams) -> Result<Box<dyn 
     }
 }
 
-/// Parse a probe result into a `ProbeResult` (ok / exception).
+/// Strictly classify one discovery response. A malformed FC/count/quantity
+/// is an error, not a discovered device with empty register values.
 pub fn classify_response(function: u8, pdu: &[u8], rtt_us: u128) -> ProbeResult {
-    use crate::modbus::frame::Pdu;
-    match Pdu::from_bytes(pdu).map(Pdu::into_response) {
-        Ok(p) if p.is_exception() => {
-            if let Pdu::Exception { code, .. } = p {
-                ProbeResult::Exception {
-                    function,
-                    code,
-                    message: crate::modbus::common::ModbusError::from_exception(code)
-                        .to_string(),
-                    rtt_us,
-                }
-            } else {
-                unreachable!()
+    use crate::modbus::frame::{response, validate_response_function, Pdu};
+
+    let decoded = Pdu::from_bytes(pdu)
+        .and_then(|p| validate_response_function(p, function))
+        .and_then(|p| match p {
+            Pdu::Exception { code, .. } => Ok(Err(code)),
+            Pdu::Response { data, .. } => {
+                response::parse_read_values(function, &data, 1).map(Ok)
             }
-        }
-        Ok(p) => {
-            let data = match &p {
-                Pdu::Response { data, .. } => data.clone(),
-                _ => Vec::new(),
-            };
-            let values = match function {
-                0x01 | 0x02 => crate::modbus::frame::response::parse_bits(&data, 1)
-                    .map(|bits| bits.iter().map(|&b| b as u16).collect())
-                    .unwrap_or_default(),
-                0x03 | 0x04 => crate::modbus::frame::response::parse_registers(&data).unwrap_or_default(),
-                _ => Vec::new(),
-            };
-            ProbeResult::Ok {
-                function,
-                values,
-                raw_hex: hex::encode(pdu),
-                rtt_us,
-            }
-        }
+            _ => Err(crate::modbus::common::ModbusError::InvalidFrame(
+                "expected a response PDU".into()
+            )),
+        });
+    match decoded {
+        Ok(Ok(values)) => ProbeResult::Ok {
+            function,
+            values,
+            raw_hex: hex::encode(pdu),
+            rtt_us,
+        },
+        Ok(Err(code)) => ProbeResult::Exception {
+            function,
+            code,
+            message: crate::modbus::common::ModbusError::from_exception(code).to_string(),
+            rtt_us,
+        },
         Err(e) => ProbeResult::TransportError {
             function,
             message: e.to_string(),
