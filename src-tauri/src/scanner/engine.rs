@@ -656,10 +656,13 @@ async fn engine_task(
         while ip_tasks.join_next().await.is_some() {}
     }
 
-    // Drop transports before publishing the terminal state.
+    // Drop transports and close the control receiver before the terminal
+    // watch update. A caller may restart immediately after wait_finished().
     if let Some(mut transport) = serial_transport.take() {
         let _ = transport.close().await;
     }
+    control_rx.close();
+    user_cancelled |= *cancel_rx.borrow();
     {
         let mut current = results.write();
         current.stats.finished_ms = Some(now_ms());
