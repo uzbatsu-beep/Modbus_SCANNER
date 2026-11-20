@@ -21,6 +21,11 @@ enum Reply {
     Data,
     Exception(u8),
     WrongTransaction,
+    WrongFunction,
+    WrongExceptionFunction,
+    ExtraExceptionBytes,
+    InvalidByteCount,
+    ShortRegisterData,
     Silent,
     Fragmented,
 }
@@ -68,7 +73,11 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
             let function = pdu[0];
             let response_pdu = match reply {
                 Reply::Exception(code) => vec![function | 0x80, code],
-                Reply::Data | Reply::WrongTransaction | Reply::Fragmented => match function {
+                Reply::WrongExceptionFunction => vec![(function + 1) | 0x80, 2],
+                Reply::ExtraExceptionBytes => vec![function | 0x80, 2, 0],
+                Reply::InvalidByteCount => vec![function, 4, 0, 42],
+                Reply::ShortRegisterData => vec![function, 2, 0, 42],
+                Reply::Data | Reply::WrongTransaction | Reply::WrongFunction | Reply::Fragmented => match function {
                     0x01 | 0x02 => vec![function, 1, 1],
                     0x03 | 0x04 => {
                         assert!(pdu.len() >= 5, "short read request");
@@ -85,6 +94,10 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
                 Reply::Silent => unreachable!(),
             };
 
+            let mut response_pdu = response_pdu;
+            if matches!(reply, Reply::WrongFunction) {
+                response_pdu[0] = if response_pdu[0] == 0x03 { 0x04 } else { 0x03 };
+            }
             let mut tx_id = u16::from_be_bytes([mbap[0], mbap[1]]);
             if matches!(reply, Reply::WrongTransaction) {
                 tx_id = tx_id.wrapping_add(1);
@@ -225,4 +238,72 @@ async fn disallow_write_function_in_discovery_before_network_io() {
         .expect_err("write function must not enter scan engine");
     assert!(error.contains("read-only"));
     assert_eq!(handle.status(), super::types::ScanStatus::Failed);
+}
+
+#[tokio::test]
+async fn malformed_discovery_never_produces_a_false_device() {
+    for reply in [
+        Reply::InvalidByteCount,
+        Reply::WrongFunction,
+        Reply::WrongExceptionFunction,
+        Reply::ExtraExceptionBytes,
+    ] {
+        let fixture = test_slave(vec![reply]).await;
+        let port = fixture.port;
+        let results = scan(single_tcp(port, Vec::new()), safe_params(vec![0x03])).await;
+        let requests = observed(fixture).await;
+
+        assert_eq!(requests.len(), 1, "unexpected retry of malformed FC03");
+        assert!(results.records.is_empty(), "malformed data discovered a device");
+        assert_eq!(results.stats.responses_ok, 0);
+        assert_eq!(results.stats.responses_exception, 0);
+        assert_eq!(results.stats.transport_errors, 1);
+        assert_eq!(results.ip_targets[0].class, IpTargetClass::PortOpenNoModbus);
+    }
+}
+
+#[tokio::test]
+async fn malformed_register_map_response_is_never_stored_or_split() {
+    let fixture = test_slave(vec![Reply::Data, Reply::ShortRegisterData]).await;
+    let target = single_tcp(fixture.port, vec![RegisterRange {
+        function: 0x03, start: 10, quantity: 2,
+    }]);
+    let results = scan(target, safe_params(vec![0x03])).await;
+    let requests = observed(fixture).await;
+
+    assert_eq!(requests.len(), 2, "malformed register read must not fan out");
+    assert_eq!(results.stats.responses_ok, 1, "only discovery may succeed");
+    assert_eq!(results.stats.transport_errors, 1);
+    assert_eq!(results.records.len(), 1);
+    assert!(results.records[0].registers.is_empty(), "corrupt values were persisted");
+}
+
+#[tokio::test]
+async fn corrupt_initial_register_scan_does_not_split_into_more_requests() {
+    use super::types::{RegisterScanMode, RegisterScanParams};
+
+    let fixture = test_slave(vec![Reply::InvalidByteCount]).await;
+    let target = ScanTarget::RegisterScan {
+        scan: RegisterScanParams {
+            target: DeviceTarget {
+                kind: TransportKind::Tcp,
+                endpoint: "127.0.0.1".into(),
+                port: Some(fixture.port),
+                unit_id: 1,
+                serial: None,
+                serial_mode: None,
+            },
+            function: 0x03,
+            start: 0,
+            end: 99,
+            mode: RegisterScanMode::Balanced,
+            batch: 100,
+        },
+    };
+    let results = scan(target, safe_params(vec![0x03])).await;
+    let requests = observed(fixture).await;
+
+    assert_eq!(requests.len(), 1, "invalid PDU must abort adaptive scan");
+    assert_eq!(results.stats.transport_errors, 1);
+    assert!(results.records.is_empty());
 }
