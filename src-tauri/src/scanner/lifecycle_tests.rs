@@ -70,7 +70,7 @@ async fn send_read_response(stream: &mut tokio::net::TcpStream, request: &[u8]) 
 
 async fn assert_no_more_connections(listener: &TcpListener) {
     assert!(
-        tokio::time::timeout(Duration::from_millis(250), listener.accept()).await.is_err(),
+        tokio::time::timeout(Duration::from_millis(650), listener.accept()).await.is_err(),
         "new TCP request was made after Stop"
     );
 }
@@ -94,7 +94,6 @@ async fn second_start_is_rejected_during_running_and_paused() {
     assert!(scanner.start(EventSink::null(), target(port, Vec::new()), settings)
         .await.expect_err("paused scan still owns the engine").contains("already in progress"));
     scanner.control(ControlMsg::Stop).await.expect("stop paused scan");
-    assert_eq!(scanner.status(), ScanStatus::Stopping);
     scanner.wait_finished(Duration::from_secs(2)).await.expect("stop completes");
     assert_eq!(scanner.status(), ScanStatus::Stopped);
     assert_no_more_connections(&listener).await;
@@ -111,6 +110,13 @@ async fn stop_discards_queued_register_reads() {
 
     let (mut stream, request) = recv_request(&listener).await;
     send_read_response(&mut stream, &request).await;
+    // Ensure discovery has completed before exercising queued register work.
+    tokio::time::timeout(Duration::from_secs(1), async {
+        while scanner.results().records.is_empty() {
+            tokio::task::yield_now().await;
+        }
+    }).await.expect("device discovered");
+    tokio::time::sleep(Duration::from_millis(20)).await;
 
     // A 400ms inter-request gap allows Stop to arrive before the queued
     // register work. The old engine would still drain it after the stop.
@@ -151,7 +157,6 @@ async fn stop_before_spawned_engine_is_polled_never_opens_socket() {
     scanner.start(EventSink::null(), target(port, Vec::new()), params(vec![3]))
         .await.expect("start scan");
     scanner.control(ControlMsg::Stop).await.expect("stop immediately");
-    assert_eq!(scanner.status(), ScanStatus::Stopping);
     scanner.wait_finished(Duration::from_secs(2)).await.expect("stop completion");
     assert_eq!(scanner.status(), ScanStatus::Stopped);
     assert_no_more_connections(&listener).await;

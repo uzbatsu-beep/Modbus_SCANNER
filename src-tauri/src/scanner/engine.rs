@@ -304,8 +304,10 @@ impl ScannerHandle {
 
         match msg {
             ControlMsg::Stop => {
+                // Only the engine acknowledges Stopping. Publishing it here
+                // would race a concurrently finished task and could overwrite
+                // a terminal state with a permanently stale "stopping".
                 active.cancel.send_replace(true);
-                self.status_tx.send_replace(ScanStatus::Stopping);
                 Ok(())
             }
             ControlMsg::Pause | ControlMsg::Resume => {
