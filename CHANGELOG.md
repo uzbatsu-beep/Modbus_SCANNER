@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Build / Security — PR #9 (repository governance and release gates)
+- Add importable, active-by-template GitHub Ruleset JSON for protected main (independent PR review, latest-push approval, strict five-job CI) and immutable v* release tags; GitHub Settings activation is required.
+- Replace automatic tag-triggered publishing with a manually dispatched, fail-closed release workflow verifying exact main SHA, 5 green CI checks, same-SHA QA artifact, documented bench PASS and active Rulesets.
+- Gate final publishing behind a protected `production-release` GitHub Environment with independent reviewers and provisioned sentinel secret; upload EXE/MSI with SHA256SUMS and build metadata.
+- Add Governance CI unit tests with negative cases, automatically run Windows QA on main commits, and document activation and acceptance EN/RU.
+
 ### Added — PR #7 (OT Safety Policy, stacked on PR #6)
 - Fail-closed, explicit IP/CIDR allowlist and exclusion rules shared by GUI, CLI and REST scans; prevent hostname-based policy bypass.
 - Quiet Mode global scan TX pacing to 2 requests/sec, including retries, FC43 and register-map traffic; TCP handshake attempts separately paced to 2/sec with effective IP concurrency 1.

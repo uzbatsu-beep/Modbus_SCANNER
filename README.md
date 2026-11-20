@@ -134,7 +134,10 @@ cargo test --lib         # protocol unit tests
 
 ## Status
 
-**Release candidate:** v1.0.1 protocol fixes and offline test suite are merged. A separate [Windows QA build](docs/WINDOWS_QA.md) produces test EXE/MSI installers for field validation without publishing a GitHub Release.
+**Release candidate:** v1.0.1 protocol and OT safety changes are in main.
+[Windows QA](docs/WINDOWS_QA.md) builds test EXE/MSI without a Release.
+Official publishing is now **manual and approval-gated**; configure
+[Repository rulesets and release approval](docs/RELEASE_GATES.md) before release.
 
 
 The protocol layer, transports, scanner engine and UI are implemented, and the

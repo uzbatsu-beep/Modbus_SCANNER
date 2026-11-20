@@ -155,15 +155,24 @@ CI перегенерирует биндинги и упадёт, если `src/
 
 ## Релизный процесс (E-06)
 
-Релизы автоматизированы workflow `.github/workflows/release.yml`:
+Официальный выпуск теперь **только вручную** с блокирующими проверками.
+Push тега `v*` **больше не запускает** релиз.
 
-1. Поднимите версию в `package.json`, `package-lock.json`, `Cargo.toml`,
-   `Cargo.lock` и `tauri.conf.json`; добавьте секцию в `CHANGELOG.md`.
-2. Закоммитьте и запушьте в `main`, затем создайте и запушьте аннотированный
-   тег `vX.Y.Z`.
-3. Workflow собирает Windows-инсталляторы на `windows-latest`
-   (`npm ci` → `npm run tauri build`), загружает их как артефакт и создаёт
-   GitHub Release по тегу с файлами MSI и NSIS.
+1. Зафиксировать версии всех манифестов и CHANGELOG через одобренный PR,
+   слить его в `main`; дождаться успешного CI и Windows QA **на точном SHA main**.
+2. Провести физическую стендовую приёмку и закрепить подписанный протокол
+   с подтверждениями в GitHub Issue репозитория.
+3. Активировать Rulesets для `main` и тегов `v*`; настроить
+   `production-release` с независимым Required reviewer, запретом
+   self-review, допуском только `main` и секретом `OT_RELEASE_APPROVAL_GATE`.
+4. Запустить **Release (manual, protected)** на `main` с параметрами
+   версии, QA run ID, результатом стенда и URL Issue. Preflight проверяет
+   SHA/CI/QA/Rulesets/стенд, сборка формирует EXE/MSI и SHA256SUMS.
+5. Только после отдельного подтверждения GitHub Environment допускается
+   GitHub Release с новым тегом.
+
+Пошаговая настройка: [RELEASE_GATES.ru.md](RELEASE_GATES.ru.md).
+Наличие JSON-шаблонов Ruleset в Git не означает, что ограничения включены.
 
 Локальный аналог: `npm run tauri build`; артефакты — в
 `src-tauri/target/release/bundle/{msi,nsis}/`. На машине пользователя нужен
