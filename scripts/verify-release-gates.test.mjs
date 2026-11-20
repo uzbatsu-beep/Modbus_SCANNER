@@ -37,7 +37,7 @@ function fixture() {
     benchUrl: "https://github.com/uzbatsu-beep/Modbus_SCANNER/issues/42",
     benchEvidence: { number: 42,
       html_url: "https://github.com/uzbatsu-beep/Modbus_SCANNER/issues/42",
-      body: "Source SHA: " + SHA + "\\nBench result: PASS\\nHardware: test drive\\nTransport: Modbus RTU\\nTest summary: verified FC03 and timeout\\n",
+      body: "Source SHA: " + SHA + "\nBench result: PASS\nHardware: test drive\nTransport: Modbus RTU\nTest summary: verified FC03 and timeout\n",
       pull_request: undefined },
     ciRuns: [{ head_sha: SHA, head_branch: "main", event: "push",
       status: "completed", conclusion: "success",
