@@ -12,6 +12,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed — PR #6 (manual write safety and transport stabilization)
 - Manual FC05/FC06/FC10 writes and arbitrary Raw Frames are single-shot regardless of configured retries; only read requests may retry (max 5).
+- Empty/oversized raw PDU/ADU are rejected before transmission; receiving an arbitrary raw response is explicitly not treated as proof of a successful write.
 - Positive write acknowledgments require exact echo of requested address and value/quantity; mismatched acknowledgments are failures, not false-positive success.
 - Timeout/transport failures on writes explicitly warn that the device may have executed the command and that the outcome is unknown.
 - RTU-over-TCP accepts delayed first bytes and assembles common/FC43 responses by length instead of prematurely treating a 5ms gap as EOF; bounded TLS handshake.

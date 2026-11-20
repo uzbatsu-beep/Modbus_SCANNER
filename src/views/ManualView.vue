@@ -229,6 +229,7 @@ onMounted(() => {
       <div class="hint">
         {{ t("rawHint") }}
       </div>
+      <div class="hint">{{ t("rawResponseCaution") }}</div>
     </div>
 
     <!-- RESPONSE -->

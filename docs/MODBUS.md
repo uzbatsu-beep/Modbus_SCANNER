@@ -242,6 +242,8 @@ Mismatches are reported as transport errors and do not create a device record.
 - FC05 and FC06 write acknowledgments must **exactly echo** the requested
   address and value; FC10 must echo the requested start address and quantity.
   A function code match alone is not sufficient to confirm a write.
+- Empty or oversized Raw Frame payloads are blocked before TX; raw responses
+  are not validated as write acknowledgments even when bytes are received.
 - Write and arbitrary Raw Frame actions are never automatically replayed,
   including after a lost reply, timeout, or an I/O error; only reads can retry.
 - A timeout is an **unknown write outcome**, not proof that the device did not
