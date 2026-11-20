@@ -22,6 +22,6 @@
 - [ ] Docs updated (EN + RU) when behaviour or IPC changed
 - [ ] `CHANGELOG.md` updated
 - [ ] Protocol test vector added for codec changes
-- [ ] Review was performed by someone other than the author/last pusher
-- [ ] No merge before explicit reviewer approval
-- [ ] Release approval / physical bench evidence is never inferred from CI
+- [ ] Repository Ruleset still requires a PR, all 5 CI checks and clean review threads
+- [ ] Maintainer has explicitly approved merging this PR (no mandatory external reviewer)
+- [ ] Release remains manual; independent hardware bench PASS evidence is not inferred from CI
