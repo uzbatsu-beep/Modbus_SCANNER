@@ -35,10 +35,10 @@ function fixture() {
     benchUrl: "https://github.com/uzbatsu-beep/Modbus_SCANNER/issues/42",
     ciRuns: [{ head_sha: SHA, head_branch: "main", event: "push",
       status: "completed", conclusion: "success",
-      path: ".github/workflows/ci.yml@refs/heads/main" }],
+      path: ".github/workflows/ci.yml" }],
     qaRun: { id: 15, head_sha: SHA, head_branch: "main",
       status: "completed", conclusion: "success", event: "workflow_dispatch",
-      path: ".github/workflows/windows-qa.yml@refs/heads/main" },
+      path: ".github/workflows/windows-qa.yml" },
     qaJobs: [{ status: "completed", conclusion: "success" }],
     qaArtifacts: [{ name: "modbus-scanner-v1.0.1-windows-qa-33",
       expired: false, size_in_bytes: 12800000 }],
@@ -63,6 +63,10 @@ const cases = [
   ["refusing tag replacement", (f) => { f.tagAlreadyExists = true; }, /already exists/],
   ["refusing missing main CI", (f) => { f.ciRuns = []; }, /CI/],
   ["refusing PR-only CI", (f) => { f.ciRuns[0].event = "pull_request"; }, /CI/],
+  ["refusing similar but wrong CI workflow", (f) => {
+    f.ciRuns[0].path = ".github/workflows/ci.yml.insecure"; }, /CI/],
+  ["refusing similar but wrong QA workflow", (f) => {
+    f.qaRun.path = ".github/workflows/windows-qa.yml.insecure"; }, /QA/],
   ["refusing a stale QA commit", (f) => { f.qaRun.head_sha = "b".repeat(40); }, /QA/],
   ["refusing PR QA", (f) => { f.qaRun.event = "pull_request"; }, /QA/],
   ["refusing failed QA job", (f) => { f.qaJobs[0].conclusion = "failure"; }, /QA/],

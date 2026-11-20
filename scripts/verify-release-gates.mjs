@@ -24,6 +24,13 @@ function includesRef(ruleset, ref) {
       (ref.startsWith("refs/tags/v") && name === "refs/tags/v*"));
 }
 
+function isWorkflowPath(actual, expected) {
+  // GitHub Actions REST run.path is usually ".github/workflows/name.yml".
+  // Some API variants append "@refs/heads/main"; accept both, but not
+  // similarly prefixed file names such as "ci.yml.untrusted".
+  return actual === expected || String(actual ?? "").startsWith(expected + "@");
+}
+
 function activeRule(rulesets, target, ref, type) {
   return rulesets.filter((r) => r.target === target && r.enforcement === "active" &&
     includesRef(r, ref)).flatMap((r) => r.rules ?? []).find((r) => r.type === type);
@@ -70,12 +77,12 @@ export function validateEvidence({
   requireGate(Array.isArray(ciRuns) && ciRuns.some((r) =>
     r.head_sha === sourceSha && r.head_branch === "main" &&
     r.event === "push" && r.status === "completed" && r.conclusion === "success" &&
-    String(r.path ?? "").startsWith(".github/workflows/ci.yml@")),
+    isWorkflowPath(r.path, ".github/workflows/ci.yml")),
     "no successful main-push CI for EXACT release commit");
   requireGate(qaRun && qaRun.head_sha === sourceSha && qaRun.head_branch === "main" &&
     ["push", "workflow_dispatch"].includes(qaRun.event) &&
     qaRun.status === "completed" && qaRun.conclusion === "success" &&
-    String(qaRun.path ?? "").startsWith(".github/workflows/windows-qa.yml@"),
+    isWorkflowPath(qaRun.path, ".github/workflows/windows-qa.yml"),
     "Windows QA must pass on the EXACT main commit (not a PR head)");
   requireGate(Array.isArray(qaJobs) && qaJobs.length > 0 &&
     qaJobs.every((j) => j.status === "completed" && j.conclusion === "success"),
