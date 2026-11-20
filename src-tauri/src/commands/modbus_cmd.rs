@@ -652,3 +652,176 @@ mod reliability_tests {
         assert!(validate_write(0x10, u16::MAX, &[1, 2]).is_err());
     }
 }
+
+#[cfg(test)]
+mod write_safety_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn tcp_target(port: u16) -> ManualTarget {
+        ManualTarget {
+            kind: TransportKind::Tcp,
+            endpoint: "127.0.0.1".into(),
+            port: Some(port),
+            unit_id: 1,
+            serial: None,
+            serial_mode: None,
+        }
+    }
+
+    fn timing(retries: u32) -> ManualTiming {
+        ManualTiming { timeout_ms: 80, retries }
+    }
+
+    fn ack(fc: u8, data: &[u8]) -> Pdu {
+        Pdu::Response { function: fc, data: data.to_vec() }
+    }
+
+    #[test]
+    fn read_retries_are_bounded_and_writes_raw_are_always_single_shot() {
+        let allowed = ManualRetryPolicy::ReadOnly;
+        let single = ManualRetryPolicy::SingleShot;
+        assert_eq!(permitted_retries(None, allowed), 0);
+        assert_eq!(permitted_retries(Some(&timing(1)), allowed), 1);
+        assert_eq!(permitted_retries(Some(&timing(1000)), allowed), 5);
+        assert_eq!(permitted_retries(Some(&timing(1000)), single), 0);
+        assert_eq!(permitted_retries(None, single), 0);
+        assert!(write_outcome_unknown(&TransportError::Timeout(Duration::from_millis(80)))
+            .contains("may have executed"));
+    }
+
+    #[test]
+    fn fc05_and_fc06_require_exact_address_and_value_echo() {
+        for (fc, value) in [(0x05, 0xFF00u16), (0x05, 0u16), (0x06, 0xABCD)] {
+            let mut req = vec![fc, 0x12, 0x34];
+            req.extend_from_slice(&value.to_be_bytes());
+            let ok = ack(fc, &req[1..]);
+            assert!(verify_write_ack(&ok, &req).is_ok());
+            let mut wrong_address = req[1..].to_vec();
+            wrong_address[1] ^= 1;
+            assert!(verify_write_ack(&ack(fc, &wrong_address), &req).is_err());
+            let mut wrong_value = req[1..].to_vec();
+            wrong_value[3] ^= 1;
+            assert!(verify_write_ack(&ack(fc, &wrong_value), &req).is_err());
+            let mut trailing = req[1..].to_vec();
+            trailing.push(0);
+            assert!(verify_write_ack(&ack(fc, &trailing), &req).is_err());
+        }
+    }
+
+    #[test]
+    fn fc10_requires_exact_start_address_and_quantity_echo() {
+        let req = request::write_multiple_registers(0x1234, &[0x1111, 0x2222]);
+        assert!(verify_write_ack(&ack(0x10, &[0x12, 0x34, 0, 2]), &req).is_ok());
+        for invalid in [
+            vec![0x12, 0x35, 0, 2],
+            vec![0x12, 0x34, 0, 1],
+            vec![0x12, 0x34, 0, 2, 0],
+            vec![0x12, 0x34, 0],
+        ] {
+            assert!(verify_write_ack(&ack(0x10, &invalid), &req).is_err());
+        }
+        assert!(verify_write_ack(&ack(0x06, &[0x12, 0x34, 0, 2]), &req).is_err());
+        assert!(verify_write_ack(&Pdu::Exception { function: 0x10, code: 2 }, &req).is_err());
+    }
+
+    #[tokio::test]
+    async fn write_timeout_with_retries_configured_transmits_exactly_once() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = WriteRequest {
+            target: tcp_target(port),
+            function: 0x06,
+            start_address: 0x1234,
+            values: vec![0xABCD],
+            confirm_write: true,
+            timing: Some(timing(5)),
+        };
+        let pdu = request::write_single_register(request.start_address, request.values[0]);
+        let frame = build_adu(TransportKind::Tcp, 1, &pdu);
+        let sent = frame.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; sent.len()];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, sent);
+            // Timeout is ambiguous: the device may have applied the write,
+            // even though the response never arrived.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(),
+                "dangerous automatic retry created a second connection"
+            );
+        });
+        let err = manual_transact(&request, frame, 8, ManualRetryPolicy::SingleShot)
+            .await.expect_err("silent write response must not be successful");
+        assert!(matches!(err, TransportError::Timeout(_)));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn raw_request_timeout_with_retries_configured_transmits_exactly_once() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = RawFrameRequest {
+            target: tcp_target(port),
+            adu_hex: "06 12 34 AB CD".into(),
+            is_full_adu: false,
+            confirm_unsafe: true,
+            timing: Some(timing(5)),
+        };
+        let frame = build_adu(TransportKind::Tcp, 1, &[0x06, 0x12, 0x34, 0xAB, 0xCD]);
+        let sent = frame.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; sent.len()];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, sent);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(),
+                "raw frame was replayed after a response timeout"
+            );
+        });
+        assert!(manual_transact(&request, frame, 8, ManualRetryPolicy::SingleShot)
+            .await.is_err());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_only_request_can_retry_after_closed_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = ReadRequest {
+            target: tcp_target(port),
+            function: 3,
+            start_address: 0,
+            quantity: 1,
+            timing: Some(timing(1)),
+        };
+        let frame = build_adu(TransportKind::Tcp, 1, &request::read_holding_registers(0, 1));
+        let expected = frame.clone();
+        let server = tokio::spawn(async move {
+            for attempt in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = vec![0; expected.len()];
+                stream.read_exact(&mut bytes).await.unwrap();
+                assert_eq!(bytes, expected);
+                if attempt == 1 {
+                    stream.write_all(&[0, 0, 0, 0, 0, 5, 1, 3, 2, 0, 42])
+                        .await.unwrap();
+                }
+            }
+        });
+        let (response, _) = manual_transact(
+            &request, frame, 8, ManualRetryPolicy::ReadOnly,
+        ).await.expect("read-only retry succeeded");
+        let decoded = verify_and_parse(TransportKind::Tcp, 1, 3, &response).unwrap();
+        match decoded {
+            Pdu::Response { data, .. } => {
+                assert_eq!(response::parse_registers(&data).unwrap(), [42]);
+            }
+            other => panic!("unexpected read reply: {other:?}"),
+        }
+        server.await.unwrap();
+    }
+}
