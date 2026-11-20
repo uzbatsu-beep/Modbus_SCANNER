@@ -105,6 +105,16 @@ pub struct ScanArgs {
     /// Max parallel IP probes (default 32)
     #[arg(long)]
     pub concurrency: Option<u32>,
+    /// Allow an IP or CIDR (repeat flag for multiple authorized destinations)
+    #[arg(long = "allow-ip")]
+    pub allow_ips: Vec<String>,
+    /// Exclude an IP or CIDR even within an allowed network (repeat flag)
+    #[arg(long = "exclude-ip")]
+    pub exclude_ips: Vec<String>,
+    /// OT Quiet Mode: pace TCP connection attempts and Modbus TX at <=2/s
+    /// with only one IP worker, including retries, reads and FC43.
+    #[arg(long = "quiet-mode")]
+    pub quiet_mode: bool,
     /// Stop after the first found device
     #[arg(long)]
     pub stop_on_first: bool,
@@ -194,6 +204,9 @@ fn build_params(args: &ScanArgs) -> ScanParams {
         params.ip_concurrency = v;
     }
     params.stop_on_first = args.stop_on_first;
+    params.ip_allowlist = args.allow_ips.clone();
+    params.ip_exclusions = args.exclude_ips.clone();
+    params.quiet_mode = args.quiet_mode;
     params.identify_devices = !args.no_identify;
     params.udp_mbap = args.udp_mbap;
     params.tcp_framing = if args.rtu_over_tcp {
@@ -250,6 +263,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn flags_propagate_authorized_scope_and_quiet_mode() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "modbus-scanner", "scan", "--ip", "127.0.0.1",
+            "--allow-ip", "127.0.0.1/32",
+            "--allow-ip", "10.0.0.0/24",
+            "--exclude-ip", "10.0.0.42",
+            "--quiet-mode",
+        ]).expect("parse new OT flags");
+        let Commands::Scan(args) = cli.command.expect("scan command") else {
+            panic!("expected scan subcommand");
+        };
+        let params = build_params(&args);
+        assert_eq!(params.ip_allowlist, ["127.0.0.1/32", "10.0.0.0/24"]);
+        assert_eq!(params.ip_exclusions, ["10.0.0.42"]);
+        assert!(params.quiet_mode);
+        assert!(matches!(build_target(&args).unwrap(), ScanTarget::IpRange { .. }));
+    }
+
+    #[test]
     fn builds_serial_target() {
         let args = ScanArgs {
             port: Some("COM7".into()),
@@ -273,6 +306,9 @@ mod tests {
             gap_ms: None,
             retries: None,
             concurrency: None,
+            allow_ips: vec![],
+            exclude_ips: vec![],
+            quiet_mode: false,
             stop_on_first: false,
             no_identify: false,
             output: None,
@@ -314,6 +350,9 @@ mod tests {
             gap_ms: None,
             retries: None,
             concurrency: None,
+            allow_ips: vec![],
+            exclude_ips: vec![],
+            quiet_mode: false,
             stop_on_first: false,
             no_identify: false,
             output: None,

@@ -10,8 +10,31 @@ in `src/api/mod.ts`; the payload types in `src/types/ipc.ts` (TypeScript mirror 
 ## Local REST + WebSocket API (E-03)
 
 Started with `modbus-scanner serve --port 8787` or from the desktop app via the
-`start_api_server` Tauri command. Binds to **127.0.0.1 only**, no authentication
-by default. All scan endpoints reuse the same `ScannerHandle` as the GUI.
+`start_api_server` Tauri command. Binds to **127.0.0.1 only** and **requires authentication** for every
+HTTP route (including `/health`) and WebSocket upgrade. All scan endpoints
+reuse the same `ScannerHandle` as GUI and CLI, including the OT IP policy.
+
+**Bootstrap:** set a unique `MODBUS_SCANNER_API_TOKEN` in the process
+environment **before** starting the application or `serve` command.
+It must have at least 24 printable ASCII characters; otherwise the API refuses
+to start. Send `Authorization: Bearer <TOKEN>` on every request. Do not place
+tokens in URLs, query strings, or Git repositories. Browser requests with
+an `Origin` other than `http://127.0.0.1:<port>` or
+`http://localhost:<port>` are forbidden. Standard browser WebSocket clients
+cannot set arbitrary Authorization headers; use a native client for authenticated
+WS subscriptions. Binding to loopback alone is **not** an access-control policy.
+
+**OT scan safety:** `ScanParams.ip_allowlist` is a list of literal IP/CIDRs
+(e.g. `["192.168.1.0/24"]`), required for all TCP/UDP scan targets.
+An empty list denies all IP scans before network I/O. `ip_exclusions`
+overrides allowlist entries (e.g. `["192.168.1.254"]`).
+DNS names are prohibited to prevent authorization bypass/rebinding;
+all non-excluded requested IPs must fall within the allowed scope.
+`quiet_mode: true` limits outbound scanner transmissions to
+**2 req/sec**, limits TCP connection attempts to **2/sec**, and forces
+IP concurrency to 1. Retries, FC43, and register reads all consume slots.
+It does not govern the separate manual/monitor subsystems, and it is not
+an emergency stop.
 
 | Method | Path | Result |
 |--------|------|--------|
@@ -164,7 +187,23 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 ```
 
 **`write_registers`** — `{ req: WriteRequest }`, same shape with
-`function: 5|6|16` and `values: number[]`.
+`function: 5|6|16` and `values: number[]`, plus explicit `confirm_write: true`.
+
+**Manual I/O safety (PR #6):** `read_registers` may retry up to 5 times
+according to `timing.retries`. Both `write_registers` and `send_raw_frame`
+are strictly **single-shot**, regardless of the supplied retry count. The
+backend checks positive write acknowledgments: FC05/FC06 echo the exact address
+and value; FC10 echoes the exact start address and quantity. A mismatching
+acknowledgment is a failure, never `ok: true`. Broadcast unit 0 is blocked
+on every transport for write/raw operations.
+
+If a write or raw request times out, the outcome is **unknown**: the device
+may have applied the operation even though the response was lost. No implicit
+retransmission takes place. Verify the relevant device state before deciding
+whether to issue a new write. Raw requests remain explicitly unsafe and require
+`confirm_unsafe: true` for each send. Raw-frame `ok: true` means only that
+response bytes arrived: it is **not** a validated write acknowledgment.
+Empty payloads and payloads over the Modbus size limit are rejected.
 
 **`inspect_registers`** — `{ values: number[] }` → `DecodeResult`: all
 interpretations (INT16/UINT16/INT32/UINT32/FLOAT32/ASCII × ABCD/BADC/CDAB/DCBA)

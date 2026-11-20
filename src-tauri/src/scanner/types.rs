@@ -211,6 +211,16 @@ pub struct ScanParams {
     /// Modbus Security: wrap TCP connections in TLS (port 802 by convention).
     #[serde(default)]
     pub tls: Option<TlsParams>,
+    /// Explicit IPv4/IPv6 IP/CIDR allowlist. Empty = deny all network scans.
+    #[serde(default)]
+    pub ip_allowlist: Vec<String>,
+    /// Never scan these IP/CIDR destinations, even if they are allowed.
+    #[serde(default)]
+    pub ip_exclusions: Vec<String>,
+    /// Serialize all scanner transmissions at at most 2 requests per second,
+    /// including probe retries, FC43 identification and register-map reads.
+    #[serde(default)]
+    pub quiet_mode: bool,
 }
 
 fn default_identify_devices() -> bool {
@@ -231,6 +241,9 @@ impl Default for ScanParams {
             tcp_framing: TcpFraming::Mbap,
             udp_mbap: false,
             tls: None,
+            ip_allowlist: Vec::new(),
+            ip_exclusions: Vec::new(),
+            quiet_mode: false,
         }
     }
 }

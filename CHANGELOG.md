@@ -10,6 +10,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — PR #7 (OT Safety Policy, stacked on PR #6)
+- Fail-closed, explicit IP/CIDR allowlist and exclusion rules shared by GUI, CLI and REST scans; prevent hostname-based policy bypass.
+- Quiet Mode global scan TX pacing to 2 requests/sec, including retries, FC43 and register-map traffic; TCP handshake attempts separately paced to 2/sec with effective IP concurrency 1.
+- REST/WS API refuses startup without `MODBUS_SCANNER_API_TOKEN` (24+ printable ASCII characters), authenticates every route and rejects cross-origin browser access.
+- RU/EN scan UI and CLI flags for OT policy; negative loopback tests for authorization, request pacing and API security.
+
+
+
+### Fixed — PR #6 (manual write safety and transport stabilization)
+- Manual FC05/FC06/FC10 writes and arbitrary Raw Frames are single-shot regardless of configured retries; only read requests may retry (max 5).
+- Empty/oversized raw PDU/ADU are rejected before transmission; receiving an arbitrary raw response is explicitly not treated as proof of a successful write.
+- Positive write acknowledgments require exact echo of requested address and value/quantity; mismatched acknowledgments are failures, not false-positive success.
+- Timeout/transport failures on writes explicitly warn that the device may have executed the command and that the outcome is unknown.
+- RTU-over-TCP accepts delayed first bytes and assembles common/FC43 responses by length instead of prematurely treating a 5ms gap as EOF; bounded TLS handshake.
+- RTU/ASCII receive buffers have strict maximum sizes to reject noisy/oversized frames; Windows/Linux/macOS regression tests cover delayed, fragmented and silent responses.
+
+
 ### Fixed — PR #5 (strict Modbus response validation / строгая валидация)
 - Rejects truncated/oversized PDU and invalid exception FC/code/length; shared MBAP transaction/protocol/length/unit verification for scanner and manual I/O.
 - FC01/02 bit counts must exactly match ceil(requested quantity / 8), without panics; FC03/04 register byte counts and actual quantity must match the request.

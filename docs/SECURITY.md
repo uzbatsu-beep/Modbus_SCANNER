@@ -46,7 +46,8 @@ note that active scanning can affect industrial networks and that audits must no
 interfere with ICS workflows. Therefore:
 
 - discovery stays strictly read-only (FC01–FC04);
-- a future **quiet mode** will cap request rate (≤2 req/s) and add adaptive backoff;
+- optional **OT Quiet Mode** caps total scanner transmissions at 2 requests/sec
+  (including retries, FC43 and register reads); adaptive backoff remains future work;
 - passive fingerprinting is preferred over aggressive probing where possible;
 - write-access testing is a separate opt-in mode with double confirmation and rollback.
 
@@ -60,14 +61,23 @@ interfere with ICS workflows. Therefore:
 - Only scan networks and hosts you own or are authorized to test.
 - IP sweeps generate many connection attempts in a short time; on shared networks
   this can trip IDS/IPS or overload fragile equipment.
-- The default concurrency value (32) is intentionally modest; prefer 1–8 on
-  OT/ICS networks.
+- The default concurrency value (32) may still open many sockets in parallel;
+  prefer 1–8 on OT/ICS networks and enable Quiet Mode.
+- PR #7: empty IP allowlists deny all TCP/UDP scans, and explicit excluded
+  addresses always take priority over authorized CIDR scopes.
+- The local HTTP/WebSocket API requires an environment Bearer token and
+  blocks foreign browser origins. Protect the token from untrusted processes.
 
 - Сканируйте только те сети и хосты, которыми вы владеете или на которые у вас есть
   разрешение.
 - IP-перебор генерирует много попыток подключения за короткое время — на общих сетях
   это может сработать с IDS/IPS или перегрузить чувствительное оборудование.
-- Значение параллелизма по умолчанию (32) умеренное; в сетях OT/ICS используйте 1–8.
+- Значение параллелизма по умолчанию (32) допускает много одновременных
+  TCP-подключений; в OT-сетях используйте 1–8 и включайте Quiet Mode.
+- PR #7: пустой список разрешённых IP запрещает TCP/UDP-сканирование,
+  а явно исключённые адреса имеют приоритет над разрешёнными.
+- Локальный REST/WebSocket API требует токен Bearer и блокирует чужие Origin.
+  Защищайте переменную окружения с токеном от посторонних процессов.
 
 ## Data handling / Работа с данными
 

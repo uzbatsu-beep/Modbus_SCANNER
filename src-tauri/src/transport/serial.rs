@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
 
-use crate::modbus::common::SerialMode;
+use crate::modbus::common::{ModbusError, SerialMode};
 
 use super::{Transport, TransportError, TransportResult};
 
@@ -185,6 +185,19 @@ async fn read_frame_from<R: AsyncRead + Unpin>(
             Ok(Ok(0)) => return Err(TransportError::Closed),
             Ok(Ok(n)) => {
                 rx_buf.extend_from_slice(&tmp[..n]);
+                // RTU ADU <= 256 bytes. ASCII carries up to 255 binary
+                // payload bytes as 510 hex chars plus ':' and CRLF (513).
+                // A noisy or unterminated bus must not grow RX indefinitely.
+                let limit = match mode {
+                    SerialMode::Rtu => 256,
+                    SerialMode::Ascii => 513,
+                };
+                if rx_buf.len() > limit {
+                    rx_buf.clear();
+                    return Err(TransportError::Modbus(ModbusError::InvalidFrame(
+                        format!("serial response exceeds {limit} bytes"),
+                    )));
+                }
                 if mode == SerialMode::Ascii && rx_buf.len() >= 5 && rx_buf.ends_with(b"\r\n") {
                     return Ok(std::mem::take(rx_buf));
                 }
@@ -302,5 +315,40 @@ mod tests {
             required_rtu_gap(38_400, DataBitsSerde::Eight, ParitySerde::None, StopBitsSerde::One),
             Duration::from_micros(1_750)
         );
+    }
+}
+
+#[cfg(test)]
+mod serial_receive_limits_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn oversized_rtu_stream_is_rejected_without_unbounded_buffer_growth() {
+        let (mut sender, mut receiver) = tokio::io::duplex(1024);
+        let writer = tokio::spawn(async move {
+            sender.write_all(&vec![0x33; 300]).await.unwrap();
+        });
+        let mut buffer = Vec::new();
+        let err = read_frame_from(
+            &mut receiver, &mut buffer, SerialMode::Rtu, Duration::from_millis(5),
+        ).await.expect_err("RTU frame longer than 256 bytes must be rejected");
+        assert!(matches!(err, TransportError::Modbus(ModbusError::InvalidFrame(_))));
+        assert!(buffer.is_empty(), "oversized RX buffer must be discarded");
+        writer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_ascii_stream_is_rejected_without_waiting_for_crlf() {
+        let (mut sender, mut receiver) = tokio::io::duplex(1024);
+        let writer = tokio::spawn(async move {
+            sender.write_all(&vec![b'1'; 600]).await.unwrap();
+        });
+        let mut buffer = Vec::new();
+        let err = read_frame_from(
+            &mut receiver, &mut buffer, SerialMode::Ascii, Duration::from_millis(5),
+        ).await.expect_err("oversized unterminated ASCII frame must be rejected");
+        assert!(matches!(err, TransportError::Modbus(ModbusError::InvalidFrame(_))));
+        assert!(buffer.is_empty(), "oversized RX buffer must be discarded");
+        writer.await.unwrap();
     }
 }

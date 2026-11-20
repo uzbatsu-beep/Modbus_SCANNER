@@ -36,6 +36,25 @@ wrong-function exception; check that the UI reports an error and does not create
 fictitious devices/registers. Keep all tests read-only. Never inject malformed
 traffic into production OT networks.
 
+**PR #6 — safe write acceptance (isolated bench only):** For FC05, FC06 and FC10,
+send a **single** explicitly confirmed request to a simulator or fully isolated
+slave. Simulate a lost write reply and configure `retries=5`: exactly one TX
+must occur, and the UI must warn that the outcome is unknown. Return mismatched
+write acknowledgment address/value/quantity and verify `ok=false`.
+Test a delayed first byte and split RTU-over-TCP payload, plus an oversized
+RTU/ASCII frame. Do **not** execute writes on an active production process.
+
+**PR #7 OT Safety Policy bench validation:** Before scanning test devices, set
+explicit allowed IP/CIDR and excluded addresses; a blank allowlist must fail
+before TX. Confirm exclusions never receive frames. In Quiet Mode inspect
+packet timestamps across TCP workers, retries and FC43; target maximum
+2 outbound scanner requests/second. Configure a randomly generated
+`MODBUS_SCANNER_API_TOKEN` (>=24 printable ASCII chars) and validate
+HTTP status 401 for missing/incorrect token, 403 for foreign Origin,
+authorized REST requests and WebSocket upgrade authorization.
+Do not send active scans to production OT networks without written
+authorization; this bench procedure does not validate emergency-stop behavior.
+
 **Not automated:** RS-485 signal integrity, USB adapter behavior, baud/parity
 compatibility, real firmware error handling, field safety acceptance.
 

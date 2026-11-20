@@ -121,15 +121,67 @@ fn build_adu(kind: TransportKind, unit_id: u8, pdu: &[u8]) -> Vec<u8> {
     }
 }
 
+/// Manual writes and arbitrary raw frames can change equipment state. A lost
+/// response does NOT prove that the command was not executed, so never retry
+/// these operations automatically, even when a caller configured read retries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ManualRetryPolicy {
+    ReadOnly,
+    SingleShot,
+}
+
+fn permitted_retries(timing: Option<&ManualTiming>, policy: ManualRetryPolicy) -> u32 {
+    match policy {
+        ManualRetryPolicy::ReadOnly => timing.map(|t| t.retries.min(5)).unwrap_or(0),
+        ManualRetryPolicy::SingleShot => 0,
+    }
+}
+
+fn write_outcome_unknown(error: &TransportError) -> String {
+    format!(
+        "Write/raw outcome is not confirmed ({error}). The device may have executed the command.          Automatic retries are disabled; read back device state before retrying manually."
+    )
+}
+
+/// Confirm a positive write acknowledgment refers to the *same* address and
+/// value/quantity that were transmitted. Matching only FC and unit ID is unsafe.
+fn verify_write_ack(response: &Pdu, request: &[u8]) -> Result<(), ModbusError> {
+    let Some(&function) = request.first() else {
+        return Err(ModbusError::InvalidFrame("empty write PDU".into()));
+    };
+    let Pdu::Response { function: reply_fc, data } = response else {
+        return Err(ModbusError::InvalidFrame("expected positive write acknowledgment".into()));
+    };
+    if *reply_fc != function {
+        return Err(ModbusError::UnexpectedFunction(*reply_fc));
+    }
+    let expected_data: &[u8] = match function {
+        0x05 | 0x06 if request.len() == 5 => &request[1..],
+        0x10 if request.len() >= 6 => &request[1..5],
+        _ => return Err(ModbusError::InvalidFrame(format!(
+            "unsupported or malformed write request FC {function:#04x}"
+        ))),
+    };
+    if data.as_slice() != expected_data {
+        return Err(ModbusError::InvalidFrame(format!(
+            "FC {function:#04x} write acknowledgment does not echo the requested address/value/quantity"
+        )));
+    }
+    Ok(())
+}
+
 async fn manual_transact(
     req: &impl HasTarget,
     adu: Vec<u8>,
     expected_hint: usize,
+    policy: ManualRetryPolicy,
 ) -> Result<(Vec<u8>, u128), TransportError> {
     let target = req.target();
     let timing = req.timing();
-    let timeout = Duration::from_millis(timing.map(|t| t.timeout_ms as u64).unwrap_or(800));
-    let retries = timing.map(|t| t.retries).unwrap_or(0);
+    let timeout = Duration::from_millis(
+        timing.map(|t| t.timeout_ms).unwrap_or(800).clamp(50, 10_000) as u64,
+    );
+    let retries = permitted_retries(timing, policy);
 
     let mut attempts = 0u32;
     loop {
@@ -264,6 +316,35 @@ fn verify_and_parse(
     validate_response_function(pdu, expected_fc)
 }
 
+/// Raw frame mode intentionally permits malformed protocol fields for bench
+/// diagnostics, but empty and oversized messages are never useful and can
+/// destabilize a serial gateway or allocate excessive transport buffers.
+fn validate_raw_payload_size(
+    kind: TransportKind,
+    is_full_adu: bool,
+    payload: &[u8],
+) -> Result<(), String> {
+    if payload.is_empty() {
+        return Err("empty raw PDU/ADU is not allowed".into());
+    }
+    let maximum = if is_full_adu {
+        match kind {
+            TransportKind::Rtu | TransportKind::Udp => 256,
+            TransportKind::Ascii => 513,
+            TransportKind::Tcp => 260,
+        }
+    } else {
+        253 // PDU maximum under the Modbus application protocol
+    };
+    if payload.len() > maximum {
+        return Err(format!(
+            "raw frame size {} exceeds the {maximum}-byte limit",
+            payload.len()
+        ));
+    }
+    Ok(())
+}
+
 /// Reject broadcast destinations encoded directly inside a caller-supplied ADU.
 /// Checking only target.unit_id is insufficient in full-ADU mode.
 fn is_raw_broadcast(kind: TransportKind, payload: &[u8]) -> bool {
@@ -330,7 +411,7 @@ pub async fn read_registers(
     };
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
-    match manual_transact(&req, adu, 3 + (req.quantity as usize) * 2).await {
+    match manual_transact(&req, adu, 3 + (req.quantity as usize) * 2, ManualRetryPolicy::ReadOnly).await {
         Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
@@ -401,8 +482,8 @@ pub async fn write_registers(
 ) -> Result<ManualResponse, String> {
     let _ = &state;
     if !req.confirm_write { return Err("explicit write confirmation required".into()); }
-    if matches!(req.target.kind, TransportKind::Rtu | TransportKind::Ascii) && req.target.unit_id == 0 {
-        return Err("broadcast writes (unit 0) are blocked".into());
+    if req.target.unit_id == 0 {
+        return Err("broadcast writes (unit 0) are blocked on every transport".into());
     }
     validate_write(req.function, req.start_address, &req.values)?;
     let expected_fc = req.function;
@@ -424,7 +505,7 @@ pub async fn write_registers(
     };
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
-    match manual_transact(&req, adu, 8).await {
+    match manual_transact(&req, adu, 8, ManualRetryPolicy::SingleShot).await {
         Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
@@ -440,14 +521,24 @@ pub async fn write_registers(
                     unreachable!()
                 }
             }
-            Ok(_) => Ok(ManualResponse {
-                ok: true,
-                error: None,
-                exception_code: None,
-                values: req.values.clone(),
-                response_hex: Some(hex::encode(&resp)),
-                rtt_us: Some(rtt),
-            }),
+            Ok(p) => match verify_write_ack(&p, &pdu) {
+                Ok(()) => Ok(ManualResponse {
+                    ok: true,
+                    error: None,
+                    exception_code: None,
+                    values: req.values.clone(),
+                    response_hex: Some(hex::encode(&resp)),
+                    rtt_us: Some(rtt),
+                }),
+                Err(error) => Ok(ManualResponse {
+                    ok: false,
+                    error: Some(error.to_string()),
+                    exception_code: None,
+                    values: Vec::new(),
+                    response_hex: Some(hex::encode(&resp)),
+                    rtt_us: Some(rtt),
+                }),
+            },
             Err(e) => Ok(ManualResponse {
                 ok: false,
                 error: Some(e.to_string()),
@@ -459,7 +550,7 @@ pub async fn write_registers(
         },
         Err(e) => Ok(ManualResponse {
             ok: false,
-            error: Some(e.to_string()),
+            error: Some(write_outcome_unknown(&e)),
             exception_code: None,
             values: Vec::new(),
             response_hex: None,
@@ -475,11 +566,12 @@ pub async fn send_raw_frame(
 ) -> Result<ManualResponse, String> {
     let _ = &state;
     if !req.confirm_unsafe { return Err("explicit unsafe-frame confirmation required".into()); }
-    if matches!(req.target.kind, TransportKind::Rtu | TransportKind::Ascii) && req.target.unit_id == 0 {
-        return Err("broadcast raw requests are blocked".into());
+    if req.target.unit_id == 0 {
+        return Err("broadcast raw requests (unit 0) are blocked on every transport".into());
     }
     let bytes = hex::decode(req.adu_hex.trim().replace(' ', ""))
         .map_err(|e| format!("bad hex: {e}"))?;
+    validate_raw_payload_size(req.target.kind, req.is_full_adu, &bytes)?;
 
     let adu = if req.is_full_adu {
         bytes
@@ -494,7 +586,7 @@ pub async fn send_raw_frame(
         return Err("broadcast raw ADU (unit 0) is blocked".into());
     }
 
-    match manual_transact(&req, adu.clone(), 8).await {
+    match manual_transact(&req, adu, 8, ManualRetryPolicy::SingleShot).await {
         Ok((resp, rtt)) => Ok(ManualResponse {
             ok: true,
             error: None,
@@ -505,7 +597,7 @@ pub async fn send_raw_frame(
         }),
         Err(e) => Ok(ManualResponse {
             ok: false,
-            error: Some(e.to_string()),
+            error: Some(write_outcome_unknown(&e)),
             exception_code: None,
             values: Vec::new(),
             response_hex: None,
@@ -588,5 +680,194 @@ mod reliability_tests {
         assert!(validate_write(0x10, 0, &[]).is_err());
         assert!(validate_write(0x05, 0, &[2]).is_err());
         assert!(validate_write(0x10, u16::MAX, &[1, 2]).is_err());
+    }
+}
+
+#[cfg(test)]
+mod write_safety_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
+
+    fn tcp_target(port: u16) -> ManualTarget {
+        ManualTarget {
+            kind: TransportKind::Tcp,
+            endpoint: "127.0.0.1".into(),
+            port: Some(port),
+            unit_id: 1,
+            serial: None,
+            serial_mode: None,
+        }
+    }
+
+    fn timing(retries: u32) -> ManualTiming {
+        ManualTiming { timeout_ms: 80, retries }
+    }
+
+    fn ack(fc: u8, data: &[u8]) -> Pdu {
+        Pdu::Response { function: fc, data: data.to_vec() }
+    }
+
+    #[test]
+    fn raw_payload_rejects_empty_and_oversized_frames_before_transmission() {
+        for kind in [TransportKind::Tcp, TransportKind::Rtu, TransportKind::Ascii, TransportKind::Udp] {
+            assert!(validate_raw_payload_size(kind, false, &[]).is_err());
+            assert!(validate_raw_payload_size(kind, true, &[]).is_err());
+            assert!(validate_raw_payload_size(kind, false, &[3, 0, 0, 0, 1]).is_ok());
+            assert!(validate_raw_payload_size(kind, false, &vec![3; 254]).is_err());
+        }
+        assert!(validate_raw_payload_size(TransportKind::Rtu, true, &vec![0; 256]).is_ok());
+        assert!(validate_raw_payload_size(TransportKind::Rtu, true, &vec![0; 257]).is_err());
+        assert!(validate_raw_payload_size(TransportKind::Tcp, true, &vec![0; 260]).is_ok());
+        assert!(validate_raw_payload_size(TransportKind::Tcp, true, &vec![0; 261]).is_err());
+        assert!(validate_raw_payload_size(TransportKind::Ascii, true, &vec![0; 513]).is_ok());
+        assert!(validate_raw_payload_size(TransportKind::Ascii, true, &vec![0; 514]).is_err());
+    }
+
+    #[test]
+    fn read_retries_are_bounded_and_writes_raw_are_always_single_shot() {
+        let allowed = ManualRetryPolicy::ReadOnly;
+        let single = ManualRetryPolicy::SingleShot;
+        assert_eq!(permitted_retries(None, allowed), 0);
+        assert_eq!(permitted_retries(Some(&timing(1)), allowed), 1);
+        assert_eq!(permitted_retries(Some(&timing(1000)), allowed), 5);
+        assert_eq!(permitted_retries(Some(&timing(1000)), single), 0);
+        assert_eq!(permitted_retries(None, single), 0);
+        assert!(write_outcome_unknown(&TransportError::Timeout(Duration::from_millis(80)))
+            .contains("may have executed"));
+    }
+
+    #[test]
+    fn fc05_and_fc06_require_exact_address_and_value_echo() {
+        for (fc, value) in [(0x05, 0xFF00u16), (0x05, 0u16), (0x06, 0xABCD)] {
+            let mut req = vec![fc, 0x12, 0x34];
+            req.extend_from_slice(&value.to_be_bytes());
+            let ok = ack(fc, &req[1..]);
+            assert!(verify_write_ack(&ok, &req).is_ok());
+            let mut wrong_address = req[1..].to_vec();
+            wrong_address[1] ^= 1;
+            assert!(verify_write_ack(&ack(fc, &wrong_address), &req).is_err());
+            let mut wrong_value = req[1..].to_vec();
+            wrong_value[3] ^= 1;
+            assert!(verify_write_ack(&ack(fc, &wrong_value), &req).is_err());
+            let mut trailing = req[1..].to_vec();
+            trailing.push(0);
+            assert!(verify_write_ack(&ack(fc, &trailing), &req).is_err());
+        }
+    }
+
+    #[test]
+    fn fc10_requires_exact_start_address_and_quantity_echo() {
+        let req = request::write_multiple_registers(0x1234, &[0x1111, 0x2222]);
+        assert!(verify_write_ack(&ack(0x10, &[0x12, 0x34, 0, 2]), &req).is_ok());
+        for invalid in [
+            vec![0x12, 0x35, 0, 2],
+            vec![0x12, 0x34, 0, 1],
+            vec![0x12, 0x34, 0, 2, 0],
+            vec![0x12, 0x34, 0],
+        ] {
+            assert!(verify_write_ack(&ack(0x10, &invalid), &req).is_err());
+        }
+        assert!(verify_write_ack(&ack(0x06, &[0x12, 0x34, 0, 2]), &req).is_err());
+        assert!(verify_write_ack(&Pdu::Exception { function: 0x10, code: 2 }, &req).is_err());
+    }
+
+    #[tokio::test]
+    async fn write_timeout_with_retries_configured_transmits_exactly_once() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = WriteRequest {
+            target: tcp_target(port),
+            function: 0x06,
+            start_address: 0x1234,
+            values: vec![0xABCD],
+            confirm_write: true,
+            timing: Some(timing(5)),
+        };
+        let pdu = request::write_single_register(request.start_address, request.values[0]);
+        let frame = build_adu(TransportKind::Tcp, 1, &pdu);
+        let sent = frame.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; sent.len()];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, sent);
+            // Timeout is ambiguous: the device may have applied the write,
+            // even though the response never arrived.
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(),
+                "dangerous automatic retry created a second connection"
+            );
+        });
+        let err = manual_transact(&request, frame, 8, ManualRetryPolicy::SingleShot)
+            .await.expect_err("silent write response must not be successful");
+        assert!(matches!(err, TransportError::Timeout(_)));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn raw_request_timeout_with_retries_configured_transmits_exactly_once() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = RawFrameRequest {
+            target: tcp_target(port),
+            adu_hex: "06 12 34 AB CD".into(),
+            is_full_adu: false,
+            confirm_unsafe: true,
+            timing: Some(timing(5)),
+        };
+        let frame = build_adu(TransportKind::Tcp, 1, &[0x06, 0x12, 0x34, 0xAB, 0xCD]);
+        let sent = frame.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; sent.len()];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, sent);
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), listener.accept()).await.is_err(),
+                "raw frame was replayed after a response timeout"
+            );
+        });
+        assert!(manual_transact(&request, frame, 8, ManualRetryPolicy::SingleShot)
+            .await.is_err());
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn read_only_request_can_retry_after_closed_connection() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = ReadRequest {
+            target: tcp_target(port),
+            function: 3,
+            start_address: 0,
+            quantity: 1,
+            timing: Some(timing(1)),
+        };
+        let frame = build_adu(TransportKind::Tcp, 1, &request::read_holding_registers(0, 1));
+        let expected = frame.clone();
+        let server = tokio::spawn(async move {
+            for attempt in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = vec![0; expected.len()];
+                stream.read_exact(&mut bytes).await.unwrap();
+                assert_eq!(bytes, expected);
+                if attempt == 1 {
+                    stream.write_all(&[0, 0, 0, 0, 0, 5, 1, 3, 2, 0, 42])
+                        .await.unwrap();
+                }
+            }
+        });
+        let (response, _) = manual_transact(
+            &request, frame, 8, ManualRetryPolicy::ReadOnly,
+        ).await.expect("read-only retry succeeded");
+        let decoded = verify_and_parse(TransportKind::Tcp, 1, 3, &response).unwrap();
+        match decoded {
+            Pdu::Response { data, .. } => {
+                assert_eq!(response::parse_registers(&data).unwrap(), [42]);
+            }
+            other => panic!("unexpected read reply: {other:?}"),
+        }
+        server.await.unwrap();
     }
 }

@@ -59,8 +59,8 @@ function buildTarget() {
   };
 }
 
-function buildTiming() {
-  return { timeout_ms: form.timeout_ms, retries: form.retries };
+function buildTiming(retries = form.retries) {
+  return { timeout_ms: form.timeout_ms, retries };
 }
 
 async function doRead() {
@@ -100,7 +100,7 @@ async function doWrite() {
       start_address: form.write_addr,
       values,
       confirm_write: true,
-      timing: buildTiming(),
+      timing: buildTiming(0),
     });
   } catch (e) {
     lastResponse.value = { ok: false, error: String(e), values: [], exception_code: null, response_hex: null, rtt_us: null };
@@ -119,7 +119,7 @@ async function doRaw() {
       adu_hex: form.raw_hex,
       is_full_adu: form.raw_full_adu,
       confirm_unsafe: true,
-      timing: buildTiming(),
+      timing: buildTiming(0),
     });
   } catch (e) {
     lastResponse.value = { ok: false, error: String(e), values: [], exception_code: null, response_hex: null, rtt_us: null };
@@ -171,6 +171,7 @@ onMounted(() => {
         <label class="short">{{ t("retries") }}</label>
         <input v-model.number="form.retries" type="number" min="0" max="5" />
       </div>
+      <div class="hint">{{ t("manualReadRetryHint") }}</div>
     </div>
 
     <!-- READ -->
@@ -226,9 +227,9 @@ onMounted(() => {
         <button :disabled="busy" @click="doRaw()">▶ {{ t("send") }}</button>
       </div>
       <div class="hint">
-        Без галки: hex = PDU, ADU строится автоматически (RTU: +адрес+CRC; ASCII: +':' +hex +LRC+CRLF;
-        TCP: +MBAP). С галкой: байты уходят как есть.
+        {{ t("rawHint") }}
       </div>
+      <div class="hint">{{ t("rawResponseCaution") }}</div>
     </div>
 
     <!-- RESPONSE -->
