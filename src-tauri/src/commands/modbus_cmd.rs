@@ -121,15 +121,67 @@ fn build_adu(kind: TransportKind, unit_id: u8, pdu: &[u8]) -> Vec<u8> {
     }
 }
 
+/// Manual writes and arbitrary raw frames can change equipment state. A lost
+/// response does NOT prove that the command was not executed, so never retry
+/// these operations automatically, even when a caller configured read retries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ManualRetryPolicy {
+    ReadOnly,
+    SingleShot,
+}
+
+fn permitted_retries(timing: Option<&ManualTiming>, policy: ManualRetryPolicy) -> u32 {
+    match policy {
+        ManualRetryPolicy::ReadOnly => timing.map(|t| t.retries.min(5)).unwrap_or(0),
+        ManualRetryPolicy::SingleShot => 0,
+    }
+}
+
+fn write_outcome_unknown(error: &TransportError) -> String {
+    format!(
+        "Write/raw outcome is not confirmed ({error}). The device may have executed the command.          Automatic retries are disabled; read back device state before retrying manually."
+    )
+}
+
+/// Confirm a positive write acknowledgment refers to the *same* address and
+/// value/quantity that were transmitted. Matching only FC and unit ID is unsafe.
+fn verify_write_ack(response: &Pdu, request: &[u8]) -> Result<(), ModbusError> {
+    let Some(&function) = request.first() else {
+        return Err(ModbusError::InvalidFrame("empty write PDU".into()));
+    };
+    let Pdu::Response { function: reply_fc, data } = response else {
+        return Err(ModbusError::InvalidFrame("expected positive write acknowledgment".into()));
+    };
+    if *reply_fc != function {
+        return Err(ModbusError::UnexpectedFunction(*reply_fc));
+    }
+    let expected_data: &[u8] = match function {
+        0x05 | 0x06 if request.len() == 5 => &request[1..],
+        0x10 if request.len() >= 6 => &request[1..5],
+        _ => return Err(ModbusError::InvalidFrame(format!(
+            "unsupported or malformed write request FC {function:#04x}"
+        ))),
+    };
+    if data.as_slice() != expected_data {
+        return Err(ModbusError::InvalidFrame(format!(
+            "FC {function:#04x} write acknowledgment does not echo the requested address/value/quantity"
+        )));
+    }
+    Ok(())
+}
+
 async fn manual_transact(
     req: &impl HasTarget,
     adu: Vec<u8>,
     expected_hint: usize,
+    policy: ManualRetryPolicy,
 ) -> Result<(Vec<u8>, u128), TransportError> {
     let target = req.target();
     let timing = req.timing();
-    let timeout = Duration::from_millis(timing.map(|t| t.timeout_ms as u64).unwrap_or(800));
-    let retries = timing.map(|t| t.retries).unwrap_or(0);
+    let timeout = Duration::from_millis(
+        timing.map(|t| t.timeout_ms).unwrap_or(800).clamp(50, 10_000) as u64,
+    );
+    let retries = permitted_retries(timing, policy);
 
     let mut attempts = 0u32;
     loop {
@@ -330,7 +382,7 @@ pub async fn read_registers(
     };
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
-    match manual_transact(&req, adu, 3 + (req.quantity as usize) * 2).await {
+    match manual_transact(&req, adu, 3 + (req.quantity as usize) * 2, ManualRetryPolicy::ReadOnly).await {
         Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
@@ -401,8 +453,8 @@ pub async fn write_registers(
 ) -> Result<ManualResponse, String> {
     let _ = &state;
     if !req.confirm_write { return Err("explicit write confirmation required".into()); }
-    if matches!(req.target.kind, TransportKind::Rtu | TransportKind::Ascii) && req.target.unit_id == 0 {
-        return Err("broadcast writes (unit 0) are blocked".into());
+    if req.target.unit_id == 0 {
+        return Err("broadcast writes (unit 0) are blocked on every transport".into());
     }
     validate_write(req.function, req.start_address, &req.values)?;
     let expected_fc = req.function;
@@ -424,7 +476,7 @@ pub async fn write_registers(
     };
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
-    match manual_transact(&req, adu, 8).await {
+    match manual_transact(&req, adu, 8, ManualRetryPolicy::SingleShot).await {
         Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
@@ -440,14 +492,24 @@ pub async fn write_registers(
                     unreachable!()
                 }
             }
-            Ok(_) => Ok(ManualResponse {
-                ok: true,
-                error: None,
-                exception_code: None,
-                values: req.values.clone(),
-                response_hex: Some(hex::encode(&resp)),
-                rtt_us: Some(rtt),
-            }),
+            Ok(p) => match verify_write_ack(&p, &pdu) {
+                Ok(()) => Ok(ManualResponse {
+                    ok: true,
+                    error: None,
+                    exception_code: None,
+                    values: req.values.clone(),
+                    response_hex: Some(hex::encode(&resp)),
+                    rtt_us: Some(rtt),
+                }),
+                Err(error) => Ok(ManualResponse {
+                    ok: false,
+                    error: Some(error.to_string()),
+                    exception_code: None,
+                    values: Vec::new(),
+                    response_hex: Some(hex::encode(&resp)),
+                    rtt_us: Some(rtt),
+                }),
+            },
             Err(e) => Ok(ManualResponse {
                 ok: false,
                 error: Some(e.to_string()),
@@ -459,7 +521,7 @@ pub async fn write_registers(
         },
         Err(e) => Ok(ManualResponse {
             ok: false,
-            error: Some(e.to_string()),
+            error: Some(write_outcome_unknown(&e)),
             exception_code: None,
             values: Vec::new(),
             response_hex: None,
@@ -475,8 +537,8 @@ pub async fn send_raw_frame(
 ) -> Result<ManualResponse, String> {
     let _ = &state;
     if !req.confirm_unsafe { return Err("explicit unsafe-frame confirmation required".into()); }
-    if matches!(req.target.kind, TransportKind::Rtu | TransportKind::Ascii) && req.target.unit_id == 0 {
-        return Err("broadcast raw requests are blocked".into());
+    if req.target.unit_id == 0 {
+        return Err("broadcast raw requests (unit 0) are blocked on every transport".into());
     }
     let bytes = hex::decode(req.adu_hex.trim().replace(' ', ""))
         .map_err(|e| format!("bad hex: {e}"))?;
@@ -494,7 +556,7 @@ pub async fn send_raw_frame(
         return Err("broadcast raw ADU (unit 0) is blocked".into());
     }
 
-    match manual_transact(&req, adu.clone(), 8).await {
+    match manual_transact(&req, adu, 8, ManualRetryPolicy::SingleShot).await {
         Ok((resp, rtt)) => Ok(ManualResponse {
             ok: true,
             error: None,
@@ -505,7 +567,7 @@ pub async fn send_raw_frame(
         }),
         Err(e) => Ok(ManualResponse {
             ok: false,
-            error: Some(e.to_string()),
+            error: Some(write_outcome_unknown(&e)),
             exception_code: None,
             values: Vec::new(),
             response_hex: None,
