@@ -84,10 +84,10 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | Command | Args | Returns | Effect |
 |---------|------|---------|--------|
 | `start_scan` | `{ target: ScanTarget, params: ScanParams }` | `void` | Spawns an engine task; returns immediately |
-| `stop_scan` | — | `void` | Stops after the current request |
+| `stop_scan` | — | `void` | Requests cancellation immediately; Stopped only after cleanup |
 | `pause_scan` | — | `void` | Pauses between work items |
 | `resume_scan` | — | `void` | Resumes |
-| `get_scan_status` | — | `ScanStatus` | `"idle" \| "preparing" \| "running" \| "paused" \| "stopped" \| "finished" \| "failed"` |
+| `get_scan_status` | — | `ScanStatus` | `"idle" \| "preparing" \| "running" \| "paused" \| "stopping" \| "stopped" \| "finished" \| "failed"` |
 | `get_scan_progress` | — | `ScanProgress` | Latest progress snapshot |
 | `get_scan_results` | — | `ScanResults` | Full results snapshot |
 | `clear_results` | — | `void` | Clears records and stats |

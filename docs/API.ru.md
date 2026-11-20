@@ -83,10 +83,10 @@ spec: DecodeSpec, unit?, description? }`. Сопоставление identity р
 | Команда | Аргументы | Возврат | Действие |
 |---------|-----------|---------|----------|
 | `start_scan` | `{ target: ScanTarget, params: ScanParams }` | `void` | Запускает задачу движка, возвращается сразу |
-| `stop_scan` | — | `void` | Останавливает после текущего запроса |
+| `stop_scan` | — | `void` | Запрашивает отмену немедленно; Stopped только после очистки |
 | `pause_scan` | — | `void` | Пауза между элементами работы |
 | `resume_scan` | — | `void` | Продолжить |
-| `get_scan_status` | — | `ScanStatus` | `"idle" \| "preparing" \| "running" \| "paused" \| "stopped" \| "finished" \| "failed"` |
+| `get_scan_status` | — | `ScanStatus` | `"idle" \| "preparing" \| "running" \| "paused" \| "stopping" \| "stopped" \| "finished" \| "failed"` |
 | `get_scan_progress` | — | `ScanProgress` | Последний снимок прогресса |
 | `get_scan_results` | — | `ScanResults` | Полный снимок результатов |
 | `clear_results` | — | `void` | Очищает записи и статистику |

@@ -35,6 +35,17 @@ compatibility, real firmware error handling, field safety acceptance.
 - Avoid active network scans of production subnets; for operational OT networks use explicit authorization, 1–8 IP concurrency, and conservative timeouts.
 - Do not use write tests on process equipment; use a simulator or disconnected test slave only.
 
+## Lifecycle regression / Регрессия жизненного цикла
+
+PR #4 adds `scanner::lifecycle_tests` to verify that repeated Start is rejected
+while Running/Paused, Stop interrupts a silent TCP request, pending register reads
+are discarded, and a new scan may start after cleanup.
+
+For serial hardware, explicitly verify a Stop during a long RTU timeout and a
+Pause → Stop transition: after the application reports `Stopped`, no new
+transaction should be initiated by the scanner. Bytes that were already sent
+cannot be canceled.
+
 ## Verification matrix / Матрица испытаний
 
 | ID | Procedure / Действие | Acceptance / Критерий |
@@ -52,6 +63,9 @@ compatibility, real firmware error handling, field safety acceptance.
 | SAFE-02 | Try broadcast write unit 0 and full-ADU raw broadcast on simulator | Rejected; no outgoing write frame |
 | SAFE-03 | Confirm a benign write on disconnected simulator only | Modal confirmation, one request, expected simulator response |
 | UI-01 | Verify RU/EN labels, exported logs, serial probe RTT | No missing labels; RTT non-zero when a response arrives |
+| LIFE-01 | Stop a running RTU scan while awaiting slave response | Stopped promptly without waiting for full timeout; no newly scheduled TX |
+| LIFE-02 | Pause the scanner, attempt a second Start, then Stop | Second Start rejected; Stopped after cleanup; restart succeeds |
+| LIFE-03 | Stop with pending register reads behind a discovered device | No additional register read after cancellation; pending queue is discarded |
 
 ## Evidence / Отчёт
 
