@@ -163,6 +163,32 @@ endian `u16` values.
 
 The UI shows registers as hex, decimal and 16-bit binary.
 
+### Strict response validation (PR #5)
+
+All read paths (discovery, adaptive map, manual read, live monitor) now share
+the same PDU payload validator:
+
+- FC01/FC02: 1–2000 requested bits; response byte count **exactly**
+  `ceil(quantity/8)`, with exactly that many payload bytes; final padding bits
+  may be ignored.
+- FC03/FC04: 1–125 requested registers; response byte count **exactly**
+  `2 × quantity`, even, within 250 bytes, no missing or trailing bytes.
+- PDU length at most 253 bytes; exception PDU **exactly 2 bytes** with the
+  requested base FC and a standard exception code; a mismatched exception
+  is **not** evidence that a Modbus device was found.
+- TCP/MBAP verification also checks Transaction ID, Protocol ID 0, exact MBAP
+  length and Unit ID, including for manual requests.
+- FC43 object count must consume its declared data exactly.
+
+Malformed responses return an error and **never** become empty successful
+reads, create fake register values or inflate successful-response statistics.
+Adaptive register exploration aborts on invalid PDU rather than issuing
+further divide-and-retry requests against a misbehaving device.
+
+These checks validate the Modbus application framing and payload semantics.
+They do not guarantee that a correctly encoded value matches the true
+engineering quantity, type, scaling or equipment state.
+
 ## 5b. Multi-register values and byte order (P3-01)
 
 Two consecutive registers `w0 w1` (each transmitted big-endian) can form a

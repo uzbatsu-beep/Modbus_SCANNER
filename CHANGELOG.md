@@ -10,6 +10,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed — PR #5 (strict Modbus response validation / строгая валидация)
+- Rejects truncated/oversized PDU and invalid exception FC/code/length; shared MBAP transaction/protocol/length/unit verification for scanner and manual I/O.
+- FC01/02 bit counts must exactly match ceil(requested quantity / 8), without panics; FC03/04 register byte counts and actual quantity must match the request.
+- Discovery no longer identifies devices from malformed responses, and invalid manual/monitor/register-map reads no longer produce empty success values.
+- Adaptive register scans abort on malformed response rather than recursively splitting potentially thousands of addresses.
+- FC43 device identification rejects undeclared trailing bytes; added malformed TCP loopback and RTU/ASCII/UDP regression tests.
+
+
 ### Fixed — PR #4 (scanner lifecycle and cancellation)
 - Exclusively guards active scans through Preparing, Running, Paused and Stopping, including concurrent start requests.
 - Immediate Stop interrupts IP/serial requests, slot waits and request gaps; aborts outstanding workers and discards planned register reads.

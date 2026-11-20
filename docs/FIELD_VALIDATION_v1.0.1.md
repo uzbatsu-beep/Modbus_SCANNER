@@ -18,12 +18,23 @@ MBAP framing, response classification, register map, and scan completion.
 | FC03 map read + fragmented TCP reply | Correct registers, no extra-byte timeout |
 | Modbus exception 02 | Identifies Modbus endpoint, records exception |
 | Wrong Transaction ID | No false device discovery |
+| Malformed FC03 byte count, wrong response FC | No device discovered; no successful read count |
+| Wrong-function/oversized Modbus exception | Rejected, no false device discovery |
+| Register map returns fewer words than requested | No values persisted, no successful read count |
+| Malformed first adaptive block | Stop splitting; no additional probe cascade |
+| Short FC01/FC02 payload (including crafted counts) | Error, never panic or empty success |
 | Connected but silent target | Timeout, no false device discovery |
 | Invalid FC list (e.g. 03 + 06) | Rejected before opening a socket |
 
 Run locally: `cd src-tauri && cargo test --lib scanner::field_tests -- --nocapture`.
 GitHub CI executes it on Windows, Linux and macOS. Tests contain no physical
 serial connection and never send packets outside the local loopback interface.
+
+**Physical negative tests for PR #5:** On an isolated Modbus RTU/ASCII bench or
+simulator, feed truncated FC01/FC02/FC03 replies, incorrect byte counts and a
+wrong-function exception; check that the UI reports an error and does not create
+fictitious devices/registers. Keep all tests read-only. Never inject malformed
+traffic into production OT networks.
 
 **Not automated:** RS-485 signal integrity, USB adapter behavior, baud/parity
 compatibility, real firmware error handling, field safety acceptance.
