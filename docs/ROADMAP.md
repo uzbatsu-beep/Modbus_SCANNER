@@ -8,7 +8,7 @@
 > [PLAN.ru.md](PLAN.ru.md).
 > История изменений: [CHANGELOG.md](../CHANGELOG.md).
 
-**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#6 и #8 слиты; PR #7 дублирует уже слитые изменения; PR #9 — защитные механизмы и release gates)
+**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#9 завершены; PR #10 — индивидуальная разработка: сохранение CI/QA и ручного релиза без обязательного reviewer)
 
 ---
 
@@ -27,14 +27,15 @@
 | **PR #5** — Strict Modbus response validation | ✅ слит; CI и Windows QA прошли | Строгая структура PDU, проверка FC/exception, точные количества бит/регистров, отсутствие ложных успешных чтений, негативные loopback-тесты |
 | **PR #6** — Safe manual I/O & transport stability | ✅ слит; CI/Windows QA успешны | Запись и Raw Frame без повторов, точная проверка FC05/06/10, RTU-over-TCP с задержками ответа, ограничение RX буферов |
 | **PR #7 / #8** — OT Safety Policy | ✅ изменения в main через PR #8; PR #7 дублирует работу | IP/CIDR allowlist, исключения, Quiet Mode 2 req/s, Bearer/Origin защита HTTP+WS API |
-| **PR #9** — Repository Governance & Release Gates | 🔧 Draft | Защита main/тегов через импортируемые Rulesets; обязательное независимое review; manual release с CI/QA/bench-gates и environment approval |
+| **PR #9** — Repository Governance & Release Gates | ✅ слит; Rulesets main/v* активированы | Обязательный PR, пять CI-проверок, защита тегов, ручной Release с проверкой стенда |
+| **PR #10** — Solo-maintainer release governance | 🔧 Draft | 0 обязательных reviewer (PR остаётся обязательным), manual Release, физический bench Issue по точному SHA, Windows QA и SHA256 |
 | **v1.1** — Diagnostics | 📋 следующий | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting, quiet mode |
 | **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
 | **v2.0** — Platform | 💡 исследование + выбор стека | Шлюзы MQTT/OPC UA, web-компаньон, политики IEC 62443, плагины; BACnet отложен (см. §9 RESEARCH_V2) |
 
-**Кандидат v1.0.1:** PR #1–#6 и #8 слиты, 95 Rust-тестов и Windows QA автоматизированы. **Официальный** тег `v1.0.1` и GitHub Release допускаются только после активации Rulesets для main и v*, настройки защищённого окружения `production-release`, успешного CI/QA на точном SHA main, документированной приёмки на физическом стенде и независимого ручного утверждения. Последний публичный релиз — v1.0.0.
+**Кандидат v1.0.1:** Rulesets `main` и `v*` активированы; для индивидуальной работы PR #10 отменяет обязательное участие второго reviewer, сохраняя PR и пять CI-checks. Для GitHub Release нужны успешные CI/Windows QA **на точном SHA main**, реальная стендовая приёмка (Issue с SHA и `PASS`) и **ручной** запуск Release. Второй пользователь и Environment не требуются. Последний публичный релиз — v1.0.0.
 
-**Качество:** main до PR #9 прошёл CI (5 рабочих этапов после PR #9: Frontend, Governance и Rust на Windows/Linux/macOS). Windows QA EXE/MSI — тестовый артефакт, не доказательство стендовой приёмки. Актуальное состояние защит GitHub отслеживается отдельно от содержимого файлов Rulesets.
+**Качество:** main после PR #9 прошёл CI (Governance, Frontend и Rust на Windows/Linux/macOS), а Windows QA EXE/MSI выполняется отдельно. QA не заменяет физический стенд. Изменение JSON в PR #10 не меняет действующий Ruleset: администратор должен исправить существующее правило через Settings.
 
 ---
 

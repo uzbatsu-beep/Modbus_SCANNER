@@ -161,20 +161,19 @@ Both QA and official release builds verify version manifest consistency.
 The official release is **manual, gated, and fails closed**. Do **not**
 publish by pushing a `v*` tag: this event no longer triggers a Release.
 
-1. Prepare all matching version manifests and `CHANGELOG.md` in an approved
-   PR, merge it to `main`, and wait for successful CI + Windows QA on the
-   **exact merged main SHA**.
-2. Complete isolated physical hardware acceptance and attach the signed-off
-   evidence to a repository GitHub Issue.
-3. Confirm active branch and tag Rulesets, and a `production-release`
-   environment with independent required reviewers, prevent self-review,
-   main-only deployment and `OT_RELEASE_APPROVAL_GATE` environment secret.
-4. Manually run **Release (manual, protected)** on `main` with tag, QA run ID,
-   bench PASS flag and GitHub issue URL. The preflight verifies version,
-   main SHA, 5 CI checks, QA artifact, rulesets and evidence; the Windows
-   builder packages EXE/MSI with SHA256 and build metadata.
-5. An independent GitHub reviewer approves the `production-release` job.
-   Only then can GitHub Release and its new tag be created.
+1. Change and merge version manifests and `CHANGELOG.md` through a PR after
+   all five CI checks pass (no second-person review required).
+2. Confirm Windows QA completed successfully on the **exact final main SHA**.
+3. Run isolated physical Modbus hardware acceptance and record the result in
+   a repository Issue using `.github/ISSUE_TEMPLATE/release_bench_acceptance.md`.
+   It must contain the exact `Source SHA`, `Bench result: PASS`, real hardware,
+   transport settings and test summary.
+4. Keep active main + tag Rulesets, with mandatory PR, strict CI, **zero**
+   required approvals, and no last-push or code-owner approval requirement.
+5. Manually dispatch **Release (manual, verified)** on `main` with tag, QA ID,
+   bench PASS flag and Issue URL. The workflow verifies all evidence against
+   the GitHub API, builds MSI+EXE and SHA256, rechecks before publishing.
+   No extra Environment reviewers or approval secret is needed.
 
 See [release governance (EN)](RELEASE_GATES.md) and
 [release governance (RU)](RELEASE_GATES.ru.md) for detailed activation

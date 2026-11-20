@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Build / Governance — PR #10 (solo-maintainer release policy)
+- Keep protected main and immutable release tags, strict PR-only merges, five CI checks and Windows QA; set required PR approvals to zero, disable last-push and code-owner approval requirements.
+- Keep official Release strictly manual, with no independent Environment review or approval sentinel secret; do not publish automatically on tag push.
+- Require real repository bench-acceptance Issue for the precise release commit (SHA, PASS, tested hardware, transport and results), in addition to CI and QA, before publishing.
+- Provide RU/EN governance instructions and issue template; live GitHub Ruleset must be edited separately by an administrator.
+
 ### Build / Security — PR #9 (repository governance and release gates)
 - Add importable, active-by-template GitHub Ruleset JSON for protected main (independent PR review, latest-push approval, strict five-job CI) and immutable v* release tags; GitHub Settings activation is required.
 - Replace automatic tag-triggered publishing with a manually dispatched, fail-closed release workflow verifying exact main SHA, 5 green CI checks, same-SHA QA artifact, documented bench PASS and active Rulesets.
