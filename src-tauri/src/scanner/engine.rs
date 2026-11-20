@@ -893,6 +893,31 @@ mod mbap_tests {
         frame[5] = 99;
         assert!(verify_mbap(&frame, 1, 7).is_err());
     }
+
+    #[test]
+    fn strict_exception_fc_on_all_transports() {
+        use crate::modbus::{ascii, rtu};
+        let engine = EngineParams::from_scan_params(&ScanParams::default());
+        for (kind, raw) in [
+            (TransportKind::Rtu, rtu::encode(UnitId(1), &[0x84, 2])),
+            (TransportKind::Ascii, ascii::encode(UnitId(1), &[0x84, 2])),
+            (TransportKind::Udp, rtu::encode(UnitId(1), &[0x84, 2])),
+            (TransportKind::Tcp, mbap_frame(1, &[0x84, 2], 10)),
+        ] {
+            assert!(matches!(
+                verify_adu(kind, 1, 3, &raw, 10, engine.clone()),
+                Err(TransportError::Modbus(ModbusError::UnexpectedFunction(4)))
+            ));
+        }
+        for (kind, raw) in [
+            (TransportKind::Rtu, rtu::encode(UnitId(1), &[0x83, 2, 0])),
+            (TransportKind::Ascii, ascii::encode(UnitId(1), &[0x83, 2, 0])),
+            (TransportKind::Udp, rtu::encode(UnitId(1), &[0x83, 2, 0])),
+            (TransportKind::Tcp, mbap_frame(1, &[0x83, 2, 0], 10)),
+        ] {
+            assert!(verify_adu(kind, 1, 3, &raw, 10, engine.clone()).is_err());
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
