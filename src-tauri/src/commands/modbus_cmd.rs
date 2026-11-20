@@ -538,6 +538,37 @@ mod reliability_tests {
     }
 
     #[test]
+    fn manual_tcp_rejects_wrong_tid_protocol_length_and_fc() {
+        let good = [0, 0, 0, 0, 0, 5, 1, 3, 2, 0x12, 0x34];
+        for (position, value) in [(0, 1), (3, 1), (5, 4), (6, 2), (7, 4)] {
+            let mut broken = good;
+            broken[position] = value;
+            assert!(
+                verify_and_parse(TransportKind::Tcp, 1, 3, &broken).is_err(),
+                "manual TCP accepted malformed MBAP/PDU at offset {position}"
+            );
+        }
+        let short_register_data = [0, 0, 0, 0, 0, 4, 1, 3, 2, 0x12];
+        let p = verify_and_parse(TransportKind::Tcp, 1, 3, &short_register_data)
+            .expect("MBAP alone cannot determine the requested register count");
+        match p {
+            Pdu::Response { data, .. } => assert!(
+                response::parse_read_values(3, &data, 1).is_err()
+            ),
+            _ => panic!("expected raw read response"),
+        }
+        let wrong_exception = [0, 0, 0, 0, 0, 3, 1, 0x84, 2];
+        assert!(verify_and_parse(TransportKind::Tcp, 1, 3, &wrong_exception).is_err());
+    }
+
+    #[test]
+    fn manual_bit_reads_do_not_convert_bad_count_into_success() {
+        assert_eq!(response::parse_read_values(1, &[1, 0x01], 1).unwrap(), [1]);
+        assert!(response::parse_read_values(1, &[1, 0x01], 16).is_err());
+        assert!(response::parse_read_values(2, &[1, 0x01, 0x02], 1).is_err());
+    }
+
+    #[test]
     fn full_raw_adu_cannot_bypass_broadcast_protection() {
         assert!(is_raw_broadcast(TransportKind::Rtu, &[0, 6, 0, 0]));
         assert!(is_raw_broadcast(TransportKind::Ascii, b":00060000"));
