@@ -252,7 +252,10 @@ impl ScannerHandle {
     ) -> Result<(), String> {
         // Keep preparation and installation atomic with respect to concurrent starts.
         let mut guard = self.control_tx.lock().await;
-        if guard.as_ref().is_some_and(|run| !run.commands.is_closed()) {
+        if matches!(
+            *self.status_tx.borrow(),
+            ScanStatus::Preparing | ScanStatus::Running | ScanStatus::Paused | ScanStatus::Stopping
+        ) || guard.as_ref().is_some_and(|run| !run.commands.is_closed()) {
             return Err("scan already in progress".into());
         }
 
@@ -674,7 +677,9 @@ async fn engine_task(
     } else {
         ScanStatus::Finished
     };
-    status_tx.send_replace(status);
+    // Publish terminal events before notifying wait_finished() and allowing
+    // restart. Otherwise an old scan's final event can overwrite the next
+    // scan's UI status after the previous status already looked terminal.
     emit_event(&sink, &ScanEvent::StatusChanged {
         status,
         message: if user_cancelled {
@@ -693,6 +698,8 @@ async fn engine_task(
         errors: current.stats.timeouts + current.stats.transport_errors,
         elapsed_ms: current.stats.elapsed_ms(),
     });
+    drop(current);
+    status_tx.send_replace(status);
 }
 
 /// Schedule the register plan for a found device and honour `stop_on_first`.
