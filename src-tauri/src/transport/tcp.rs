@@ -18,6 +18,8 @@ use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio::net::TcpStream;
 use tokio_rustls::TlsConnector;
 
+use crate::modbus::common::ModbusError;
+
 use super::tls::{build_client_config, TlsParams};
 use super::{Transport, TransportError, TransportResult};
 
@@ -69,6 +71,47 @@ impl Default for TcpConfig {
 pub trait AsyncStream: AsyncRead + AsyncWrite + Send + Unpin {}
 impl<T: AsyncRead + AsyncWrite + Send + Unpin> AsyncStream for T {}
 
+/// Expected complete RTU-over-TCP response length when encoded by a
+/// length-delimited Modbus function. The return value INCLUDES unit + CRC.
+/// Unknown functions fall back to a bounded inter-chunk idle interval.
+fn rtu_reply_length(frame: &[u8]) -> Option<usize> {
+    if frame.len() < 2 {
+        return None;
+    }
+    let fc = frame[1];
+    if fc & 0x80 != 0 {
+        return Some(5); // unit + exception FC + exception byte + CRC16
+    }
+    match fc {
+        0x01..=0x04 | 0x17 if frame.len() >= 3 => Some(5 + frame[2] as usize),
+        0x05 | 0x06 | 0x0F | 0x10 => Some(8),
+        0x2B if frame.len() >= 8 && frame[2] == 0x0E => {
+            // FC43/MEI14: a 6-byte header after FC followed by counted objects.
+            let mut offset = 8usize; // unit + FC + MEI/read/conformity/follows/next/count
+            for _ in 0..frame[7] {
+                if offset + 2 > frame.len() {
+                    return None;
+                }
+                let value_len = frame[offset + 1] as usize;
+                offset += 2 + value_len;
+                if offset > frame.len() {
+                    return None;
+                }
+            }
+            Some(offset + 2)
+        }
+        _ => None,
+    }
+}
+
+fn rtu_reply_has_known_length(frame: &[u8]) -> bool {
+    if frame.len() < 2 {
+        return true; // still waiting for unit and FC
+    }
+    frame[1] & 0x80 != 0 ||
+        matches!(frame[1], 0x01..=0x06 | 0x0F | 0x10 | 0x17 | 0x2B)
+}
+
 /// Modbus TCP client transport.
 pub struct TcpTransport {
     config: TcpConfig,
@@ -91,10 +134,13 @@ impl TcpTransport {
                 let client_config = build_client_config(tls).map_err(TransportError::Other)?;
                 let domain = ServerName::try_from(config.host.clone())
                     .map_err(|e| TransportError::Other(format!("invalid TLS server name: {e}")))?;
-                let tls_stream = TlsConnector::from(client_config)
-                    .connect(domain, stream)
-                    .await
-                    .map_err(TransportError::Io)?;
+                let tls_stream = tokio::time::timeout(
+                    config.connect_timeout,
+                    TlsConnector::from(client_config).connect(domain, stream),
+                )
+                .await
+                .map_err(|_| TransportError::Timeout(config.connect_timeout))?
+                .map_err(TransportError::Io)?;
                 Box::new(tls_stream)
             }
             None => Box::new(stream),
@@ -124,23 +170,50 @@ impl TcpTransport {
         Ok(frame)
     }
 
-    /// Read a raw RTU frame: the stream is chunk-oriented, so use a short
-    /// silence interval to decide that the frame is complete.
+    /// Read one RTU-over-TCP response. The outer Transport::transact timeout
+    /// controls the first byte and incomplete *known-length* frames; a 5 ms
+    /// receive gap must not make a healthy but slow gateway look disconnected.
+    /// Unknown FCs use a short idle interval because no length is available.
     async fn read_rtu(&mut self) -> TransportResult<Vec<u8>> {
         let mut out = Vec::with_capacity(64);
         let mut buf = [0u8; 256];
         loop {
-            match tokio::time::timeout(Duration::from_millis(5), self.stream.read(&mut buf)).await {
-                Ok(Ok(0)) => break,
-                Ok(Ok(n)) => out.extend_from_slice(&buf[..n]),
-                Ok(Err(e)) => return Err(TransportError::Io(e)),
-                Err(_) => break, // silence = end of frame
+            if let Some(expected) = rtu_reply_length(&out) {
+                if expected > 256 {
+                    return Err(TransportError::Modbus(ModbusError::InvalidFrame(
+                        format!("RTU-over-TCP response length {expected} exceeds 256 bytes"),
+                    )));
+                }
+                if out.len() >= expected {
+                    return Ok(out); // complete ADU: do not wait for a 5ms idle gap
+                }
             }
-        }
-        if out.is_empty() {
-            Err(TransportError::Timeout(Duration::from_millis(5)))
-        } else {
-            Ok(out)
+            let read = if rtu_reply_has_known_length(&out) {
+                // Wait for a delayed first byte / remaining frame payload.
+                // The caller's transaction timeout bounds this await.
+                self.stream.read(&mut buf).await
+            } else {
+                match tokio::time::timeout(
+                    Duration::from_millis(20), self.stream.read(&mut buf),
+                ).await {
+                    Ok(result) => result,
+                    Err(_) if !out.is_empty() => return Ok(out),
+                    Err(_) => continue,
+                }
+            };
+            match read {
+                Ok(0) if out.is_empty() => return Err(TransportError::Closed),
+                Ok(0) => return Ok(out), // truncated frame is rejected by codec
+                Ok(n) => {
+                    out.extend_from_slice(&buf[..n]);
+                    if out.len() > 256 {
+                        return Err(TransportError::Modbus(ModbusError::InvalidFrame(
+                            "RTU-over-TCP frame exceeds 256 bytes".into(),
+                        )));
+                    }
+                }
+                Err(error) => return Err(TransportError::Io(error)),
+            }
         }
     }
 }
