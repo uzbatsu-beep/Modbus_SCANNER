@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { validateEvidence, REQUIRED_CHECKS } from "./verify-release-gates.mjs";
 
 const SHA = "a".repeat(40);
@@ -66,6 +67,7 @@ const cases = [
   ["refusing wrong bench SHA", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace(SHA, "b".repeat(40)); }, /bench/],
   ["refusing failed bench result", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace("Bench result: PASS", "Bench result: FAIL"); }, /bench/],
   ["refusing an empty bench protocol", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace("Hardware: test drive", "Hardware: "); }, /bench/],
+  ["refusing bench placeholders", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace("Hardware: test drive", "Hardware: REPLACE_WITH_DEVICE"); }, /bench/],
   ["refusing external fake report", (f) => { f.benchUrl = "https://evil.example/issues/1"; }, /bench/],
   ["refusing wrong source checkout", (f) => { f.checkoutSha = "b".repeat(40); }, /identical/],
   ["refusing old main", (f) => { f.mainSha = "b".repeat(40); }, /identical/],
@@ -116,3 +118,40 @@ for (const [name, mutate, expected] of cases) {
     assert.throws(() => validateEvidence(value), expected);
   });
 }
+
+
+test("repository main Ruleset template requires PR but no second-person reviewer", () => {
+  const rule = JSON.parse(readFileSync(new URL("../.github/rulesets/main.json", import.meta.url), "utf8"));
+  assert.equal(rule.target, "branch");
+  assert.equal(rule.enforcement, "active");
+  assert.deepEqual(rule.bypass_actors, []);
+  const pr = rule.rules.find((r) => r.type === "pull_request");
+  assert.equal(pr.parameters.required_approving_review_count, 0);
+  assert.equal(pr.parameters.require_last_push_approval, false);
+  assert.equal(pr.parameters.require_code_owner_review, false);
+  assert.equal(pr.parameters.required_review_thread_resolution, true);
+  const checks = rule.rules.find((r) => r.type === "required_status_checks");
+  assert.equal(checks.parameters.strict_required_status_checks_policy, true);
+  assert.ok(REQUIRED_CHECKS.every((c) =>
+    checks.parameters.required_status_checks.some((k) => k.context === c)));
+  for (const type of ["deletion", "non_fast_forward"]) {
+    assert.ok(rule.rules.some((r) => r.type === type));
+  }
+});
+
+test("repository tag Ruleset template protects tag updates and deletion", () => {
+  const rule = JSON.parse(readFileSync(new URL("../.github/rulesets/release-tags.json", import.meta.url), "utf8"));
+  assert.equal(rule.target, "tag");
+  assert.equal(rule.enforcement, "active");
+  assert.deepEqual(rule.bypass_actors, []);
+  for (const type of ["deletion", "update", "non_fast_forward"]) {
+    assert.ok(rule.rules.some((r) => r.type === type));
+  }
+});
+
+test("physical bench Issue template records every attestation field", () => {
+  const template = readFileSync(new URL("../.github/ISSUE_TEMPLATE/release_bench_acceptance.md", import.meta.url), "utf8");
+  for (const marker of ["Source SHA:", "Bench result: PENDING", "Hardware:", "Transport:", "Test summary:"]) {
+    assert.ok(template.includes(marker), marker);
+  }
+});

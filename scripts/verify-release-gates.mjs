@@ -59,6 +59,7 @@ export function validateEvidence({
   requireGate(new RegExp("^Source SHA:\\s*" + sourceSha + "\\s*$", "im").test(body) &&
     /^Bench result:\s*PASS\s*$/im.test(body),
     "bench Issue must contain exact Source SHA and Bench result: PASS");
+  requireGate(!/REPLACE_WITH_/i.test(body), "bench Issue contains unfilled template placeholders");
   for (const label of ["Hardware", "Transport", "Test summary"]) {
     requireGate(new RegExp("^" + label + ":[ \\t]*\\S[^\\r\\n]*$", "im").test(body),
       "bench Issue is missing required field: " + label);
@@ -72,7 +73,6 @@ export function validateEvidence({
   requireGate(pr && pr.parameters?.required_approving_review_count === 0 &&
     pr.parameters?.require_last_push_approval === false &&
     pr.parameters?.require_code_owner_review !== true &&
-    pr.parameters?.require_extra_approval_for_unattributed_changes !== true &&
     pr.parameters?.required_review_thread_resolution === true,
     "main ruleset must require PR without mandatory second-person approval");
   const status = activeRule(rulesets, "branch", "refs/heads/main", "required_status_checks");
