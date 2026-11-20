@@ -57,7 +57,7 @@ impl ApiAuth {
         let token = std::env::var("MODBUS_SCANNER_API_TOKEN").map_err(|_| {
             "local API disabled: set MODBUS_SCANNER_API_TOKEN (>= 24 characters)".to_string()
         })?;
-        if token.len() < 24 || token.bytes().any(|c| c.is_ascii_whitespace() || c.is_ascii_control()) {
+        if token.len() < 24 || token.bytes().any(|c| !c.is_ascii_graphic()) {
             return Err("MODBUS_SCANNER_API_TOKEN must contain >= 24 non-whitespace ASCII characters".into());
         }
         Ok(Self { token, port })
@@ -272,4 +272,79 @@ pub async fn serve_headless(port: u16) -> Result<(), String> {
         Err(e) => return Err(e.to_string()),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod security_tests {
+    use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    fn test_state(port: u16) -> ApiState {
+        ApiState {
+            scanner: Arc::new(ScannerHandle::new()),
+            traffic: Arc::new(TrafficLogHandle::new()),
+            loggers: Arc::new(LoggerHandle::new()),
+            events: broadcast::channel(16).0,
+            auth: Arc::new(ApiAuth {
+                token: "0123456789abcdef0123456789abcdef".into(),
+                port,
+            }),
+        }
+    }
+
+    async fn request(port: u16, path: &str, headers: &str) -> String {
+        let mut socket = tokio::net::TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+        let message = format!(
+            "GET {path} HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\nConnection: close\r\n{headers}\r\n"
+        );
+        socket.write_all(message.as_bytes()).await.unwrap();
+        let mut body = Vec::new();
+        tokio::time::timeout(std::time::Duration::from_secs(3), socket.read_to_end(&mut body))
+            .await.unwrap().unwrap();
+        String::from_utf8(body).unwrap()
+    }
+
+    #[tokio::test]
+    async fn rest_and_websocket_reject_missing_token_and_cross_site_origin() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let _ = axum::serve(listener, router(test_state(port))).await;
+        });
+        let no_token = request(port, "/api/v1/status", "").await;
+        assert!(no_token.starts_with("HTTP/1.1 401"), "{no_token}");
+        let wrong_token = request(port, "/health", "Authorization: Bearer invalid\r\n").await;
+        assert!(wrong_token.starts_with("HTTP/1.1 401"), "{wrong_token}");
+        let good = "Authorization: Bearer 0123456789abcdef0123456789abcdef\r\n";
+        let status = request(port, "/api/v1/status", good).await;
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        let cross_origin = format!("{good}Origin: https://evil.example\r\n");
+        let forbidden = request(port, "/api/v1/status", &cross_origin).await;
+        assert!(forbidden.starts_with("HTTP/1.1 403"), "{forbidden}");
+        let malicious_ws = format!(
+            "{good}Origin: https://evil.example\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+        );
+        let forbidden_ws = request(port, "/api/v1/events", &malicious_ws).await;
+        assert!(forbidden_ws.starts_with("HTTP/1.1 403"), "{forbidden_ws}");
+        let localhost_origin = format!("{good}Origin: http://localhost:{port}\r\n");
+        let same_origin = request(port, "/health", &localhost_origin).await;
+        assert!(same_origin.starts_with("HTTP/1.1 200"), "{same_origin}");
+        task.abort();
+        let _ = task.await;
+    }
+
+    #[test]
+    fn auth_token_validation_does_not_depend_on_origin() {
+        let auth = ApiAuth {
+            token: "0123456789abcdef0123456789abcdef".into(),
+            port: 8787,
+        };
+        let mut headers = HeaderMap::new();
+        headers.insert(header::AUTHORIZATION, "Bearer 0123456789abcdef0123456789abcdef".parse().unwrap());
+        assert!(auth.valid_bearer(&headers));
+        headers.insert(header::ORIGIN, "https://external.example".parse().unwrap());
+        assert!(!auth.permitted_origin(&headers));
+        headers.insert(header::ORIGIN, "http://127.0.0.1:8787".parse().unwrap());
+        assert!(auth.permitted_origin(&headers));
+    }
 }
