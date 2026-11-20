@@ -174,10 +174,25 @@ impl Pdu {
         if bytes.is_empty() {
             return Err(ModbusError::TooShort(0));
         }
+        if bytes.len() > 253 {
+            return Err(ModbusError::InvalidFrame(format!(
+                "PDU length {} exceeds maximum 253",
+                bytes.len()
+            )));
+        }
         let function = bytes[0];
+        if function == 0 {
+            return Err(ModbusError::InvalidFrame("zero function code".into()));
+        }
         if function & 0x80 != 0 {
-            if bytes.len() < 2 {
-                return Err(ModbusError::TooShort(bytes.len()));
+            if bytes.len() != 2 {
+                return Err(ModbusError::InvalidFrame(format!(
+                    "exception PDU must contain exactly 2 bytes, got {}",
+                    bytes.len()
+                )));
+            }
+            if function == 0x80 {
+                return Err(ModbusError::InvalidFrame("exception with zero base function".into()));
             }
             return Ok(Pdu::Exception {
                 function: function & 0x7F,
@@ -189,6 +204,63 @@ impl Pdu {
             data: bytes[1..].to_vec(),
         })
     }
+}
+
+/// Verify a decoded inbound PDU belongs to the function code requested.
+/// Exception replies are NOT evidence of the requested slave unless their
+/// base function and exception code are also valid.
+pub fn validate_response_function(pdu: Pdu, expected_fc: u8) -> Result<Pdu, ModbusError> {
+    if pdu.function() != expected_fc {
+        return Err(ModbusError::UnexpectedFunction(pdu.function()));
+    }
+    if let Pdu::Exception { code, .. } = &pdu {
+        if !matches!(code, 0x01..=0x08 | 0x0A | 0x0B) {
+            return Err(ModbusError::InvalidFrame(format!(
+                "invalid Modbus exception code {code:#04x}"
+            )));
+        }
+    }
+    Ok(pdu.into_response())
+}
+
+/// Parse a complete Modbus TCP/UDP-MBAP response and validate its header.
+/// Keeping this shared prevents manual commands from accepting stale/wrong-TID
+/// packets that the scanner itself would reject.
+pub fn parse_tcp_response(
+    adu: &[u8],
+    expected_unit: u8,
+    expected_transaction: u16,
+) -> Result<Pdu, ModbusError> {
+    if adu.len() < 8 {
+        return Err(ModbusError::TooShort(adu.len()));
+    }
+    let transaction = u16::from_be_bytes([adu[0], adu[1]]);
+    if transaction != expected_transaction {
+        return Err(ModbusError::TransactionIdMismatch {
+            expected: expected_transaction,
+            actual: transaction,
+        });
+    }
+    let protocol = u16::from_be_bytes([adu[2], adu[3]]);
+    if protocol != 0 {
+        return Err(ModbusError::InvalidFrame(format!(
+            "MBAP protocol id must be 0, got {protocol}"
+        )));
+    }
+    let length = u16::from_be_bytes([adu[4], adu[5]]) as usize;
+    if !(2..=254).contains(&length) || adu.len() != 6 + length {
+        return Err(ModbusError::InvalidFrame(format!(
+            "invalid MBAP length {length}, actual payload {}",
+            adu.len() - 6
+        )));
+    }
+    if adu[6] != expected_unit {
+        return Err(ModbusError::UnitIdMismatch {
+            expected: expected_unit,
+            actual: adu[6],
+        });
+    }
+    Pdu::from_bytes(&adu[7..])
 }
 
 #[cfg(test)]
@@ -370,48 +442,178 @@ pub mod request {
     }
 }
 
-/// Response data parsers (PDU level).
+/// Response data parsers (PDU level). A malformed read must never turn
+/// into an empty successful sample, a false-positive device, or a panic.
 pub mod response {
     use super::super::common::ModbusError;
 
-    /// Parse a read-coils/discrete-inputs response into a bit vector.
+    /// FC01/FC02 use a byte count of ceil(quantity/8). The final byte may
+    /// contain padding bits, but extra bytes or missing bytes are invalid.
     pub fn parse_bits(data: &[u8], expected: u16) -> Result<Vec<bool>, ModbusError> {
-        // data: [byte count][bytes...]
+        if !(1..=2_000).contains(&expected) {
+            return Err(ModbusError::InvalidFrame(format!(
+                "invalid FC01/FC02 quantity {expected}"
+            )));
+        }
+        let expected_bytes = (expected as usize).div_ceil(8);
         if data.is_empty() {
             return Err(ModbusError::TooShort(0));
         }
-        let byte_count = data[0] as usize;
-        if data.len() < 1 + byte_count {
+        let count = data[0] as usize;
+        if count != expected_bytes || data.len() != 1 + count {
             return Err(ModbusError::InvalidFrame(format!(
-                "byte count {} > payload {}",
-                byte_count,
-                data.len() - 1
+                "bit payload: byte count {count}, expected {expected_bytes}, received {} bytes",
+                data.len().saturating_sub(1)
             )));
         }
-        let mut bits = Vec::with_capacity(expected as usize);
-        for i in 0..expected as usize {
-            let byte = data[1 + i / 8];
-            bits.push((byte >> (i % 8)) & 0x01 != 0);
-        }
-        Ok(bits)
+        let bytes = &data[1..];
+        Ok((0..expected as usize)
+            .map(|i| bytes[i / 8] & (1 << (i % 8)) != 0)
+            .collect())
     }
 
-    /// Parse a read-registers response into a u16 vector.
+    /// Decode register words only after verifying count, evenness and exact
+    /// packet length. The requested quantity is checked by parse_read_values.
     pub fn parse_registers(data: &[u8]) -> Result<Vec<u16>, ModbusError> {
         if data.is_empty() {
             return Err(ModbusError::TooShort(0));
         }
-        let byte_count = data[0] as usize;
-        if byte_count % 2 != 0 || data.len() < 1 + byte_count {
+        let count = data[0] as usize;
+        if count == 0 || count > 250 || count % 2 != 0 || data.len() != count + 1 {
             return Err(ModbusError::InvalidFrame(format!(
-                "bad byte count {} / payload {}",
-                byte_count,
-                data.len() - 1
+                "register payload: byte count {count}, received {} bytes",
+                data.len().saturating_sub(1)
             )));
         }
-        Ok(data[1..1 + byte_count]
+        Ok(data[1..]
             .chunks_exact(2)
-            .map(|c| u16::from_be_bytes([c[0], c[1]]))
+            .map(|chunk| u16::from_be_bytes([chunk[0], chunk[1]]))
             .collect())
+    }
+
+    /// Shared strict read validator for discovery, register maps, manual reads,
+    /// and live monitoring. A short/long answer never counts as successful.
+    pub fn parse_read_values(
+        function: u8,
+        data: &[u8],
+        quantity: u16,
+    ) -> Result<Vec<u16>, ModbusError> {
+        match function {
+            0x01 | 0x02 => parse_bits(data, quantity)
+                .map(|bits| bits.into_iter().map(u16::from).collect()),
+            0x03 | 0x04 => {
+                if !(1..=125).contains(&quantity) {
+                    return Err(ModbusError::InvalidFrame(format!(
+                        "invalid FC03/FC04 quantity {quantity}"
+                    )));
+                }
+                let values = parse_registers(data)?;
+                if values.len() != quantity as usize {
+                    return Err(ModbusError::InvalidFrame(format!(
+                        "register quantity mismatch: expected {quantity}, got {}",
+                        values.len()
+                    )));
+                }
+                Ok(values)
+            }
+            _ => Err(ModbusError::UnexpectedFunction(function)),
+        }
+    }
+}
+
+#[cfg(test)]
+mod strict_response_tests {
+    use super::*;
+
+    #[test]
+    fn rejects_wrong_fc_exception_and_extra_exception_bytes() {
+        assert!(matches!(
+            validate_response_function(Pdu::from_bytes(&[0x84, 2]).unwrap(), 3),
+            Err(ModbusError::UnexpectedFunction(4))
+        ));
+        assert!(Pdu::from_bytes(&[0x83, 2, 0]).is_err());
+        assert!(Pdu::from_bytes(&[0x83]).is_err());
+        assert!(Pdu::from_bytes(&[0x80, 2]).is_err());
+        assert!(validate_response_function(Pdu::from_bytes(&[0x83, 0]).unwrap(), 3).is_err());
+        assert!(matches!(
+            validate_response_function(Pdu::from_bytes(&[0x83, 2]).unwrap(), 3),
+            Ok(Pdu::Exception { function: 3, code: 2 })
+        ));
+    }
+
+    #[test]
+    fn reject_corrupt_mbap_even_with_correct_unit_id() {
+        let valid = [0, 7, 0, 0, 0, 5, 1, 3, 2, 0x12, 0x34];
+        assert!(parse_tcp_response(&valid, 1, 7).is_ok());
+        for i in 0..valid.len() {
+            if i < 8 {
+                assert!(parse_tcp_response(&valid[..i], 1, 7).is_err());
+            }
+        }
+        let mut corrupted = valid;
+        corrupted[0] = 3;
+        assert!(parse_tcp_response(&corrupted, 1, 7).is_err());
+        let mut corrupted = valid;
+        corrupted[3] = 1;
+        assert!(parse_tcp_response(&corrupted, 1, 7).is_err());
+        let mut corrupted = valid;
+        corrupted[5] = 4;
+        assert!(parse_tcp_response(&corrupted, 1, 7).is_err());
+        let mut corrupted = valid;
+        corrupted[6] = 2;
+        assert!(parse_tcp_response(&corrupted, 1, 7).is_err());
+        let mut too_long = valid.to_vec();
+        too_long.push(0);
+        assert!(parse_tcp_response(&too_long, 1, 7).is_err());
+    }
+
+    #[test]
+    fn reject_truncated_oversized_and_inconsistent_bit_responses_without_panic() {
+        use response::*;
+        assert_eq!(parse_bits(&[1, 0b00000001], 1).unwrap(), vec![true]);
+        assert_eq!(parse_bits(&[1, 0b10000001], 8).unwrap().len(), 8);
+        assert_eq!(parse_bits(&[2, 0xFF, 1], 9).unwrap().len(), 9);
+        assert!(parse_bits(&[1, 1], 16).is_err());
+        assert!(parse_bits(&[2, 1], 9).is_err());
+        assert!(parse_bits(&[2, 1, 2, 3], 9).is_err());
+        assert!(parse_bits(&[1, 1, 0], 1).is_err());
+        assert!(parse_bits(&[0], 1).is_err());
+        assert!(parse_bits(&[1, 1], 0).is_err());
+        assert_eq!(parse_bits(&[250].into_iter().chain([0; 250]).collect::<Vec<_>>(), 2000).unwrap().len(), 2000);
+
+        // Every possible advertised count with shorter actual payloads must
+        // return Result, never panic or index outside the received buffer.
+        for count in 0..=255u8 {
+            for actual_len in 0..=8 {
+                let mut data = vec![0; actual_len + 1];
+                data[0] = count;
+                let _ = parse_bits(&data, 2_000);
+                let _ = parse_bits(&data, 1);
+            }
+        }
+    }
+
+    #[test]
+    fn register_response_requires_exact_byte_count_and_quantity() {
+        use response::*;
+        assert_eq!(parse_read_values(3, &[4, 0, 42, 0, 43], 2).unwrap(), [42, 43]);
+        for data in [
+            vec![0],
+            vec![3, 0, 42, 0],
+            vec![2, 0],
+            vec![2, 0, 42, 0],
+            vec![2, 0, 42, 0, 43],
+            vec![252],
+        ] {
+            assert!(parse_registers(&data).is_err(), "accepted {data:?}");
+        }
+        assert!(parse_read_values(3, &[2, 0, 42], 2).is_err());
+        assert!(parse_read_values(3, &[4, 0, 42, 0, 43], 1).is_err());
+        assert!(parse_read_values(4, &[2, 0, 42], 0).is_err());
+        assert!(parse_read_values(3, &[2, 0, 42], 126).is_err());
+        assert!(parse_read_values(6, &[2, 0, 42], 1).is_err());
+        let mut max = vec![250];
+        max.extend(vec![0u8; 250]);
+        assert_eq!(parse_read_values(4, &max, 125).unwrap().len(), 125);
     }
 }
