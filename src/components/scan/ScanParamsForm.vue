@@ -10,6 +10,18 @@ const params = defineModel<ScanParams>({ required: true });
 
 const scanner = useScannerStore();
 
+function splitEntries(value: string): string[] {
+  return value.split(/[\s,;]+/).map((s) => s.trim()).filter(Boolean);
+}
+const allowlistText = computed({
+  get: () => (params.value.ip_allowlist ?? []).join(", "),
+  set: (v: string) => { params.value.ip_allowlist = splitEntries(v); },
+});
+const exclusionsText = computed({
+  get: () => (params.value.ip_exclusions ?? []).join(", "),
+  set: (v: string) => { params.value.ip_exclusions = splitEntries(v); },
+});
+
 const READ_FCS = [FC.READ_COILS, FC.READ_DISCRETE_INPUTS, FC.READ_HOLDING_REGISTERS, FC.READ_INPUT_REGISTERS];
 
 const tcpFraming = computed({
@@ -50,6 +62,22 @@ function toggleProbe(fc: number) {
       <label class="short">{{ t("ipConcurrency") }}</label>
       <input v-model.number="params.ip_concurrency" type="number" min="1" max="256" :disabled="scanner.isRunning" />
     </div>
+
+    <div class="form-row">
+      <label>{{ t("otQuietMode") }}</label>
+      <input type="checkbox" v-model="params.quiet_mode" :disabled="scanner.isRunning" />
+      <span class="hint">{{ t("otQuietHint") }}</span>
+    </div>
+
+    <div class="form-row">
+      <label>{{ t("otAllowlist") }}</label>
+      <input v-model="allowlistText" class="wide" placeholder="192.168.1.0/24, 10.0.0.5" :disabled="scanner.isRunning" />
+    </div>
+    <div class="form-row">
+      <label>{{ t("otExclusions") }}</label>
+      <input v-model="exclusionsText" class="wide" placeholder="192.168.1.254" :disabled="scanner.isRunning" />
+    </div>
+    <div class="hint">{{ t("otAllowlistHint") }}</div>
 
     <div class="form-row">
       <label>{{ t("probeFcs") }}</label>

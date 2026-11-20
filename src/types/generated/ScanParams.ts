@@ -50,4 +50,17 @@ udp_mbap: boolean,
 /**
  * Modbus Security: wrap TCP connections in TLS (port 802 by convention).
  */
-tls: TlsParams | null, };
+tls: TlsParams | null, 
+/**
+ * Explicit IPv4/IPv6 IP/CIDR allowlist. Empty = deny all network scans.
+ */
+ip_allowlist: Array<string>, 
+/**
+ * Never scan these IP/CIDR destinations, even if they are allowed.
+ */
+ip_exclusions: Array<string>, 
+/**
+ * Serialize all scanner transmissions at at most 2 requests per second,
+ * including probe retries, FC43 identification and register-map reads.
+ */
+quiet_mode: boolean, };

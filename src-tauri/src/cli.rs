@@ -105,6 +105,16 @@ pub struct ScanArgs {
     /// Max parallel IP probes (default 32)
     #[arg(long)]
     pub concurrency: Option<u32>,
+    /// Allow an IP or CIDR (repeat flag for multiple authorized destinations)
+    #[arg(long = "allow-ip")]
+    pub allow_ips: Vec<String>,
+    /// Exclude an IP or CIDR even within an allowed network (repeat flag)
+    #[arg(long = "exclude-ip")]
+    pub exclude_ips: Vec<String>,
+    /// OT Quiet Mode: globally at most 2 on-wire scan requests/sec,
+    /// including retries, register reads and FC43 identification.
+    #[arg(long = "quiet-mode")]
+    pub quiet_mode: bool,
     /// Stop after the first found device
     #[arg(long)]
     pub stop_on_first: bool,
@@ -194,6 +204,9 @@ fn build_params(args: &ScanArgs) -> ScanParams {
         params.ip_concurrency = v;
     }
     params.stop_on_first = args.stop_on_first;
+    params.ip_allowlist = args.allow_ips.clone();
+    params.ip_exclusions = args.exclude_ips.clone();
+    params.quiet_mode = args.quiet_mode;
     params.identify_devices = !args.no_identify;
     params.udp_mbap = args.udp_mbap;
     params.tcp_framing = if args.rtu_over_tcp {
@@ -273,6 +286,9 @@ mod tests {
             gap_ms: None,
             retries: None,
             concurrency: None,
+            allow_ips: vec![],
+            exclude_ips: vec![],
+            quiet_mode: false,
             stop_on_first: false,
             no_identify: false,
             output: None,
@@ -314,6 +330,9 @@ mod tests {
             gap_ms: None,
             retries: None,
             concurrency: None,
+            allow_ips: vec![],
+            exclude_ips: vec![],
+            quiet_mode: false,
             stop_on_first: false,
             no_identify: false,
             output: None,
