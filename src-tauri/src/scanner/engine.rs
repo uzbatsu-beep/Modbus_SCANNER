@@ -43,7 +43,7 @@ pub enum ControlMsg {
 ///
 /// All values are clamped once at scan start, so the engine task and its workers
 /// use identical settings for every request.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct EngineParams {
     /// Response/connect timeout for a single request.
     pub timeout: Duration,
@@ -61,9 +61,26 @@ pub struct EngineParams {
     pub udp_mbap: bool,
     /// Modbus Security TLS options.
     pub tls: Option<TlsParams>,
+    quiet_gate: Option<Arc<QuietGate>>,
+}
+
+/// Shared for all worker tasks of a single scan, including retry and FC43.
+#[derive(Debug)]
+struct QuietGate { next: Mutex<tokio::time::Instant> }
+impl QuietGate {
+    fn new() -> Self { Self { next: Mutex::new(tokio::time::Instant::now()) } }
+    async fn wait(&self) {
+        let mut next = self.next.lock().await;
+        let now = tokio::time::Instant::now();
+        if *next > now { tokio::time::sleep_until(*next).await; }
+        *next = tokio::time::Instant::now() + Duration::from_millis(500);
+    }
 }
 
 impl EngineParams {
+    async fn before_tx(&self) {
+        if let Some(gate) = &self.quiet_gate { gate.wait().await; }
+    }
     pub fn from_scan_params(p: &ScanParams) -> Self {
         Self {
             timeout: Duration::from_millis(p.timeout_ms.clamp(50, 10_000) as u64),
@@ -74,6 +91,7 @@ impl EngineParams {
             tcp_framing: p.tcp_framing,
             udp_mbap: p.udp_mbap,
             tls: p.tls.clone(),
+            quiet_gate: p.quiet_mode.then(|| Arc::new(QuietGate::new())),
         }
     }
 }
@@ -978,6 +996,7 @@ async fn execute_probe(
                     }
                 }
                 let t = serial_transport.as_mut().unwrap();
+                engine.before_tx().await;
                 match t.transact(&adu, timeout, 8).await {
                     Ok(resp) => Ok(resp),
                     Err(e) => {
@@ -1000,6 +1019,7 @@ async fn execute_probe(
             {
                 Ok(mut t) => {
                     tcp_connected = true;
+                    engine.before_tx().await;
                     match t.transact(&adu, timeout, 8).await {
                         Ok(resp) => {
                             let _ = t.close().await;
@@ -1011,7 +1031,7 @@ async fn execute_probe(
                 Err(e) => Err(e),
             },
             TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
-                Ok(mut t) => t.transact(&adu, timeout, 8).await,
+                Ok(mut t) => { engine.before_tx().await; t.transact(&adu, timeout, 8).await },
                 Err(e) => Err(e),
             },
         };
@@ -1249,6 +1269,7 @@ async fn execute_register_read(
                 return RegisterReadOutcome::Error;
             }
             let t = serial_transport.as_mut().unwrap();
+            engine.before_tx().await;
             t.transact(&adu, timeout, 3 + (quantity as usize) * 2).await
         }
         TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
@@ -1260,17 +1281,19 @@ async fn execute_register_read(
         })
         .await
         {
-            Ok(mut t) => match t.transact(&adu, timeout, 8).await {
+            Ok(mut t) => { engine.before_tx().await;
+                match t.transact(&adu, timeout, 8).await {
                 Ok(resp) => {
                     let _ = t.close().await;
                     Ok(resp)
                 }
                 Err(e) => Err(e),
+                }
             },
             Err(e) => Err(e),
         },
         TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
-            Ok(mut t) => t.transact(&adu, timeout, 8).await,
+            Ok(mut t) => { engine.before_tx().await; t.transact(&adu, timeout, 8).await },
             Err(e) => Err(e),
         },
     };
@@ -1493,7 +1516,7 @@ async fn identify_device(
     let started = Instant::now();
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
-            Some(t) => t.transact(&adu, timeout, 32).await,
+            Some(t) => { engine.before_tx().await; t.transact(&adu, timeout, 32).await },
             None => return,
         },
         TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
@@ -1506,6 +1529,7 @@ async fn identify_device(
         .await
         {
             Ok(mut t) => {
+                engine.before_tx().await;
                 let out = t.transact(&adu, timeout, 32).await;
                 let _ = t.close().await;
                 out
@@ -1513,7 +1537,7 @@ async fn identify_device(
             Err(e) => Err(e),
         },
         TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
-            Ok(mut t) => t.transact(&adu, timeout, 32).await,
+            Ok(mut t) => { engine.before_tx().await; t.transact(&adu, timeout, 32).await },
             Err(e) => Err(e),
         },
     };
