@@ -36,6 +36,14 @@ wrong-function exception; check that the UI reports an error and does not create
 fictitious devices/registers. Keep all tests read-only. Never inject malformed
 traffic into production OT networks.
 
+**PR #6 — safe write acceptance (isolated bench only):** For FC05, FC06 and FC10,
+send a **single** explicitly confirmed request to a simulator or fully isolated
+slave. Simulate a lost write reply and configure `retries=5`: exactly one TX
+must occur, and the UI must warn that the outcome is unknown. Return mismatched
+write acknowledgment address/value/quantity and verify `ok=false`.
+Test a delayed first byte and split RTU-over-TCP payload, plus an oversized
+RTU/ASCII frame. Do **not** execute writes on an active production process.
+
 **Not automated:** RS-485 signal integrity, USB adapter behavior, baud/parity
 compatibility, real firmware error handling, field safety acceptance.
 

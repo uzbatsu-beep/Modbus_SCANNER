@@ -10,6 +10,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed — PR #6 (manual write safety and transport stabilization)
+- Manual FC05/FC06/FC10 writes and arbitrary Raw Frames are single-shot regardless of configured retries; only read requests may retry (max 5).
+- Positive write acknowledgments require exact echo of requested address and value/quantity; mismatched acknowledgments are failures, not false-positive success.
+- Timeout/transport failures on writes explicitly warn that the device may have executed the command and that the outcome is unknown.
+- RTU-over-TCP accepts delayed first bytes and assembles common/FC43 responses by length instead of prematurely treating a 5ms gap as EOF; bounded TLS handshake.
+- RTU/ASCII receive buffers have strict maximum sizes to reject noisy/oversized frames; Windows/Linux/macOS regression tests cover delayed, fragmented and silent responses.
+
+
 ### Fixed — PR #5 (strict Modbus response validation / строгая валидация)
 - Rejects truncated/oversized PDU and invalid exception FC/code/length; shared MBAP transaction/protocol/length/unit verification for scanner and manual I/O.
 - FC01/02 bit counts must exactly match ceil(requested quantity / 8), without panics; FC03/04 register byte counts and actual quantity must match the request.

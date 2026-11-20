@@ -164,7 +164,21 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 ```
 
 **`write_registers`** — `{ req: WriteRequest }`, same shape with
-`function: 5|6|16` and `values: number[]`.
+`function: 5|6|16` and `values: number[]`, plus explicit `confirm_write: true`.
+
+**Manual I/O safety (PR #6):** `read_registers` may retry up to 5 times
+according to `timing.retries`. Both `write_registers` and `send_raw_frame`
+are strictly **single-shot**, regardless of the supplied retry count. The
+backend checks positive write acknowledgments: FC05/FC06 echo the exact address
+and value; FC10 echoes the exact start address and quantity. A mismatching
+acknowledgment is a failure, never `ok: true`. Broadcast unit 0 is blocked
+on every transport for write/raw operations.
+
+If a write or raw request times out, the outcome is **unknown**: the device
+may have applied the operation even though the response was lost. No implicit
+retransmission takes place. Verify the relevant device state before deciding
+whether to issue a new write. Raw requests remain explicitly unsafe and require
+`confirm_unsafe: true` for each send.
 
 **`inspect_registers`** — `{ values: number[] }` → `DecodeResult`: all
 interpretations (INT16/UINT16/INT32/UINT32/FLOAT32/ASCII × ABCD/BADC/CDAB/DCBA)
