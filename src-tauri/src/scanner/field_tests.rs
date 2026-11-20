@@ -5,7 +5,7 @@
 //! All listener ports are ephemeral and no traffic leaves localhost.
 
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -33,6 +33,7 @@ enum Reply {
 struct TestSlave {
     port: u16,
     requests: Arc<Mutex<Vec<Vec<u8>>>>,
+    arrivals: Arc<Mutex<Vec<Instant>>>,
     task: JoinHandle<()>,
 }
 
@@ -43,6 +44,8 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
     let port = listener.local_addr().unwrap().port();
     let requests: Arc<Mutex<Vec<Vec<u8>>>> = Arc::new(Mutex::new(Vec::new()));
     let observed = requests.clone();
+    let arrivals: Arc<Mutex<Vec<Instant>>> = Arc::new(Mutex::new(Vec::new()));
+    let times = arrivals.clone();
     let task = tokio::spawn(async move {
         for reply in replies {
             let (mut stream, _) = tokio::time::timeout(
@@ -52,6 +55,7 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
             .await
             .expect("scanner did not connect to fixture")
             .expect("accept loopback connection");
+            times.lock().unwrap().push(Instant::now());
 
             let mut mbap = [0u8; 7];
             stream.read_exact(&mut mbap).await.expect("read MBAP");
@@ -119,7 +123,7 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
             }
         }
     });
-    TestSlave { port, requests, task }
+    TestSlave { port, requests, arrivals, task }
 }
 
 fn single_tcp(port: u16, register_plan: Vec<RegisterRange>) -> ScanTarget {
@@ -358,4 +362,56 @@ async fn traffic_logs_are_invalid_for_corrupted_discovery_and_map_replies() {
     assert_eq!(traffic[1].status, "invalid");
     assert_eq!(results.stats.responses_ok, 1);
     assert!(results.records[0].registers.is_empty());
+}
+
+#[tokio::test]
+async fn default_ip_allowlist_blocks_network_before_socket_open() {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let scanner = ScannerHandle::new();
+    let mut params = safe_params(vec![3]);
+    params.ip_allowlist.clear();
+    let error = scanner.start(EventSink::null(), single_tcp(port, Vec::new()), params)
+        .await.expect_err("empty network allowlist must deny");
+    assert!(error.contains("allowlist"), "{error}");
+    assert!(tokio::time::timeout(Duration::from_millis(100), listener.accept()).await.is_err());
+}
+
+#[tokio::test]
+async fn quiet_mode_rates_retries_and_fc43_at_two_total_requests_per_second() {
+    let fixture = test_slave(vec![
+        Reply::Data,
+        Reply::Exception(1),  // FC43 identification is still a TX slot
+        Reply::Data,
+        Reply::Exception(1),
+    ]).await;
+    let timestamps = fixture.arrivals.clone();
+    let mut params = safe_params(vec![3, 4]);
+    params.identify_devices = true;
+    params.quiet_mode = true;
+    params.ip_concurrency = 64;
+    let results = scan(single_tcp(fixture.port, Vec::new()), params).await;
+    let requests = observed(fixture).await;
+    assert_eq!(requests.len(), 4);
+    assert_eq!(results.stats.responses_ok, 2);
+    let times = timestamps.lock().unwrap();
+    for times in times.windows(2) {
+        assert!(times[1].duration_since(times[0]) >= Duration::from_millis(430),
+            "OT quiet mode sent two consecutive requests too quickly");
+    }
+}
+
+#[tokio::test]
+async fn quiet_mode_includes_retry_attempts() {
+    let fixture = test_slave(vec![Reply::Silent, Reply::Data]).await;
+    let timestamps = fixture.arrivals.clone();
+    let mut params = safe_params(vec![3]);
+    params.quiet_mode = true;
+    params.retries = 1;
+    params.timeout_ms = 100;
+    let _ = scan(single_tcp(fixture.port, Vec::new()), params).await;
+    let requests = observed(fixture).await;
+    assert_eq!(requests.len(), 2);
+    let times = timestamps.lock().unwrap();
+    assert!(times[1].duration_since(times[0]) >= Duration::from_millis(430));
 }
