@@ -10,8 +10,30 @@ in `src/api/mod.ts`; the payload types in `src/types/ipc.ts` (TypeScript mirror 
 ## Local REST + WebSocket API (E-03)
 
 Started with `modbus-scanner serve --port 8787` or from the desktop app via the
-`start_api_server` Tauri command. Binds to **127.0.0.1 only**, no authentication
-by default. All scan endpoints reuse the same `ScannerHandle` as the GUI.
+`start_api_server` Tauri command. Binds to **127.0.0.1 only** and **requires authentication** for every
+HTTP route (including `/health`) and WebSocket upgrade. All scan endpoints
+reuse the same `ScannerHandle` as GUI and CLI, including the OT IP policy.
+
+**Bootstrap:** set a unique `MODBUS_SCANNER_API_TOKEN` in the process
+environment **before** starting the application or `serve` command.
+It must have at least 24 printable ASCII characters; otherwise the API refuses
+to start. Send `Authorization: Bearer <TOKEN>` on every request. Do not place
+tokens in URLs, query strings, or Git repositories. Browser requests with
+an `Origin` other than `http://127.0.0.1:<port>` or
+`http://localhost:<port>` are forbidden. Standard browser WebSocket clients
+cannot set arbitrary Authorization headers; use a native client for authenticated
+WS subscriptions. Binding to loopback alone is **not** an access-control policy.
+
+**OT scan safety:** `ScanParams.ip_allowlist` is a list of literal IP/CIDRs
+(e.g. `["192.168.1.0/24"]`), required for all TCP/UDP scan targets.
+An empty list denies all IP scans before network I/O. `ip_exclusions`
+overrides allowlist entries (e.g. `["192.168.1.254"]`).
+DNS names are prohibited to prevent authorization bypass/rebinding;
+all non-excluded requested IPs must fall within the allowed scope.
+`quiet_mode: true` limits total outbound scanner transmissions to
+**2 req/sec** across concurrent IP workers, retries, FC43, and register reads.
+It does not govern the separate manual/monitor subsystems, and it is not
+an emergency stop.
 
 | Method | Path | Result |
 |--------|------|--------|
