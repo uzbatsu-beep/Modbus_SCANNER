@@ -55,7 +55,6 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
             .await
             .expect("scanner did not connect to fixture")
             .expect("accept loopback connection");
-            times.lock().unwrap().push(Instant::now());
 
             let mut mbap = [0u8; 7];
             stream.read_exact(&mut mbap).await.expect("read MBAP");
@@ -64,6 +63,9 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
             assert!((2..=254).contains(&length), "invalid MBAP length {length}");
             let mut pdu = vec![0u8; length as usize - 1];
             stream.read_exact(&mut pdu).await.expect("read PDU");
+            // The quiet-mode gate acts on physical request TX, not on
+            // TCP connect(). Timestamp receipt of the complete Modbus PDU.
+            times.lock().unwrap().push(Instant::now());
             let mut adu = mbap.to_vec();
             adu.extend_from_slice(&pdu);
             observed.lock().unwrap().push(adu);
@@ -83,6 +85,7 @@ async fn test_slave(replies: Vec<Reply>) -> TestSlave {
                 Reply::ShortRegisterData => vec![function, 2, 0, 42],
                 Reply::Data | Reply::WrongTransaction | Reply::WrongFunction | Reply::Fragmented => match function {
                     0x01 | 0x02 => vec![function, 1, 1],
+                    0x2B => vec![function | 0x80, 0x01], // unsupported optional FC43
                     0x03 | 0x04 => {
                         assert!(pdu.len() >= 5, "short read request");
                         let quantity = u16::from_be_bytes([pdu[3], pdu[4]]);
@@ -379,12 +382,9 @@ async fn default_ip_allowlist_blocks_network_before_socket_open() {
 
 #[tokio::test]
 async fn quiet_mode_rates_retries_and_fc43_at_two_total_requests_per_second() {
-    let fixture = test_slave(vec![
-        Reply::Data,
-        Reply::Exception(1),  // FC43 identification is still a TX slot
-        Reply::Data,
-        Reply::Exception(1),
-    ]).await;
+    // Responses are generated from incoming FC rather than assuming that
+    // concurrently scheduled discovery and FC43 requests have a fixed order.
+    let fixture = test_slave(vec![Reply::Data; 4]).await;
     let timestamps = fixture.arrivals.clone();
     let mut params = safe_params(vec![3, 4]);
     params.identify_devices = true;
