@@ -306,3 +306,121 @@ mod tests {
         server.await.unwrap();
     }
 }
+
+#[cfg(test)]
+mod rtu_over_tcp_regression_tests {
+    use super::*;
+    use crate::modbus::common::UnitId;
+    use crate::modbus::rtu;
+    use tokio::net::TcpListener;
+
+    async fn connect_rtu(port: u16) -> TcpTransport {
+        TcpTransport::connect(TcpConfig {
+            host: "127.0.0.1".into(),
+            port,
+            connect_timeout: Duration::from_millis(500),
+            framing: TcpFraming::Rtu,
+            tls: None,
+        })
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn delayed_first_byte_and_fragmented_register_response_is_received_completely() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = rtu::encode(UnitId(1), &[3, 0, 0, 0, 1]);
+        let expected_request = request.clone();
+        let response = rtu::encode(UnitId(1), &[3, 2, 0x12, 0x34]);
+        let expected_response = response.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; expected_request.len()];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, expected_request);
+            tokio::time::sleep(Duration::from_millis(65)).await;
+            stream.write_all(&response[..3]).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(35)).await;
+            stream.write_all(&response[3..]).await.unwrap();
+            // Keep the stream open. Length awareness, not EOF, ends receive.
+            tokio::time::sleep(Duration::from_millis(35)).await;
+        });
+        let mut client = connect_rtu(port).await;
+        let actual = client.transact(&request, Duration::from_millis(500), 7)
+            .await.expect("delayed RTU-over-TCP reply");
+        assert_eq!(actual, expected_response);
+        assert_eq!(rtu::decode(&actual).unwrap().pdu.to_bytes(), [3, 2, 0x12, 0x34]);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delayed_exception_response_is_received_without_initial_5ms_timeout() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = rtu::encode(UnitId(1), &[3, 0, 0, 0, 1]);
+        let expected_request = request.clone();
+        let response = rtu::encode(UnitId(1), &[0x83, 2]);
+        let expected_response = response.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; expected_request.len()];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, expected_request);
+            tokio::time::sleep(Duration::from_millis(55)).await;
+            stream.write_all(&response).await.unwrap();
+        });
+        let mut client = connect_rtu(port).await;
+        let actual = client.transact(&request, Duration::from_millis(500), 5)
+            .await.expect("slow exception reply");
+        assert_eq!(actual, expected_response);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn fragmented_fc43_identification_with_long_chunk_gap_is_received() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let request = rtu::encode(UnitId(1), &[0x2B, 0x0E, 1, 0]);
+        let expected_request = request.clone();
+        let response = rtu::encode(UnitId(1), &[
+            0x2B, 0x0E, 1, 1, 0, 0, 1, // MEI/read/conformity/follows/next/count
+            0, 3, b'A', b'B', b'C',     // object 0
+        ]);
+        let expected_response = response.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = vec![0; expected_request.len()];
+            stream.read_exact(&mut bytes).await.unwrap();
+            assert_eq!(bytes, expected_request);
+            stream.write_all(&response[..8]).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(40)).await;
+            stream.write_all(&response[8..]).await.unwrap();
+        });
+        let mut client = connect_rtu(port).await;
+        let actual = client.transact(&request, Duration::from_millis(500), 20)
+            .await.expect("fragmented FC43 response");
+        assert_eq!(actual, expected_response);
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn impossible_rtu_byte_count_is_rejected_before_buffer_growth() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = [0u8; 8];
+            stream.read_exact(&mut bytes).await.unwrap();
+            stream.write_all(&[1, 3, 255]).await.unwrap();
+        });
+        let mut client = connect_rtu(port).await;
+        let result = client.transact(
+            &rtu::encode(UnitId(1), &[3, 0, 0, 0, 1]),
+            Duration::from_millis(500),
+            7,
+        ).await;
+        assert!(matches!(result, Err(TransportError::Modbus(ModbusError::InvalidFrame(_)))));
+        server.await.unwrap();
+    }
+}
