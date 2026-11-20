@@ -317,3 +317,38 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod serial_receive_limits_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn oversized_rtu_stream_is_rejected_without_unbounded_buffer_growth() {
+        let (mut sender, mut receiver) = tokio::io::duplex(1024);
+        let writer = tokio::spawn(async move {
+            sender.write_all(&vec![0x33; 300]).await.unwrap();
+        });
+        let mut buffer = Vec::new();
+        let err = read_frame_from(
+            &mut receiver, &mut buffer, SerialMode::Rtu, Duration::from_millis(5),
+        ).await.expect_err("RTU frame longer than 256 bytes must be rejected");
+        assert!(matches!(err, TransportError::Modbus(ModbusError::InvalidFrame(_))));
+        assert!(buffer.is_empty(), "oversized RX buffer must be discarded");
+        writer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn oversized_ascii_stream_is_rejected_without_waiting_for_crlf() {
+        let (mut sender, mut receiver) = tokio::io::duplex(1024);
+        let writer = tokio::spawn(async move {
+            sender.write_all(&vec![b'1'; 600]).await.unwrap();
+        });
+        let mut buffer = Vec::new();
+        let err = read_frame_from(
+            &mut receiver, &mut buffer, SerialMode::Ascii, Duration::from_millis(5),
+        ).await.expect_err("oversized unterminated ASCII frame must be rejected");
+        assert!(matches!(err, TransportError::Modbus(ModbusError::InvalidFrame(_))));
+        assert!(buffer.is_empty(), "oversized RX buffer must be discarded");
+        writer.await.unwrap();
+    }
+}
