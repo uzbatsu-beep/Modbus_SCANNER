@@ -263,6 +263,26 @@ mod tests {
     use super::*;
 
     #[test]
+    fn flags_propagate_authorized_scope_and_quiet_mode() {
+        use clap::Parser;
+        let cli = Cli::try_parse_from([
+            "modbus-scanner", "scan", "--ip", "127.0.0.1",
+            "--allow-ip", "127.0.0.1/32",
+            "--allow-ip", "10.0.0.0/24",
+            "--exclude-ip", "10.0.0.42",
+            "--quiet-mode",
+        ]).expect("parse new OT flags");
+        let Commands::Scan(args) = cli.command.expect("scan command") else {
+            panic!("expected scan subcommand");
+        };
+        let params = build_params(&args);
+        assert_eq!(params.ip_allowlist, ["127.0.0.1/32", "10.0.0.0/24"]);
+        assert_eq!(params.ip_exclusions, ["10.0.0.42"]);
+        assert!(params.quiet_mode);
+        assert!(matches!(build_target(&args).unwrap(), ScanTarget::IpRange { .. }));
+    }
+
+    #[test]
     fn builds_serial_target() {
         let args = ScanArgs {
             port: Some("COM7".into()),
