@@ -405,6 +405,8 @@ pub enum ScanStatus {
     Running,
     /// Paused by user.
     Paused,
+    /// Cancellation requested; existing I/O is being torn down.
+    Stopping,
     /// Stopped by user.
     Stopped,
     /// Finished normally.

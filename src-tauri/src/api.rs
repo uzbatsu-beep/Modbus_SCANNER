@@ -107,7 +107,9 @@ async fn start_scan(
 
 async fn stop_scan(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {
     state.scanner.control(ControlMsg::Stop).await?;
-    Ok(Json(json!({ "status": "stopped" })))
+    // Cancellation is asynchronous; the terminal Stopped state is reported
+    // only after the engine has aborted workers and dropped its transport.
+    Ok(Json(json!({ "status": "stopping" })))
 }
 
 async fn pause_scan(State(state): State<ApiState>) -> Result<Json<Value>, ApiError> {

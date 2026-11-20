@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed — PR #4 (scanner lifecycle and cancellation)
+- Exclusively guards active scans through Preparing, Running, Paused and Stopping, including concurrent start requests.
+- Immediate Stop interrupts IP/serial requests, slot waits and request gaps; aborts outstanding workers and discards planned register reads.
+- Stopped status is published only after cleanup, with terminal events consistent in Vue and CLI/API.
+- Added no-transmit-after-Stop loopback regression scenarios and cancellation from Pause.
+
 ### Build / Release Candidate (PR #3)
 - Separate Windows QA workflow builds NSIS EXE + MSI from the PR source without releasing or tagging; includes SHA256 checksums, commit metadata and artifact retention.
 - Consistent version validation across npm, Cargo, Tauri and optional release tag; official release workflow runs Rust regression tests before packaging.

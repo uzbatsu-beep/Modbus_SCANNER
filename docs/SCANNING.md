@@ -2,6 +2,29 @@
 
 [Русская версия](SCANNING.ru.md)
 
+## Lifecycle and explicit cancellation (PR #4)
+
+A scan has the lifecycle `Idle → Preparing → Running ↔ Paused → Stopping → Stopped`
+for a user cancellation, or `Running → Finished` for normal completion.
+While `Preparing`, `Running`, `Paused` or `Stopping`, a second scan is
+rejected by the Rust backend, including through CLI/API.
+
+`stop_scan` sends a sticky cancellation signal **independently of the
+Pause/Resume queue**. The engine preempts waits for TCP/UDP and serial I/O,
+the full IP worker pool and request gaps. It cancels worker tasks and discards
+scheduled register reads, closes its serial transport, and only then reports
+`Stopped`. `Paused` stops scheduling new work but does not abort already
+started network probes.
+
+This is a **software-level transaction cancellation**, not a hardware emergency
+stop. Bytes already transmitted or buffered by an operating system or RS-485
+adapter cannot be recalled. Do not assume a field device did not execute a
+request that was already sent.
+
+`stop_on_first` is a separate automatic discovery condition: it does not
+mean the operator pressed Stop; approved follow-up register reads may still
+complete for the detected device.
+
 ## Scan targets
 
 ### 1. Serial bus (`unit_id_range`)

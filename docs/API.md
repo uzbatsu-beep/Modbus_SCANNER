@@ -20,7 +20,7 @@ by default. All scan endpoints reuse the same `ScannerHandle` as the GUI.
 | GET | `/api/v1/results` | `ScanResults` |
 | GET | `/api/v1/traffic` | last 2000 `TrafficRecord`s |
 | POST | `/api/v1/scan` | body `{target: ScanTarget, params: ScanParams}` → `{status:"started"}` |
-| POST | `/api/v1/scan/stop` | stop the current scan |
+| POST | `/api/v1/scan/stop` | request immediate cancellation → `{"status":"stopping"}` (poll `/status` for terminal `stopped`) |
 | POST | `/api/v1/scan/pause` | pause |
 | POST | `/api/v1/scan/resume` | resume |
 | WS | `/api/v1/events` | JSON messages `{event, payload}` (scan:event, scan:progress, monitor:update, traffic:record) |
@@ -84,10 +84,10 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | Command | Args | Returns | Effect |
 |---------|------|---------|--------|
 | `start_scan` | `{ target: ScanTarget, params: ScanParams }` | `void` | Spawns an engine task; returns immediately |
-| `stop_scan` | — | `void` | Stops after the current request |
+| `stop_scan` | — | `void` | Requests cancellation immediately; Stopped only after cleanup |
 | `pause_scan` | — | `void` | Pauses between work items |
 | `resume_scan` | — | `void` | Resumes |
-| `get_scan_status` | — | `ScanStatus` | `"idle" \| "preparing" \| "running" \| "paused" \| "stopped" \| "finished" \| "failed"` |
+| `get_scan_status` | — | `ScanStatus` | `"idle" \| "preparing" \| "running" \| "paused" \| "stopping" \| "stopped" \| "finished" \| "failed"` |
 | `get_scan_progress` | — | `ScanProgress` | Latest progress snapshot |
 | `get_scan_results` | — | `ScanResults` | Full results snapshot |
 | `clear_results` | — | `void` | Clears records and stats |

@@ -150,10 +150,17 @@ mod engine_params_tests {
     }
 }
 
+/// Independent stop signal must never be queued behind Pause/Resume messages.
+#[derive(Clone)]
+struct ScanControl {
+    commands: mpsc::Sender<ControlMsg>,
+    cancel: watch::Sender<bool>,
+}
+
 /// Shared engine state handle.
 pub struct ScannerHandle {
-    /// Control channel to the running task (None when idle).
-    control_tx: Mutex<Option<mpsc::Sender<ControlMsg>>>,
+    /// Lifecycle control for the active task (None when idle).
+    control_tx: Mutex<Option<ScanControl>>,
     /// Current status (watch: UI reads it cheaply).
     status_tx: watch::Sender<ScanStatus>,
     /// Shared results.
@@ -236,74 +243,107 @@ impl ScannerHandle {
         }
     }
 
-    /// Start a new scan. Returns an error if one is already running.
+    /// Start a new scan. Active runs (including paused and preparing) are exclusive.
     pub async fn start(
         &self,
         sink: EventSink,
         target: ScanTarget,
         params: ScanParams,
     ) -> Result<(), String> {
-        {
-            let mut guard = self.control_tx.lock().await;
-            if let Some(tx) = guard.as_ref() {
-                if !tx.is_closed() && *self.status_tx.borrow() == ScanStatus::Running {
-                    return Err("scan already in progress".into());
-                }
-            }
-            let (tx, rx) = mpsc::channel(8);
-            *guard = Some(tx);
-
-            let (pause_tx, pause_rx) = watch::channel(false);
-            let results = self.results.clone();
-            let status_tx = self.status_tx.clone();
-
-            let _ = self.status_tx.send_replace(ScanStatus::Preparing);
-            let _ = status_tx;
-
-            let engine_params = EngineParams::from_scan_params(&params);
-            let strategy = build_strategy(target, params)
-                .map_err(|e| {
-                    let _ = self.status_tx.send_replace(ScanStatus::Failed);
-                    e
-                })?;
-
-            *self.results.write() = ScanResults {
-                records: Vec::new(),
-                ip_targets: Vec::new(),
-                stats: ScanStats {
-                    started_ms: Some(now_ms()),
-                    ..Default::default()
-                },
-            };
-
-            tokio::spawn(engine_task(
-                sink,
-                strategy,
-                engine_params,
-                rx,
-                (pause_tx, pause_rx),
-                results,
-                status_tx,
-            ));
-            Ok(())
+        // Keep preparation and installation atomic with respect to concurrent starts.
+        let mut guard = self.control_tx.lock().await;
+        if matches!(
+            *self.status_tx.borrow(),
+            ScanStatus::Preparing | ScanStatus::Running | ScanStatus::Paused | ScanStatus::Stopping
+        ) || guard.as_ref().is_some_and(|run| !run.commands.is_closed()) {
+            return Err("scan already in progress".into());
         }
+
+        let engine_params = EngineParams::from_scan_params(&params);
+        let strategy = build_strategy(target, params).map_err(|error| {
+            self.status_tx.send_replace(ScanStatus::Failed);
+            error
+        })?;
+
+        let (tx, rx) = mpsc::channel(8);
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        let (pause_tx, pause_rx) = watch::channel(false);
+        *guard = Some(ScanControl {
+            commands: tx,
+            cancel: cancel_tx,
+        });
+
+        *self.results.write() = ScanResults {
+            records: Vec::new(),
+            ip_targets: Vec::new(),
+            stats: ScanStats {
+                started_ms: Some(now_ms()),
+                ..Default::default()
+            },
+        };
+        self.status_tx.send_replace(ScanStatus::Preparing);
+
+        tokio::spawn(engine_task(
+            sink,
+            strategy,
+            engine_params,
+            rx,
+            cancel_rx,
+            (pause_tx, pause_rx),
+            self.results.clone(),
+            self.status_tx.clone(),
+        ));
+        Ok(())
     }
 
     pub async fn control(&self, msg: ControlMsg) -> Result<(), String> {
-        let guard = self.control_tx.lock().await;
-        match guard.as_ref() {
-            Some(tx) => tx.send(msg).await.map_err(|e| e.to_string()),
-            None => Err("no scan running".into()),
+        // Do not hold the lifecycle mutex while waiting on the command queue.
+        // In particular Stop must always bypass a full Pause/Resume queue.
+        let active = self.control_tx.lock().await.clone()
+            .ok_or_else(|| "no scan running".to_string())?;
+        if active.commands.is_closed() {
+            return Err("no scan running".into());
+        }
+
+        match msg {
+            ControlMsg::Stop => {
+                // Only the engine acknowledges Stopping. Publishing it here
+                // would race a concurrently finished task and could overwrite
+                // a terminal state with a permanently stale "stopping".
+                active.cancel.send_replace(true);
+                Ok(())
+            }
+            ControlMsg::Pause | ControlMsg::Resume => {
+                if *active.cancel.borrow() {
+                    return Err("scan is stopping".into());
+                }
+                active.commands.send(msg).await.map_err(|e| e.to_string())
+            }
         }
     }
 }
 
-/// The engine task.
+/// Wait for a stop request independently of the normal control-message queue.
+/// The watch value is sticky, so a Stop issued before a worker starts is not lost.
+async fn wait_for_cancel(receiver: &mut watch::Receiver<bool>) {
+    loop {
+        if *receiver.borrow() {
+            return;
+        }
+        if receiver.changed().await.is_err() {
+            return;
+        }
+    }
+}
+
+/// The engine task. User Stop is a hard boundary: cancel in-flight operations,
+/// discard follow-up reads and publish Stopped only after all tasks have exited.
 async fn engine_task(
     sink: EventSink,
     mut strategy: Box<dyn ScanStrategy + Send>,
     engine: EngineParams,
     mut control_rx: mpsc::Receiver<ControlMsg>,
+    mut cancel_rx: watch::Receiver<bool>,
     (pause_tx, mut pause_rx): (watch::Sender<bool>, watch::Receiver<bool>),
     results: Arc<RwLock<ScanResults>>,
     status_tx: watch::Sender<ScanStatus>,
@@ -313,43 +353,46 @@ async fn engine_task(
     let ip_concurrency = engine.ip_concurrency;
     let mut done: u64 = 0;
     let mut serial_transport: Option<SerialTransport> = None;
-    // Serial settings currently held by `serial_transport`; a sweep changes
-    // them, so the port must be reopened when this signature changes.
     let mut serial_signature: Option<String> = None;
-    // Register-plan work discovered during probes, executed by the engine so
-    // that serial reads reuse the single open port.
     let mut pending: std::collections::VecDeque<WorkItem> = std::collections::VecDeque::new();
-    // In-flight IP probes, bounded by `engine.ip_concurrency`.
-    let mut ip_tasks: tokio::task::JoinSet<ProbeOutcome> = tokio::task::JoinSet::new();
-    let mut want_stop = false;
+    // A canceled worker returns None; all other outcomes are normal probe results.
+    let mut ip_tasks: tokio::task::JoinSet<Option<ProbeOutcome>> = tokio::task::JoinSet::new();
+    let mut stop_on_first = false;
+    let mut user_cancelled = *cancel_rx.borrow();
 
-    let _ = status_tx.send_replace(ScanStatus::Running);
-    emit_event(&sink, &ScanEvent::StatusChanged {
-        status: ScanStatus::Running,
-        message: "scanning started".into(),
-    });
+    if !user_cancelled {
+        status_tx.send_replace(ScanStatus::Running);
+        emit_event(&sink, &ScanEvent::StatusChanged {
+            status: ScanStatus::Running,
+            message: "scanning started".into(),
+        });
+    }
 
     'main: loop {
-        // Handle control messages (non-blocking).
+        if *cancel_rx.borrow() {
+            user_cancelled = true;
+            break;
+        }
+
+        // Pause/Resume are advisory. Stop is also supported here for internal
+        // callers, but ScannerHandle::control(Stop) sets the cancel watch directly.
         while let Ok(msg) = control_rx.try_recv() {
             match msg {
                 ControlMsg::Stop => {
-                    want_stop = true;
-                    ip_tasks.abort_all();
-                    let _ = status_tx.send_replace(ScanStatus::Stopped);
+                    user_cancelled = true;
                     break 'main;
                 }
                 ControlMsg::Pause => {
-                    let _ = pause_tx.send(true);
-                    let _ = status_tx.send_replace(ScanStatus::Paused);
+                    pause_tx.send_replace(true);
+                    status_tx.send_replace(ScanStatus::Paused);
                     emit_event(&sink, &ScanEvent::StatusChanged {
                         status: ScanStatus::Paused,
                         message: "scanning paused".into(),
                     });
                 }
                 ControlMsg::Resume => {
-                    let _ = pause_tx.send(false);
-                    let _ = status_tx.send_replace(ScanStatus::Running);
+                    pause_tx.send_replace(false);
+                    status_tx.send_replace(ScanStatus::Running);
                     emit_event(&sink, &ScanEvent::StatusChanged {
                         status: ScanStatus::Running,
                         message: "scanning resumed".into(),
@@ -358,45 +401,68 @@ async fn engine_task(
             }
         }
 
-        // Collect finished IP probes.
+        if *cancel_rx.borrow() {
+            user_cancelled = true;
+            break;
+        }
+
         while let Some(finished) = ip_tasks.try_join_next() {
             match finished {
-                Ok(outcome) => {
+                Ok(Some(outcome)) => {
                     let stop_on_found = strategy.stop_on_found();
-                    apply_probe_outcome(&mut strategy, &mut pending, outcome, &mut want_stop, stop_on_found);
-                    if want_stop {
+                    apply_probe_outcome(
+                        &mut strategy, &mut pending, outcome, &mut stop_on_first, stop_on_found,
+                    );
+                    if stop_on_first {
                         break;
                     }
                 }
                 Err(e) if !e.is_cancelled() => tracing::warn!("IP probe task failed: {e}"),
-                Err(_) => {}
+                _ => {}
             }
         }
-        if want_stop {
+        if stop_on_first {
             break;
         }
 
-        // Wait while paused (already running IP probes finish).
         if *pause_rx.borrow() {
             tokio::select! {
-                _ = pause_rx.changed() => {},
-                msg = control_rx.recv() => {
-                    if let Some(ControlMsg::Stop) = msg {
-                        want_stop = true;
-                        ip_tasks.abort_all();
-                        let _ = status_tx.send_replace(ScanStatus::Stopped);
+                biased;
+                _ = wait_for_cancel(&mut cancel_rx) => {
+                    user_cancelled = true;
+                    break;
+                }
+                changed = pause_rx.changed() => {
+                    if changed.is_err() {
+                        user_cancelled = true;
                         break;
+                    }
+                }
+                msg = control_rx.recv() => {
+                    match msg {
+                        Some(ControlMsg::Stop) | None => {
+                            user_cancelled = true;
+                            break;
+                        }
+                        Some(ControlMsg::Resume) => {
+                            pause_tx.send_replace(false);
+                            status_tx.send_replace(ScanStatus::Running);
+                            emit_event(&sink, &ScanEvent::StatusChanged {
+                                status: ScanStatus::Running,
+                                message: "scanning resumed".into(),
+                            });
+                        }
+                        Some(ControlMsg::Pause) => {}
                     }
                 }
             }
             continue;
         }
 
-        // Next item: register work first, then the strategy's probes.
         let item = match pending.pop_front() {
-            Some(i) => i,
+            Some(item) => item,
             None => match strategy.next_item() {
-                Some(i) => i,
+                Some(item) => item,
                 None => break,
             },
         };
@@ -404,17 +470,21 @@ async fn engine_task(
         match item {
             WorkItem::Probe { target, function, pdu } => {
                 if matches!(target.kind, TransportKind::Tcp | TransportKind::Udp) {
-                    // Respect the cap strictly: wait for a free slot before spawning.
-                    while ip_tasks.len() >= ip_concurrency && !want_stop {
-                        match ip_tasks.join_next().await {
-                            Some(Ok(outcome)) => {
+                    while ip_tasks.len() >= ip_concurrency {
+                        let finished = tokio::select! {
+                            biased;
+                            _ = wait_for_cancel(&mut cancel_rx) => {
+                                user_cancelled = true;
+                                break 'main;
+                            }
+                            outcome = ip_tasks.join_next() => outcome,
+                        };
+                        match finished {
+                            Some(Ok(Some(outcome))) => {
                                 let stop_on_found = strategy.stop_on_found();
                                 apply_probe_outcome(
-                                    &mut strategy,
-                                    &mut pending,
-                                    outcome,
-                                    &mut want_stop,
-                                    stop_on_found,
+                                    &mut strategy, &mut pending, outcome,
+                                    &mut stop_on_first, stop_on_found,
                                 );
                             }
                             Some(Err(e)) if !e.is_cancelled() => {
@@ -422,52 +492,74 @@ async fn engine_task(
                             }
                             _ => {}
                         }
+                        if stop_on_first {
+                            break 'main;
+                        }
                     }
-                    if want_stop {
+                    if *cancel_rx.borrow() {
+                        user_cancelled = true;
                         break;
                     }
 
-                    // Each IP probe owns its transport: safe to run concurrently.
                     let task_sink = sink.clone();
                     let task_results = results.clone();
                     let task_engine = engine.clone();
+                    let mut task_cancel = cancel_rx.clone();
                     ip_tasks.spawn(async move {
                         let mut unused_serial = None;
-                        execute_probe(
-                            &task_sink,
-                            &mut unused_serial,
-                            &target,
-                            function,
-                            &pdu,
-                            &task_results,
-                            task_engine,
-                        )
-                        .await
+                        tokio::select! {
+                            biased;
+                            _ = wait_for_cancel(&mut task_cancel) => None,
+                            outcome = execute_probe(
+                                &task_sink, &mut unused_serial, &target,
+                                function, &pdu, &task_results, task_engine,
+                            ) => Some(outcome),
+                        }
                     });
                 } else {
-                    // Serial probes must stay strictly sequential: one bus, one transport.
-                    ensure_serial_settings(&mut serial_transport, &mut serial_signature, &target).await;
-                    let outcome = execute_probe(
-                        &sink,
-                        &mut serial_transport,
-                        &target,
-                        function,
-                        &pdu,
-                        &results,
-                        engine.clone(),
-                    )
-                    .await;
+                    // Cancellation also interrupts serial port setup and blocking RX.
+                    let outcome = tokio::select! {
+                        biased;
+                        _ = wait_for_cancel(&mut cancel_rx) => {
+                            user_cancelled = true;
+                            break 'main;
+                        }
+                        value = async {
+                            ensure_serial_settings(
+                                &mut serial_transport, &mut serial_signature, &target,
+                            ).await;
+                            execute_probe(
+                                &sink, &mut serial_transport, &target,
+                                function, &pdu, &results, engine.clone(),
+                            ).await
+                        } => value,
+                    };
                     let stop_on_found = strategy.stop_on_found();
-                    apply_probe_outcome(&mut strategy, &mut pending, outcome, &mut want_stop, stop_on_found);
+                    apply_probe_outcome(
+                        &mut strategy, &mut pending, outcome, &mut stop_on_first, stop_on_found,
+                    );
                 }
                 done += 1;
                 emit_progress(&sink, *status_tx.borrow(), total, done, &results);
             }
             item @ WorkItem::RegisterRead { .. } => {
-                if let WorkItem::RegisterRead { target, .. } = &item {
-                    ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
-                }
-                let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine.clone()).await;
+                let outcome = tokio::select! {
+                    biased;
+                    _ = wait_for_cancel(&mut cancel_rx) => {
+                        user_cancelled = true;
+                        break 'main;
+                    }
+                    value = async {
+                        if let WorkItem::RegisterRead { target, .. } = &item {
+                            ensure_serial_settings(
+                                &mut serial_transport, &mut serial_signature, target,
+                            ).await;
+                        }
+                        execute_work(
+                            &sink, &item, &mut serial_transport, &results, engine.clone(),
+                        ).await
+                    } => value,
+                };
                 if let Some(outcome) = outcome {
                     for follow in strategy.on_register_read(&item, outcome) {
                         pending.push_back(follow);
@@ -478,52 +570,136 @@ async fn engine_task(
             }
         }
 
-        // Inter-request gap from ScanParams (applies to all work items).
+        // The user can stop immediately even during a long inter-request gap.
         if !request_gap.is_zero() {
-            tokio::time::sleep(request_gap).await;
-        }
-    }
-
-    // Wait for the remaining in-flight probes (already counted in `done`).
-    while let Some(finished) = ip_tasks.join_next().await {
-        if let Ok(outcome) = finished {
-            let stop_on_found = strategy.stop_on_found();
-            apply_probe_outcome(&mut strategy, &mut pending, outcome, &mut want_stop, stop_on_found);
-        }
-    }
-    // Execute any register work collected from the last probes.
-    while let Some(item) = pending.pop_front() {
-        if let WorkItem::RegisterRead { target, .. } = &item {
-            ensure_serial_settings(&mut serial_transport, &mut serial_signature, target).await;
-        }
-        let outcome = execute_work(&sink, &item, &mut serial_transport, &results, engine.clone()).await;
-        if let Some(outcome) = outcome {
-            for follow in strategy.on_register_read(&item, outcome) {
-                pending.push_back(follow);
+            tokio::select! {
+                biased;
+                _ = wait_for_cancel(&mut cancel_rx) => {
+                    user_cancelled = true;
+                    break;
+                }
+                _ = tokio::time::sleep(request_gap) => {}
             }
         }
     }
 
-    // Cleanup.
-    if let Some(mut t) = serial_transport.take() {
-        let _ = t.close().await;
+    if !user_cancelled {
+        // Normal exhaustion or stop-on-first: collect outstanding probes.
+        // For stop-on-first no further discovery probes should be sent.
+        if stop_on_first {
+            ip_tasks.abort_all();
+        }
+        while !ip_tasks.is_empty() {
+            let finished = tokio::select! {
+                biased;
+                _ = wait_for_cancel(&mut cancel_rx) => {
+                    user_cancelled = true;
+                    break;
+                }
+                outcome = ip_tasks.join_next() => outcome,
+            };
+            if let Some(Ok(Some(outcome))) = finished {
+                let stop_on_found = strategy.stop_on_found();
+                apply_probe_outcome(
+                    &mut strategy, &mut pending, outcome, &mut stop_on_first, stop_on_found,
+                );
+                if stop_on_first {
+                    ip_tasks.abort_all();
+                }
+            }
+        }
+
+        // Only automatic stop-on-first may complete its planned register reads.
+        // An explicit user Stop must never drain this queue.
+        while !user_cancelled {
+            let Some(item) = pending.pop_front() else { break };
+            let outcome = tokio::select! {
+                biased;
+                _ = wait_for_cancel(&mut cancel_rx) => {
+                    user_cancelled = true;
+                    break;
+                }
+                value = async {
+                    if let WorkItem::RegisterRead { target, .. } = &item {
+                        ensure_serial_settings(
+                            &mut serial_transport, &mut serial_signature, target,
+                        ).await;
+                    }
+                    execute_work(
+                        &sink, &item, &mut serial_transport, &results, engine.clone(),
+                    ).await
+                } => value,
+            };
+            if let Some(outcome) = outcome {
+                for follow in strategy.on_register_read(&item, outcome) {
+                    pending.push_back(follow);
+                }
+            }
+            done += 1;
+            emit_progress(&sink, *status_tx.borrow(), total, done, &results);
+            if !request_gap.is_zero() {
+                tokio::select! {
+                    biased;
+                    _ = wait_for_cancel(&mut cancel_rx) => {
+                        user_cancelled = true;
+                        break;
+                    }
+                    _ = tokio::time::sleep(request_gap) => {}
+                }
+            }
+        }
     }
 
-    let status = if want_stop { ScanStatus::Stopped } else { ScanStatus::Finished };
+    if user_cancelled {
+        status_tx.send_replace(ScanStatus::Stopping);
+        emit_event(&sink, &ScanEvent::StatusChanged {
+            status: ScanStatus::Stopping,
+            message: "cancelling in-flight requests and discarding queued reads".into(),
+        });
+        pending.clear();
+        ip_tasks.abort_all();
+        while ip_tasks.join_next().await.is_some() {}
+    }
+
+    // Drop transports and close the control receiver before the terminal
+    // watch update. A caller may restart immediately after wait_finished().
+    if let Some(mut transport) = serial_transport.take() {
+        let _ = transport.close().await;
+    }
+    control_rx.close();
+    user_cancelled |= *cancel_rx.borrow();
     {
-        let mut r = results.write();
-        r.stats.finished_ms = Some(now_ms());
+        let mut current = results.write();
+        current.stats.finished_ms = Some(now_ms());
     }
-    let _ = status_tx.send_replace(status);
-
-    let r = results.read();
+    let status = if user_cancelled || stop_on_first {
+        ScanStatus::Stopped
+    } else {
+        ScanStatus::Finished
+    };
+    // Publish terminal events before notifying wait_finished() and allowing
+    // restart. Otherwise an old scan's final event can overwrite the next
+    // scan's UI status after the previous status already looked terminal.
+    emit_event(&sink, &ScanEvent::StatusChanged {
+        status,
+        message: if user_cancelled {
+            "scan cancelled by user".into()
+        } else if stop_on_first {
+            "stopped after first device".into()
+        } else {
+            "scan completed".into()
+        },
+    });
+    emit_progress(&sink, status, total, done, &results);
+    let current = results.read();
     emit_event(&sink, &ScanEvent::Finished {
         total: done,
-        found: r.records.len() as u64,
-        errors: r.stats.timeouts + r.stats.transport_errors,
-        elapsed_ms: r.stats.elapsed_ms(),
+        found: current.records.len() as u64,
+        errors: current.stats.timeouts + current.stats.transport_errors,
+        elapsed_ms: current.stats.elapsed_ms(),
     });
-    let _ = status_tx;
+    drop(current);
+    status_tx.send_replace(status);
 }
 
 /// Schedule the register plan for a found device and honour `stop_on_first`.

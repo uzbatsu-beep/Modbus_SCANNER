@@ -29,7 +29,7 @@ export const useScannerStore = defineStore("scanner", {
   getters: {
     isRunning: (s) => s.status === "running" || s.status === "preparing",
     isPaused: (s) => s.status === "paused",
-    canStart: (s) => !["running", "preparing", "paused"].includes(s.status),
+    canStart: (s) => !["running", "preparing", "paused", "stopping"].includes(s.status),
   },
 
   actions: {
@@ -70,7 +70,8 @@ export const useScannerStore = defineStore("scanner", {
           this.logProbe(e.device_key, e.function, e.result);
           break;
         case "finished":
-          this.status = "finished";
+          // Terminal status comes from StatusChanged/scan:progress.
+          // Do not overwrite an explicitly stopped scan with "finished".
           this.addLog(
             "info",
             `finished: done=${e.total} found=${e.found} errors=${e.errors} in ${e.elapsed_ms}ms`
@@ -111,9 +112,17 @@ export const useScannerStore = defineStore("scanner", {
     },
 
     async start(target: Parameters<typeof api.scanner.start>[0], params: ScanParams) {
-      await api.scanner.start(target, params);
+      // Set the optimistic state *before* awaiting IPC. A very short scan may
+      // already finish by the time the start command returns.
+      const previous = this.status;
       this.status = "preparing";
-      this.addLog("info", "scan started");
+      try {
+        await api.scanner.start(target, params);
+        this.addLog("info", "scan started");
+      } catch (error) {
+        this.status = previous;
+        throw error;
+      }
     },
 
     async stop() {

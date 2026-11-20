@@ -3,4 +3,4 @@
 /**
  * Scan status for the UI.
  */
-export type ScanStatus = "idle" | "preparing" | "running" | "paused" | "stopped" | "finished" | "failed";
+export type ScanStatus = "idle" | "preparing" | "running" | "paused" | "stopping" | "stopped" | "finished" | "failed";
