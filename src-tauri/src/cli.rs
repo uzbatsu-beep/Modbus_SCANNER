@@ -111,8 +111,8 @@ pub struct ScanArgs {
     /// Exclude an IP or CIDR even within an allowed network (repeat flag)
     #[arg(long = "exclude-ip")]
     pub exclude_ips: Vec<String>,
-    /// OT Quiet Mode: globally at most 2 on-wire scan requests/sec,
-    /// including retries, register reads and FC43 identification.
+    /// OT Quiet Mode: pace TCP connection attempts and Modbus TX at <=2/s
+    /// with only one IP worker, including retries, reads and FC43.
     #[arg(long = "quiet-mode")]
     pub quiet_mode: bool,
     /// Stop after the first found device

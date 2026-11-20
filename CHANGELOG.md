@@ -12,7 +12,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added — PR #7 (OT Safety Policy, stacked on PR #6)
 - Fail-closed, explicit IP/CIDR allowlist and exclusion rules shared by GUI, CLI and REST scans; prevent hostname-based policy bypass.
-- Quiet Mode global scan TX pacing to 2 requests/sec, including retries, FC43 and register-map traffic across concurrent IP workers.
+- Quiet Mode global scan TX pacing to 2 requests/sec, including retries, FC43 and register-map traffic; TCP handshake attempts separately paced to 2/sec with effective IP concurrency 1.
 - REST/WS API refuses startup without `MODBUS_SCANNER_API_TOKEN` (24+ printable ASCII characters), authenticates every route and rejects cross-origin browser access.
 - RU/EN scan UI and CLI flags for OT policy; negative loopback tests for authorization, request pacing and API security.
 

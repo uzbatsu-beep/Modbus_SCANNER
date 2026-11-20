@@ -30,8 +30,9 @@ An empty list denies all IP scans before network I/O. `ip_exclusions`
 overrides allowlist entries (e.g. `["192.168.1.254"]`).
 DNS names are prohibited to prevent authorization bypass/rebinding;
 all non-excluded requested IPs must fall within the allowed scope.
-`quiet_mode: true` limits total outbound scanner transmissions to
-**2 req/sec** across concurrent IP workers, retries, FC43, and register reads.
+`quiet_mode: true` limits outbound scanner transmissions to
+**2 req/sec**, limits TCP connection attempts to **2/sec**, and forces
+IP concurrency to 1. Retries, FC43, and register reads all consume slots.
 It does not govern the separate manual/monitor subsystems, and it is not
 an emergency stop.
 
