@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
 use tokio_serial::{DataBits, Parity, SerialStream, StopBits};
 
-use crate::modbus::common::SerialMode;
+use crate::modbus::common::{ModbusError, SerialMode};
 
 use super::{Transport, TransportError, TransportResult};
 
@@ -185,6 +185,19 @@ async fn read_frame_from<R: AsyncRead + Unpin>(
             Ok(Ok(0)) => return Err(TransportError::Closed),
             Ok(Ok(n)) => {
                 rx_buf.extend_from_slice(&tmp[..n]);
+                // RTU ADU <= 256 bytes. ASCII carries up to 255 binary
+                // payload bytes as 510 hex chars plus ':' and CRLF (513).
+                // A noisy or unterminated bus must not grow RX indefinitely.
+                let limit = match mode {
+                    SerialMode::Rtu => 256,
+                    SerialMode::Ascii => 513,
+                };
+                if rx_buf.len() > limit {
+                    rx_buf.clear();
+                    return Err(TransportError::Modbus(ModbusError::InvalidFrame(
+                        format!("serial response exceeds {limit} bytes"),
+                    )));
+                }
                 if mode == SerialMode::Ascii && rx_buf.len() >= 5 && rx_buf.ends_with(b"\r\n") {
                     return Ok(std::mem::take(rx_buf));
                 }
