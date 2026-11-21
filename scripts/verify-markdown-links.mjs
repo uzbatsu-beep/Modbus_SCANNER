@@ -26,9 +26,9 @@ export function markdownFiles(root) {
   return files.sort();
 }
 
-export function brokenLocalLinks(root) {
+export function brokenLocalLinks(root, files = markdownFiles(root)) {
   const issues = [];
-  for (const file of markdownFiles(root)) {
+  for (const file of files) {
     // Code-fence examples must not count as navigation.
     const source = readFileSync(file, 'utf8').replace(/^(\s*)(`{3,}|~{3,})[^\n]*\n[\s\S]*?^\s*\2\s*$/gm, '');
     // Deliberately supports ordinary Markdown destinations, not full CommonMark grammar.
@@ -54,7 +54,7 @@ export function brokenLocalLinks(root) {
 export function checkDocs(root = DEFAULT_ROOT) {
   if (!existsSync(root) || !statSync(root).isDirectory()) throw new Error('repo root missing');
   const files = markdownFiles(root);
-  const issues = brokenLocalLinks(root);
+  const issues = brokenLocalLinks(root, files);
   return { count: files.length, issues };
 }
 
