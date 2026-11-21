@@ -117,3 +117,14 @@ The project is at MVP stage; no security contact is defined yet. Open an issue w
 reproduction steps and affected version.
 Проект находится на стадии MVP; контакт для безопасности пока не назначен.
 Создайте issue с шагами воспроизведения и затронутой версией.
+
+## Review items for the next hardening PR (2026-11-21)
+
+- **CSP:** `src-tauri/tauri.conf.json` currently sets `app.security.csp` to `null`. Review actual WebView resource requirements, local/remote content and Tauri capability permissions before selecting and testing a restrictive CSP; this is a finding, not proof of compromise.
+- **API exposure:** the optional local REST/WS endpoint requires a strong Bearer token and loopback binding; do not add network exposure, permissive origins or an unauthenticated proxy without a dedicated threat model and tests.
+- **OT operations:** maintain default-deny IP authorization, Quiet Mode, read-only discovery and separate manual write handling. Offline CI and installer QA do not establish physical safety.
+- **Release:** only a source-SHA-bound, hardware-verified bench PASS permits manual v1.0.1 publication. Follow [release gates](RELEASE_GATES.md), [field matrix](FIELD_VALIDATION_v1.0.1.md) and [audit](AUDIT_2026-11-21.md).
+
+## Запланированные проверки безопасности
+
+Оценить CSP для Tauri WebView, сохранить авторизацию API, не ослаблять ограничения на IP и ручные записи. Не считать тесты симулятора подтверждением безопасности реального оборудования. Перед релизом требуются [стендовые испытания](FIELD_VALIDATION_v1.0.1.md) и [ручные условия публикации](RELEASE_GATES.ru.md).
