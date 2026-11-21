@@ -187,3 +187,7 @@ advantage and alignment with good practice.
 18. https://github.com/black-a85/ModbusTool
 19. https://craftparking.github.io/ModbusLens/
 20. https://github.com/casalifrancesco98/modbus-map-maker
+
+## Research freshness and implementation disclaimer (2026-11-21)
+
+This is a **dated market scan**, not a continuously updated benchmark. Pricing, licensing, feature matrices and vendor availability may have changed since 2026-11-18; re-check primary sources before a commercial or architectural decision. An item mentioned as a competitor feature, proposal or community request is **not** proof it has been implemented in Modbus Scanner. For actual project scope use [ROADMAP](ROADMAP.md), [source-backed audit](AUDIT_2026-11-21.md) and [INDEX](INDEX.md).
