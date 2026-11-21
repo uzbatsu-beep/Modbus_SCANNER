@@ -21,6 +21,8 @@ jobs:
         run: node --test scripts/verify-release-gates.test.mjs
       - name: Verify all package/Cargo/Tauri versions
         run: node scripts/check-release-version.mjs
+      - name: Check Markdown cross-references and link-checker tests
+        run: npm run docs:check
       - name: Verify importable ruleset JSON parses and has expected targets
         run: |
           node --input-type=module -e "
