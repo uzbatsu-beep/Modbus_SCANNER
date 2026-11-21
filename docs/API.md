@@ -369,3 +369,10 @@ await api.scanner.start(
     register_plan: [], ip_concurrency: 32 }
 );
 ```
+
+## Interface stability and security checklist (2026-11-21)
+
+- Tauri commands use the typed bridge; after Rust DTO changes run `npm run gen:types` and confirm `src/types/generated/` is committed. CI detects drift.
+- The optional REST/WebSocket server binds to loopback and requires `MODBUS_SCANNER_API_TOKEN` (at least 24 printable ASCII characters); origin and Bearer checks apply as described in [SECURITY](SECURITY.md). Do **not** expose it directly on a plant network.
+- Separate read-only discovery and manual write operations: operator authorization and isolated bench testing remain mandatory even when an API call succeeds.
+- For source-of-truth boundaries and current release state, see [INDEX](INDEX.md) and [audit](AUDIT_2026-11-21.md).
