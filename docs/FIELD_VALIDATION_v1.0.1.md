@@ -113,3 +113,9 @@ Do not include actual production passwords or sensitive network diagrams.
 - **No-go:** any unexpected write, incorrect MBAP parsing, RTU timeout on valid frame, arithmetic overflow, or false device detection.
 
 **Do not create a v1.0.1 release tag before the Go criteria are met.**
+
+## Evidence contract / Формат подтверждения для ручного релиза
+
+The physical acceptance record is a **repository GitHub Issue** (not a PR), written for the **exact 40-character SHA of the final `main` commit** being released. Use `.github/ISSUE_TEMPLATE/release_bench_acceptance.md` introduced by PR #10. Record `Source SHA`, `Bench result: PASS`, tested hardware model/firmware, transport, test summary, date, engineer, logs and relevant observations. Do not replace real results with template placeholders; a false PASS is unacceptable.
+
+Протокол — отдельный **Issue данного репозитория** на **точный SHA итогового коммита `main`**. Заполнить модель/прошивку устройства, режим RTU/ASCII/TCP, проводку RS-485, результаты функций и исключений, Stop, Quiet Mode, ручную запись, лог и SHA256 установщиков. Пока физический стенд не проверен, оставлять **PENDING / NO-GO** независимо от успешного CI или Windows QA. См. [RELEASE_GATES.ru.md](RELEASE_GATES.ru.md) и [аудит](AUDIT_2026-11-21.md).
