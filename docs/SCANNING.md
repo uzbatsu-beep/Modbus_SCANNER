@@ -208,3 +208,11 @@ are consistently recommended in field guides and will be implemented in v0.2:
 `scan:progress` carries `{status, total, done, found, current, errors, elapsed_ms}`.
 `scan:event` carries status changes, device found/updated, and a final summary.
 See [API.md](API.md) for the full schema.
+
+## Authorized-scanning operator checklist (2026-11-21)
+
+1. Obtain the device/network owner's consent and define the exact target IP/CIDR or serial slave range.
+2. For network scans configure an explicit nonempty allowlist, then exclusions; IP targets must be **literal addresses**, not hostnames. Default-deny is deliberate.
+3. Prefer Quiet Mode and conservative timeouts on OT networks; avoid active discovery on a production cell until impact is understood.
+4. Observe lifecycle cancellation and record responses, exceptions and timeouts. Do not interpret no response as proof that an address is unused.
+5. Use an **isolated bench** to exercise release-critical scenarios and manual writes. References: [SECURITY](SECURITY.md), [FIELD_VALIDATION](FIELD_VALIDATION_v1.0.1.md), [current audit](AUDIT_2026-11-21.md).
