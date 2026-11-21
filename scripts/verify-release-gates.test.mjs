@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { validateEvidence, REQUIRED_CHECKS } from "./verify-release-gates.mjs";
 
 const SHA = "a".repeat(40);
@@ -10,9 +11,11 @@ const branch = {
   rules: [
     { type: "deletion" }, { type: "non_fast_forward" },
     { type: "pull_request", parameters: {
-      required_approving_review_count: 1,
-      dismiss_stale_reviews_on_push: true,
-      require_last_push_approval: true,
+      required_approving_review_count: 0,
+      dismiss_stale_reviews_on_push: false,
+      require_code_owner_review: false,
+      require_last_push_approval: false,
+      require_extra_approval_for_unattributed_changes: false,
       required_review_thread_resolution: true,
     } },
     { type: "required_status_checks", parameters: {
@@ -33,6 +36,10 @@ function fixture() {
     sourceSha: SHA, checkoutSha: SHA, mainSha: SHA,
     benchPassed: true,
     benchUrl: "https://github.com/uzbatsu-beep/Modbus_SCANNER/issues/42",
+    benchEvidence: { number: 42,
+      html_url: "https://github.com/uzbatsu-beep/Modbus_SCANNER/issues/42",
+      body: "Source SHA: " + SHA + "\nBench result: PASS\nHardware: test drive\nTransport: Modbus RTU\nTest summary: verified FC03 and timeout\n",
+      pull_request: undefined },
     ciRuns: [{ head_sha: SHA, head_branch: "main", event: "push",
       status: "completed", conclusion: "success",
       path: ".github/workflows/ci.yml" }],
@@ -55,6 +62,12 @@ test("correct release evidence passes every gate", () => {
 const cases = [
   ["refusing unapproved hardware", (f) => { f.benchPassed = false; }, /bench/],
   ["refusing missing evidence", (f) => { f.benchUrl = ""; }, /bench/],
+  ["refusing missing Issue", (f) => { f.benchEvidence = undefined; }, /bench/],
+  ["refusing a PR posing as bench Issue", (f) => { f.benchEvidence.pull_request = {}; }, /bench/],
+  ["refusing wrong bench SHA", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace(SHA, "b".repeat(40)); }, /bench/],
+  ["refusing failed bench result", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace("Bench result: PASS", "Bench result: FAIL"); }, /bench/],
+  ["refusing an empty bench protocol", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace("Hardware: test drive", "Hardware: "); }, /bench/],
+  ["refusing bench placeholders", (f) => { f.benchEvidence.body = f.benchEvidence.body.replace("Hardware: test drive", "Hardware: REPLACE_WITH_DEVICE"); }, /bench/],
   ["refusing external fake report", (f) => { f.benchUrl = "https://evil.example/issues/1"; }, /bench/],
   ["refusing wrong source checkout", (f) => { f.checkoutSha = "b".repeat(40); }, /identical/],
   ["refusing old main", (f) => { f.mainSha = "b".repeat(40); }, /identical/],
@@ -74,10 +87,21 @@ const cases = [
   ["refusing missing rulesets", (f) => { f.rulesets = []; }, /ruleset/],
   ["refusing inactive branch rules", (f) => { f.rulesets[0] = {
     ...f.rulesets[0], enforcement: "disabled" }; }, /ruleset/],
-  ["refusing no independent approval", (f) => { f.rulesets[0] = {
+  ["refusing a mandatory second-person review", (f) => { f.rulesets[0] = {
     ...f.rulesets[0], rules: f.rulesets[0].rules.map((r) =>
       r.type === "pull_request" ? { ...r, parameters: {
-        ...r.parameters, required_approving_review_count: 0 } } : r) }; }, /approval/],
+        ...r.parameters, required_approving_review_count: 1 } } : r) }; }, /approval/],
+  ["refusing last-push approval requirement", (f) => { f.rulesets[0] = {
+    ...f.rulesets[0], rules: f.rulesets[0].rules.map((r) =>
+      r.type === "pull_request" ? { ...r, parameters: {
+        ...r.parameters, require_last_push_approval: true } } : r) }; }, /approval/],
+  ["refusing codeowner approval requirement", (f) => { f.rulesets[0] = {
+    ...f.rulesets[0], rules: f.rulesets[0].rules.map((r) =>
+      r.type === "pull_request" ? { ...r, parameters: {
+        ...r.parameters, require_code_owner_review: true } } : r) }; }, /approval/],
+  ["refusing no pull-request rule", (f) => { f.rulesets[0] = {
+    ...f.rulesets[0], rules: f.rulesets[0].rules.filter((r) =>
+      r.type !== "pull_request") }; }, /approval/],
   ["refusing missing required check", (f) => { f.rulesets[0] = {
     ...f.rulesets[0], rules: f.rulesets[0].rules.map((r) =>
       r.type === "required_status_checks" ? { ...r, parameters: {
@@ -94,3 +118,40 @@ for (const [name, mutate, expected] of cases) {
     assert.throws(() => validateEvidence(value), expected);
   });
 }
+
+
+test("repository main Ruleset template requires PR but no second-person reviewer", () => {
+  const rule = JSON.parse(readFileSync(new URL("../.github/rulesets/main.json", import.meta.url), "utf8"));
+  assert.equal(rule.target, "branch");
+  assert.equal(rule.enforcement, "active");
+  assert.deepEqual(rule.bypass_actors, []);
+  const pr = rule.rules.find((r) => r.type === "pull_request");
+  assert.equal(pr.parameters.required_approving_review_count, 0);
+  assert.equal(pr.parameters.require_last_push_approval, false);
+  assert.equal(pr.parameters.require_code_owner_review, false);
+  assert.equal(pr.parameters.required_review_thread_resolution, true);
+  const checks = rule.rules.find((r) => r.type === "required_status_checks");
+  assert.equal(checks.parameters.strict_required_status_checks_policy, true);
+  assert.ok(REQUIRED_CHECKS.every((c) =>
+    checks.parameters.required_status_checks.some((k) => k.context === c)));
+  for (const type of ["deletion", "non_fast_forward"]) {
+    assert.ok(rule.rules.some((r) => r.type === type));
+  }
+});
+
+test("repository tag Ruleset template protects tag updates and deletion", () => {
+  const rule = JSON.parse(readFileSync(new URL("../.github/rulesets/release-tags.json", import.meta.url), "utf8"));
+  assert.equal(rule.target, "tag");
+  assert.equal(rule.enforcement, "active");
+  assert.deepEqual(rule.bypass_actors, []);
+  for (const type of ["deletion", "update", "non_fast_forward"]) {
+    assert.ok(rule.rules.some((r) => r.type === type));
+  }
+});
+
+test("physical bench Issue template records every attestation field", () => {
+  const template = readFileSync(new URL("../.github/ISSUE_TEMPLATE/release_bench_acceptance.md", import.meta.url), "utf8");
+  for (const marker of ["Source SHA:", "Bench result: PENDING", "Hardware:", "Transport:", "Test summary:"]) {
+    assert.ok(template.includes(marker), marker);
+  }
+});

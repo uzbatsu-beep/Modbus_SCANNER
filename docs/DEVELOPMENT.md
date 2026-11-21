@@ -161,20 +161,19 @@ Both QA and official release builds verify version manifest consistency.
 The official release is **manual, gated, and fails closed**. Do **not**
 publish by pushing a `v*` tag: this event no longer triggers a Release.
 
-1. Prepare all matching version manifests and `CHANGELOG.md` in an approved
-   PR, merge it to `main`, and wait for successful CI + Windows QA on the
-   **exact merged main SHA**.
-2. Complete isolated physical hardware acceptance and attach the signed-off
-   evidence to a repository GitHub Issue.
-3. Confirm active branch and tag Rulesets, and a `production-release`
-   environment with independent required reviewers, prevent self-review,
-   main-only deployment and `OT_RELEASE_APPROVAL_GATE` environment secret.
-4. Manually run **Release (manual, protected)** on `main` with tag, QA run ID,
-   bench PASS flag and GitHub issue URL. The preflight verifies version,
-   main SHA, 5 CI checks, QA artifact, rulesets and evidence; the Windows
-   builder packages EXE/MSI with SHA256 and build metadata.
-5. An independent GitHub reviewer approves the `production-release` job.
-   Only then can GitHub Release and its new tag be created.
+1. Change and merge version manifests and `CHANGELOG.md` through a PR after
+   all five CI checks pass (no second-person review required).
+2. Confirm Windows QA completed successfully on the **exact final main SHA**.
+3. Run isolated physical Modbus hardware acceptance and record the result in
+   a repository Issue using `.github/ISSUE_TEMPLATE/release_bench_acceptance.md`.
+   It must contain the exact `Source SHA`, `Bench result: PASS`, real hardware,
+   transport settings and test summary.
+4. Keep active main + tag Rulesets, with mandatory PR, strict CI, **zero**
+   required approvals, and no last-push or code-owner approval requirement.
+5. Manually dispatch **Release (manual, verified)** on `main` with tag, QA ID,
+   bench PASS flag and Issue URL. The workflow verifies all evidence against
+   the GitHub API, builds MSI+EXE and SHA256, rechecks before publishing.
+   No extra Environment reviewers or approval secret is needed.
 
 See [release governance (EN)](RELEASE_GATES.md) and
 [release governance (RU)](RELEASE_GATES.ru.md) for detailed activation
@@ -183,3 +182,9 @@ instructions. A committed ruleset JSON is not an active GitHub setting.
 Local equivalent: `npm run tauri build`; artifacts are in
 `src-tauri/target/release/bundle/{msi,nsis}/`. The Windows target requires
 WebView2 Runtime on the end user's machine.
+
+## Documentation and release-state verification (2026-11-21)
+
+Run `npm run docs:check` before submitting a PR. The check runs dependency-free Node tests and verifies local Markdown destinations; it does not test external URLs or heading anchors. Update the paired RU/EN pages for any public behavior change, and add navigational references to [INDEX](INDEX.md).
+
+CI verifies the project without physical OT hardware; Windows QA installs are non-release artifacts. Preserve the exact source SHA and follow [RELEASE_GATES](RELEASE_GATES.md) and [field validation](FIELD_VALIDATION_v1.0.1.md) before publishing. The live Ruleset currently differs from the PR #10 proposed JSON; [dated audit](AUDIT_2026-11-21.md).

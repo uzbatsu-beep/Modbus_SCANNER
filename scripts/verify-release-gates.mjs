@@ -38,7 +38,7 @@ function activeRule(rulesets, target, ref, type) {
 
 export function validateEvidence({
   repo, tag, version, sourceSha, checkoutSha, mainSha, benchPassed, benchUrl,
-  ciRuns, qaRun, qaJobs, qaArtifacts, rulesets, tagAlreadyExists = false,
+  ciRuns, qaRun, qaJobs, qaArtifacts, rulesets, benchEvidence, tagAlreadyExists = false,
   releaseAlreadyExists = false,
 }) {
   requireGate(repo === "uzbatsu-beep/Modbus_SCANNER", "unexpected repository");
@@ -48,23 +48,38 @@ export function validateEvidence({
   requireGate(sourceSha === checkoutSha && sourceSha === mainSha,
     "checkout, workflow commit and current main must be identical");
   requireGate(benchPassed === true, "isolated bench acceptance was not approved");
-  requireGate(typeof benchUrl === "string" &&
-    benchUrl.startsWith("https://github.com/" + repo + "/issues/") &&
-    /^https:\/\/github\.com\/[^\s]+\/issues\/\d+(?:#issuecomment-\d+)?$/.test(benchUrl),
-    "bench evidence must link to a repository GitHub issue or comment");
+  const benchMatch = typeof benchUrl === "string" &&
+    benchUrl.match(/^https:\/\/github\.com\/uzbatsu-beep\/Modbus_SCANNER\/issues\/([1-9]\d*)$/);
+  requireGate(benchMatch, "bench evidence must link to a repository GitHub Issue");
+  requireGate(benchEvidence && !benchEvidence.pull_request &&
+    benchEvidence.html_url === benchUrl &&
+    benchEvidence.number === Number(benchMatch[1]),
+    "bench evidence Issue was not found or is not a standalone issue");
+  const body = String(benchEvidence.body ?? "");
+  requireGate(new RegExp("^Source SHA:\\s*" + sourceSha + "\\s*$", "im").test(body) &&
+    /^Bench result:\s*PASS\s*$/im.test(body),
+    "bench Issue must contain exact Source SHA and Bench result: PASS");
+  requireGate(!/REPLACE_WITH_/i.test(body), "bench Issue contains unfilled template placeholders");
+  for (const label of ["Hardware", "Transport", "Test summary"]) {
+    requireGate(new RegExp("^" + label + ":[ \\t]*\\S[^\\r\\n]*$", "im").test(body),
+      "bench Issue is missing required field: " + label);
+  }
   requireGate(!tagAlreadyExists && !releaseAlreadyExists,
     "release tag or release already exists: do not overwrite");
 
   const pr = activeRule(rulesets, "branch", "refs/heads/main", "pull_request");
-  requireGate(pr && pr.parameters?.required_approving_review_count >= 1 &&
-    pr.parameters?.dismiss_stale_reviews_on_push === true &&
-    pr.parameters?.require_last_push_approval === true,
-    "main ruleset must enforce independent PR approval and review on latest push");
+  // Solo maintainer: PRs and strict CI remain mandatory, but no other human
+  // can be required to approve a maintainer-authored PR or release.
+  requireGate(pr && pr.parameters?.required_approving_review_count === 0 &&
+    pr.parameters?.require_last_push_approval === false &&
+    pr.parameters?.require_code_owner_review !== true &&
+    pr.parameters?.required_review_thread_resolution === true,
+    "main ruleset must require PR without mandatory second-person approval");
   const status = activeRule(rulesets, "branch", "refs/heads/main", "required_status_checks");
   const contexts = (status?.parameters?.required_status_checks ?? []).map((x) => x.context);
   requireGate(status?.parameters?.strict_required_status_checks_policy === true &&
     REQUIRED_CHECKS.every((check) => contexts.includes(check)),
-    "main ruleset must require all 4 strict CI jobs");
+    "main ruleset must require all 5 strict CI jobs");
   for (const ruleType of ["deletion", "non_fast_forward"]) {
     requireGate(activeRule(rulesets, "branch", "refs/heads/main", ruleType),
       "main ruleset must block " + ruleType);
@@ -121,7 +136,9 @@ async function main() {
   requireGate(/^\d+$/.test(qaRunId) && Number(qaRunId) > 0, "invalid QA run ID");
   const version = JSON.parse(readFileSync("package.json", "utf8")).version;
   const checkoutSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-  const [mainRef, ci, qaRun, qa, qaArtifacts, list, tagRef, release] = await Promise.all([
+  const benchMatch = benchUrl.match(/^https:\/\/github\.com\/uzbatsu-beep\/Modbus_SCANNER\/issues\/([1-9]\d*)$/);
+  requireGate(benchMatch, "bench evidence URL must be a repository GitHub Issue");
+  const [mainRef, ci, qaRun, qa, qaArtifacts, list, tagRef, release, benchEvidence] = await Promise.all([
     githubApi(repo, "git/ref/heads/main"),
     githubApi(repo, "actions/workflows/ci.yml/runs?head_sha=" + sourceSha +
       "&branch=main&event=push&status=success&per_page=100"),
@@ -131,6 +148,7 @@ async function main() {
     githubApi(repo, "rulesets?includes_parents=true&per_page=100"),
     githubApi(repo, "git/ref/tags/" + encodeURIComponent(tag), { allowNotFound: true }),
     githubApi(repo, "releases/tags/" + encodeURIComponent(tag), { allowNotFound: true }),
+    githubApi(repo, "issues/" + benchMatch[1]),
   ]);
   const active = (list ?? []).filter((r) => r.enforcement === "active");
   const rulesets = await Promise.all(active.map((r) => githubApi(repo, "rulesets/" + r.id)));
@@ -138,10 +156,10 @@ async function main() {
     repo, tag, version, sourceSha, checkoutSha, mainSha: mainRef.object.sha,
     benchPassed: process.env.BENCH_PASSED === "true", benchUrl,
     ciRuns: ci.workflow_runs, qaRun, qaJobs: qa.jobs, qaArtifacts: qaArtifacts.artifacts,
-    rulesets, tagAlreadyExists: !!tagRef, releaseAlreadyExists: !!release,
+    rulesets, benchEvidence, tagAlreadyExists: !!tagRef, releaseAlreadyExists: !!release,
   });
   console.log("Release preflight PASS: all 5 CI checks, exact SHA QA, active rulesets, " +
-    "bench evidence and immutable tag requirements verified.");
+    "same-SHA PASS bench Issue and immutable tag requirements verified.");
   console.log(JSON.stringify(result, null, 2));
 }
 

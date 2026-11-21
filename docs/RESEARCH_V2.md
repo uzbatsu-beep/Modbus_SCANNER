@@ -196,3 +196,7 @@ exemption.
 12. https://www.mdpi.com/2624-800X/6/2/52
 13. https://www.rtautomation.com/rtas-blog/securing-modbus-networks/
 14. https://v2.tauri.app/develop/plugins/
+
+## Design-decision gate and freshness (2026-11-21)
+
+All v2.0 gateway, plugin, cloud or web-companion descriptions in this document are **research proposals**, not released capabilities. Before implementation, validate each candidate's current release, licensing, security maintenance, OT-network exposure and testability against the GPL-3.0-only application. Do not introduce an internet-facing API as an implicit consequence of a research proposal. See [SECURITY](SECURITY.md), [ROADMAP](ROADMAP.md), [audit](AUDIT_2026-11-21.md).

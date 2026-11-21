@@ -45,3 +45,14 @@ By contributing you agree that your contributions are licensed under
 [GNU GPL v3.0](LICENSE).
 
 Отправляя изменения, вы соглашаетесь с лицензией [GNU GPL v3.0](LICENSE).
+
+## Documentation and OT acceptance / Документация и приёмка
+
+- Update paired EN/RU reference pages when changing behavior, API, UI, transport or safety; navigate via [INDEX](docs/INDEX.md).
+- Run `npm run docs:check` to test the Markdown checker and verify **local** paths. This does not verify anchors, external links or technical accuracy.
+- Every PR must pass existing CI checks. Windows QA artifacts are **not releases** and do not replace real-device field validation.
+- Never infer current Ruleset requirements from JSON in Git alone; check the active GitHub settings and [dated audit](docs/AUDIT_2026-11-21.md).
+
+- Обновляйте русскую и английскую документацию вместе с изменениями кода.
+- Перед PR выполняйте `npm run docs:check`; проверка не заменяет техническую экспертизу.
+- Не используйте тестовые установщики Windows как доказательство успешных стендовых испытаний.

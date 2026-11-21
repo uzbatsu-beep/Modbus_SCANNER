@@ -1,5 +1,8 @@
 # Development plan
 
+> **Historical milestone plan (2026-11-18):** v0.2 → v1.0. It is retained for design rationale, not as the current backlog. The project now has published v1.0.0 and an unreleased v1.0.1 candidate. For live priorities use [ROADMAP](ROADMAP.md), [audit](AUDIT_2026-11-21.md) and [docs index](INDEX.md).
+
+
 [Русская версия](PLAN.ru.md) · [Research](RESEARCH.md) · [Current status](ROADMAP.md)
 
 **Date:** 2026-11-18 · **Horizon:** four releases (v0.2 → v1.0) ·

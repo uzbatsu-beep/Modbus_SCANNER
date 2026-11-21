@@ -151,3 +151,10 @@ and [PLAN](docs/PLAN.md).
 
 [GNU GPL v3.0](LICENSE) — free software, copyleft. See [LICENSE](LICENSE) for the
 full text.
+
+## Release vs development status (2026-11-21)
+
+- **Published:** [v1.0.0](https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v1.0.0). The checked-in `1.0.1` manifests describe an **unreleased** candidate, not a downloadable approved v1.0.1.
+- **Automation:** tests and Windows QA verify code and installer generation, **not physical RS-485 operation**. Follow [field acceptance](docs/FIELD_VALIDATION_v1.0.1.md) before any new production release.
+- **Governance:** the live `main` Ruleset currently requires one independent review, while [PR #10](https://github.com/uzbatsu-beep/Modbus_SCANNER/pull/10) proposes a zero-review solo-maintainer policy. The JSON template alone does not change GitHub Settings.
+- For documentation by topic, risks and evidence, see [documentation index](docs/INDEX.md), [current audit](docs/AUDIT_2026-11-21.md) and [manual release gates](docs/RELEASE_GATES.md).

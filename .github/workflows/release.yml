@@ -1,4 +1,4 @@
-name: Release (manual, protected)
+name: Release (manual, verified)
 
 # Deliberately NO push.tags trigger: creating a tag alone must NEVER publish.
 on:
@@ -18,13 +18,14 @@ on:
         default: false
         type: boolean
       bench_evidence_url:
-        description: 'GitHub issue with signed-off physical bench evidence'
+        description: 'Repository issue with source SHA and Bench result: PASS'
         required: true
         type: string
 
 permissions:
   contents: read
   actions: read
+  issues: read
 
 concurrency:
   group: release-${{ inputs.tag }}
@@ -46,7 +47,7 @@ jobs:
         run: node scripts/check-release-version.mjs
       - name: Verify release-gate implementation tests
         run: node --test scripts/verify-release-gates.test.mjs
-      - name: Verify main SHA, active Rulesets, 5 CI checks, QA and evidence
+      - name: Verify main SHA, active Rulesets, 5 CI checks, QA and bench Issue
         run: node scripts/verify-release-gates.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -121,18 +122,15 @@ jobs:
           retention-days: 30
 
   publish:
-    name: Publish (independent environment approval)
+    name: Publish (manual release with verified gates)
     needs: [preflight, build-windows]
     runs-on: ubuntu-latest
-    # Configure Required Reviewers, prevent self-review and restricted
-    # deployment branches in Settings > Environments. The environment
-    # secret is an additional fail-closed provisioning check.
-    environment:
-      name: production-release
-      url: ${{ github.server_url }}/${{ github.repository }}/releases
+    # No second-person Environment approval: the maintainer manually starts
+    # workflow_dispatch. Re-run all gates before creating a new release.
     permissions:
       contents: write
       actions: read
+      issues: read
     steps:
       - uses: actions/checkout@v4
         with:
@@ -141,16 +139,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Enforce provisioned approval environment
-        shell: bash
-        env:
-          APPROVAL_GATE: ${{ secrets.OT_RELEASE_APPROVAL_GATE }}
-        run: |
-          if [[ -z "$APPROVAL_GATE" ]]; then
-            echo "::error::production-release environment secret is missing; publication disabled"
-            exit 1
-          fi
-      - name: Recheck gates after environment approval and build
+      - name: Recheck gates immediately before publishing
         run: node scripts/verify-release-gates.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -183,7 +172,7 @@ jobs:
             Source commit: ${{ github.sha }}
             Windows QA run: ${{ inputs.qa_run_id }}
             Bench acceptance: ${{ inputs.bench_evidence_url }}
-            Approved via protected GitHub environment: production-release
+            Published by manual workflow_dispatch after CI, QA and bench sign-off gates.
           files: |
             release-dist/*.exe
             release-dist/*.msi
