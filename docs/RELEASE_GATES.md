@@ -118,3 +118,7 @@ preflight deliberately refuses publication.
 A manual PASS and issue log do not constitute IEC 62443 certification or
 guarantee that every industrial device behaves identically. Validate with
 the relevant hardware, gateways, firmware and operational safety procedures.
+
+## Live settings verification — 2026-11-21
+
+**Important distinction:** this page describes the **proposed PR #10 policy**. As read from GitHub on 2026-11-21, the *active* main Ruleset `27728708` still has `required_approving_review_count = 1` and `require_last_push_approval = true`; the `v*` tag Ruleset `27728718` is active. Do not report solo-maintainer merging as enabled until GitHub Settings is edited and verified. No hardware PASS evidence was established in this audit. See [dated facts](AUDIT_2026-11-21.md) and [documentation index](INDEX.md).
