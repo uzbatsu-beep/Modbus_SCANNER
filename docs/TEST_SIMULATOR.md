@@ -63,3 +63,9 @@ The loopback simulator does not validate USB–RS485 drivers, timing on real
 buses, LRC/CRC errors caused by electrical noise, or device-specific
 register maps. For hardware acceptance, follow
 [FIELD_VALIDATION_v1.0.1.md](FIELD_VALIDATION_v1.0.1.md).
+
+## Reproducibility and physical coverage gap (2026-11-21)
+
+Run `cd src-tauri && cargo test --lib scanner::field_tests -- --nocapture` for the deterministic TCP loopback matrix; include the command, OS, revision and test output when investigating regressions. For CLI/GUI changes, also run lifecycle and protocol tests and Windows QA on the exact candidate SHA. Simulated TCP validates framing and error handling, **not** USB/RS-485 drivers, cable termination, serial inter-frame gaps or real plant safety. Physical release acceptance remains [separate](FIELD_VALIDATION_v1.0.1.md). [Documentation index](INDEX.md).
+
+**RU:** Локальный TCP-симулятор не заменяет RS-485 и реальную работу устройств. Фиксируйте SHA и отчёт теста; стендовый PASS оформляется отдельно.
