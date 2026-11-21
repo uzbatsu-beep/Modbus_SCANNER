@@ -284,3 +284,7 @@ TCP MBAP: 00 01 00 00 00 06 01 03 00 00 00 0A
 ```
 
 These vectors are covered by unit tests in `rtu.rs`, `ascii.rs` and `frame.rs`.
+
+## Implementation and validation boundary (2026-11-21)
+
+Protocol reference describes intended and implemented frame behavior, but a successful loopback unit test does not establish real serial turnaround timing, termination, grounding or electromagnetic compatibility. For RTU/ASCII test evidence use [simulator scope](TEST_SIMULATOR.md) and [physical bench matrix](FIELD_VALIDATION_v1.0.1.md). **Discovery sends only read functions; manual FC05/06/10 writes must not be folded into automatic discovery.** See [OT security](SECURITY.md), [current audit](AUDIT_2026-11-21.md).

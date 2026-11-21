@@ -182,3 +182,9 @@ instructions. A committed ruleset JSON is not an active GitHub setting.
 Local equivalent: `npm run tauri build`; artifacts are in
 `src-tauri/target/release/bundle/{msi,nsis}/`. The Windows target requires
 WebView2 Runtime on the end user's machine.
+
+## Documentation and release-state verification (2026-11-21)
+
+Run `npm run docs:check` before submitting a PR. The check runs dependency-free Node tests and verifies local Markdown destinations; it does not test external URLs or heading anchors. Update the paired RU/EN pages for any public behavior change, and add navigational references to [INDEX](INDEX.md).
+
+CI verifies the project without physical OT hardware; Windows QA installs are non-release artifacts. Preserve the exact source SHA and follow [RELEASE_GATES](RELEASE_GATES.md) and [field validation](FIELD_VALIDATION_v1.0.1.md) before publishing. The live Ruleset currently differs from the PR #10 proposed JSON; [dated audit](AUDIT_2026-11-21.md).

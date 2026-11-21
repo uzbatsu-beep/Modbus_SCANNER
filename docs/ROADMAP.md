@@ -196,3 +196,9 @@ discovery, explicit user action, no telemetry, own protocol stack, EN/RU docs
 in the same PR. KPI: zero discovery writes, <5 min unknown-baud discovery,
 zero false devices on open ports, ≥80% protocol test coverage, green CI on
 3 OS, installers ≤10 MB.
+
+## 12. Release governance and audit checkpoint — 2026-11-21
+
+**Shipped:** v1.0.0 only. **Candidate:** v1.0.1; PR #10 is open and proposes solo-maintainer release gates. **Active GitHub setting:** `main` still requires one independent review (Ruleset `27728708`), even though the PR #10 JSON template proposes zero. Documentation-only PR #11 is stacked on PR #10; merging it does not constitute equipment acceptance.
+
+**Next P0 gates:** update the *live* Ruleset without weakening the five CI checks, validate the exact merged `main` SHA with Windows QA, collect physical bench PASS evidence, then manually publish only after the release preflight passes. **Do not equate merged code, CI status, QA installer and GitHub Release.** See [dated audit](AUDIT_2026-11-21.md), [release policy](RELEASE_GATES.ru.md) and [navigation](INDEX.md).

@@ -1,5 +1,8 @@
 # Аудит проекта / Project audit
 
+> **Historical evidence / Исторический снимок.** This file records earlier Git observations (2026-11-19/20). Commit IDs, protections and CI outcomes here are not live status. For 2026-11-21 facts see [current audit](AUDIT_2026-11-21.md); documentation navigation is in [INDEX](INDEX.md). Do not rewrite the historical observations as if freshly reverified.
+
+
 **Дата:** 2026-11-19 · **Область:** git, версии, CI/CD, надёжность, оптимизация,
 документация и прозрачность · **Статус:** auditors' findings + применённые исправления.
 

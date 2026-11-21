@@ -163,3 +163,9 @@ A future CLI can pass `EventSink::null()` or its own emitter — no engine chang
 - `src-tauri/capabilities/default.json` — Tauri 2 capability set (core:default,
   shell:allow-open).
 - `src-tauri/build.rs` — `tauri_build::build()` (generates resource/script).
+
+## Architecture review boundary (2026-11-21)
+
+The current execution path is Rust protocol/transport → scanner engine and safety checks → Tauri commands or opt-in loopback API → Vue/Pinia UI. Transport abstractions must preserve timeout, cancellation and read-only discovery invariants. The historical `Planned modules (v0.2+)` section below reflects the design **at the time it was written**, not an authoritative implementation tracker; use [ROADMAP](ROADMAP.md) and source/test evidence instead.
+
+Security review follow-up: `src-tauri/tauri.conf.json` currently has `app.security.csp: null`. Assess a restrictive CSP together with Tauri capabilities and actual WebView assets in a separate tested change. This note is not a claim of a demonstrated exploit. See [SECURITY](SECURITY.md), [audit](AUDIT_2026-11-21.md).

@@ -19,7 +19,8 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "typecheck": "vue-tsc --noEmit",
-    "gen:types": "cd src-tauri && cargo run --bin gen_bindings"
+    "gen:types": "cd src-tauri && cargo run --bin gen_bindings",
+    "docs:check": "node --test scripts/verify-markdown-links.test.mjs && node scripts/verify-markdown-links.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.5",

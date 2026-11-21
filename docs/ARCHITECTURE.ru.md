@@ -161,3 +161,9 @@ pub trait Transport: Send {
 - `src-tauri/tauri.conf.json` — frontend dist `../dist`, окно, бандл, иконки.
 - `src-tauri/capabilities/default.json` — права Tauri 2 (core:default, shell:allow-open).
 - `src-tauri/build.rs` — `tauri_build::build()`.
+
+## Границы актуальности архитектуры (21.11.2026)
+
+Фактический тракт: Modbus-протокол и транспорт на Rust → движок сканирования с проверками безопасности → команды Tauri или опциональный API на loopback → интерфейс Vue/Pinia. При изменениях важно сохранить инварианты тайм-аутов, отмены и read-only обнаружения. Раздел `Планируемые модули (v0.2+)` ниже — **исторический проектный план**, а не актуальный перечень реализованных функций. Источник статуса — [ROADMAP](ROADMAP.md), код и тесты.
+
+Отдельный пункт анализа безопасности: в `src-tauri/tauri.conf.json` сейчас `app.security.csp: null`. Подбор ограничивающей CSP требует анализа Tauri capabilities и ресурсов WebView с последующими тестами. Само по себе наблюдение не доказывает наличие эксплуатируемой уязвимости. См. [SECURITY](SECURITY.md), [аудит](AUDIT_2026-11-21.md).

@@ -46,3 +46,10 @@ responses, device-specific register maps, or process safety.
 Only after field acceptance and explicit approval should the team create the
 `v1.0.1` tag. The tag-triggered `release.yml` is separate and publishes
 the official GitHub Release. Never use the QA artifact as an official release.
+
+## Traceability checklist (2026-11-21)
+
+- For QA artifacts record run URL, full source commit SHA, version, EXE/MSI filenames, sizes, SHA256SUMS and BUILD-INFO.
+- Verify installers on an **isolated Windows test machine**. A green GitHub workflow is not equivalent to successful installation or field testing.
+- The release preflight requires an explicitly identified successful QA run of the **exact final `main` SHA**, plus five CI checks and physical bench acceptance. A PR-branch QA run cannot substitute for final-main QA.
+- Follow [manual release policy](RELEASE_GATES.md), [field matrix](FIELD_VALIDATION_v1.0.1.md) and [dated audit](AUDIT_2026-11-21.md). Publication must remain manual.
