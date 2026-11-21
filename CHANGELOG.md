@@ -154,3 +154,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 [1.0.0]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v1.0.0
 [0.1.1]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.1
 [0.1.0]: https://github.com/uzbatsu-beep/Modbus_SCANNER/releases/tag/v0.1.0
+
+## Release status convention / Как читать версии
+
+**Unreleased** entries describe work prepared in development branches or merged toward the next release; they are **not proof of published binaries**. The [latest published release](https://github.com/uzbatsu-beep/Modbus_SCANNER/releases) is the authoritative source of downloadable versions. As observed on 2026-11-21, v1.0.0 is public, `1.0.1` remains in source manifests, and PR #10 is still open. See [current audit](docs/AUDIT_2026-11-21.md).
+
+Раздел **Unreleased** не означает публикацию установщика или подтверждённую приёмку на оборудовании. Для этого проверяются GitHub Releases, конкретный SHA, CI, QA и отдельный протокол физического стенда.
