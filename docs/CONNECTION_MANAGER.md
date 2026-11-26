@@ -21,3 +21,6 @@ Staged merge of isolated 17.A approved and completed; 17.B/17.C are separate PRs
 
 
 B.1 merged in PR #18; B.2 is PR #19. [Integration contract](FUNCTIONAL_INTEGRATION.md) tracks intermediate scope and remaining requirements.
+
+
+PR #21 C.1 adds shared lease and idle-cache foundation. See [SHARED_CONNECTION_RUNTIME](SHARED_CONNECTION_RUNTIME.md); existing direct serial paths and production shared-lease migration remain pending C.2/C.3.

@@ -17,6 +17,10 @@ use super::udp::UdpTransport;
 use super::timing::{micros, TransactionTiming};
 use super::{Transport, TransportError, TransportResult};
 
+mod lifecycle;
+pub use lifecycle::{ConnectionLease, IDLE_TCP, IDLE_SERIAL, IDLE_CACHE_LIMIT};
+use lifecycle::{LeaseState, RecoveryBook};
+
 pub const QUEUE_CAPACITY: usize = 128;
 pub const MANUAL_RESERVE: usize = 8;
 const NORMAL_CAPACITY: usize = QUEUE_CAPACITY - MANUAL_RESERVE;
@@ -252,18 +256,21 @@ struct Entry {
     stop: watch::Sender<bool>,
     state: Arc<parking_lot::Mutex<ConnectionRuntimeState>>,
     task: Mutex<Option<JoinHandle<()>>>,
+    lifecycle: parking_lot::Mutex<LeaseState>,
 }
 
 pub struct ConnectionManager {
     entries: parking_lot::Mutex<HashMap<String,Arc<Entry>>>,
     factory: Arc<dyn TransportFactory>,
     exclusive: Arc<parking_lot::Mutex<HashSet<String>>>,
+    recovery: Arc<RecoveryBook>,
+    reaper_started: AtomicBool,
 }
 impl Default for ConnectionManager {fn default()->Self{Self::new()}}
 impl ConnectionManager {
     pub fn new()->Self{Self::with_factory(Arc::new(NativeFactory))}
     pub fn with_factory(factory:Arc<dyn TransportFactory>)->Self{
-        Self{entries:parking_lot::Mutex::new(HashMap::new()),factory,exclusive:Arc::new(parking_lot::Mutex::new(HashSet::new()))}
+        Self{entries:parking_lot::Mutex::new(HashMap::new()),factory,exclusive:Arc::new(parking_lot::Mutex::new(HashSet::new())),recovery:Arc::new(RecoveryBook::default()),reaper_started:AtomicBool::new(false)}
     }
 
     /// Register one lazy worker. Opening occurs on its first request.
@@ -274,6 +281,11 @@ impl ConnectionManager {
         let mut entries=self.entries.lock();
         if entries.contains_key(&definition.id) {return Err(invalid("connection id already registered"));}
         if entries.values().any(|e|e.resource==resource) || self.exclusive.lock().contains(&resource) {return Err(invalid("physical resource already owned"));}
+        self.insert_entry(&mut entries,definition,resource,LeaseState::explicit(),&runtime);
+        Ok(())
+    }
+
+    fn insert_entry(&self,entries:&mut HashMap<String,Arc<Entry>>,definition:ConnectionDefinition,resource:String,lifecycle:LeaseState,runtime:&tokio::runtime::Handle)->Arc<Entry>{
         let (tx,rx)=mpsc::channel(QUEUE_CAPACITY);
         let (stop,stop_rx)=watch::channel(false);
         let state=Arc::new(parking_lot::Mutex::new(ConnectionRuntimeState{
@@ -282,9 +294,11 @@ impl ConnectionManager {
         }));
         let slots=Arc::new(Semaphore::new(QUEUE_CAPACITY));
         let regular=Arc::new(Semaphore::new(NORMAL_CAPACITY));
-        let task=runtime.spawn(worker(definition.clone(),self.factory.clone(),state.clone(),rx,stop_rx));
-        entries.insert(definition.id.clone(),Arc::new(Entry{definition,resource,tx,slots,regular,stop,state,task:Mutex::new(Some(task))}));
-        Ok(())
+        let task=runtime.spawn(worker(definition.clone(),self.factory.clone(),state.clone(),rx,stop_rx,resource.clone(),self.recovery.clone()));
+        let id=definition.id.clone();
+        let entry=Arc::new(Entry{definition,resource,tx,slots,regular,stop,state,task:Mutex::new(Some(task)),lifecycle:parking_lot::Mutex::new(lifecycle)});
+        entries.insert(id,entry.clone());
+        entry
     }
 
     /// Exclusive lease for discovery which must change serial framing.
@@ -343,11 +357,15 @@ impl ConnectionManager {
 
     /// Validator executes inside the worker before another transaction can start.
     pub async fn transact_scoped(&self,id:&str,request:TransactionRequest,scope:Arc<OperationScope>,validator:Option<ResponseValidator>)->TransportResult<TransactionOutcome>{
+        let entry=self.entry(id)?;
+        if entry.lifecycle.lock().automatic{return Err(invalid("automatic connection requires an acquired lease"));}
+        self.transact_entry(entry,request,scope,validator).await
+    }
+    async fn transact_entry(&self,entry:Arc<Entry>,request:TransactionRequest,scope:Arc<OperationScope>,validator:Option<ResponseValidator>)->TransportResult<TransactionOutcome>{
         if request.adu.is_empty() || request.adu.len()>513 || request.response_timeout.is_zero()
             || request.response_timeout>MAX_OPERATION || request.expected_hint>1024 {
             return Err(invalid("invalid transaction bounds"));
         }
-        let entry=self.entry(id)?;
         if *entry.stop.borrow()||scope.is_cancelled(){return Err(TransportError::Cancelled);}
         let reject=||{entry.state.lock().queue_rejected+=1;invalid("connection queue full")};
         let regular=if matches!(request.priority,Priority::High){None}else{Some(entry.regular.clone().try_acquire_owned().map_err(|_|reject())?)};
@@ -376,7 +394,13 @@ impl ConnectionManager {
     /// including when a caller cancels its disconnect future.
     pub async fn disconnect(&self,id:&str)->TransportResult<()>{
         let entry=self.entry(id)?;
+        self.disconnect_entry(entry).await
+    }
+    async fn disconnect_entry(&self,entry:Arc<Entry>)->TransportResult<()>{
+        // Pointer identity prevents an old cleanup task from deleting a newer
+        // worker even if an explicit connection ID was reused.
         entry.stop.send_replace(true);
+        let id=&entry.definition.id;
         let mut task=entry.task.lock().await;
         let joined=if let Some(handle)=task.as_mut(){handle.await.map_err(|e|TransportError::Other(e.to_string()))}else{Ok(())};
         task.take();
@@ -456,6 +480,7 @@ fn cancelled(job:Job){
 async fn worker(
     definition:ConnectionDefinition,factory:Arc<dyn TransportFactory>,
     state:Arc<parking_lot::Mutex<ConnectionRuntimeState>>,mut rx:mpsc::Receiver<Job>,mut stop:watch::Receiver<bool>,
+    resource:String,recovery_book:Arc<RecoveryBook>,
 ){
     let mut transport:Option<Box<dyn Transport>>=None;
     let mut pending=FairQueue::default();
@@ -487,7 +512,8 @@ async fn worker(
                 if faulted&&!definition.policy.auto_reconnect {
                     return Err(invalid("connection faulted; disconnect and register again"));
                 }
-                if let Some(until)=retry_after{
+                let until=retry_after.into_iter().chain(recovery_book.deadline(&resource)).max();
+                if let Some(until)=until{
                     set_status(&state,ConnectionStatus::RetryWait);
                     tokio::select!{biased;
                         _=stop.changed()=>return Err(TransportError::Cancelled),
@@ -543,7 +569,9 @@ async fn worker(
                 close(&mut transport).await;
                 faulted=true;
                 let recovery=if timing.tx_us.is_some()||timing.tx_complete||timing.failure_stage.as_deref()==Some("operation_deadline"){recovery_pause(&definition,request.response_timeout)}else{Duration::ZERO};
-                retry_after=Some(tokio::time::Instant::now()+backoff.max(recovery));
+                let until=tokio::time::Instant::now()+backoff.max(recovery);
+                if !recovery.is_zero(){recovery_book.record(&resource,until);}
+                retry_after=Some(until);
                 backoff=(backoff*2).min(MAX_BACKOFF);
                 let mut s=state.lock();
                 s.status=ConnectionStatus::Faulted;s.last_error=Some(e.to_string());
