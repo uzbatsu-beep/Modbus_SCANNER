@@ -7,7 +7,7 @@ New module transport/connection.rs: serial/TCP/UDP definitions, lazy registry, n
 
 Tests: duplicate resource rejection, serial framing independence, priority fairness/FIFO, Persistent/OnDemand, reconnect without replay, queue capacity, disconnect, abandoned queued caller, disabled reconnect, independent endpoint, and native TCP loopback socket reuse across two Unit IDs. CI must compile and execute tests on Windows, Linux and macOS.
 
-## Phase 17.B — pending
+## Phase 17.B — PR #18 (in progress)
 Route existing operations through common ownership; exclusive serial autodiscovery; explicit cancellation and late frame handling; unify framing and TLS configuration; retain per-operation validation and existing safety policy; independent per-resource polling; queue metrics, logs and offline loopback integration. Real physical topology remains explicit, not guessed.
 
 ## Phase 17.C — pending
@@ -15,3 +15,6 @@ Persist connection definitions, generated IPC, editor and lifecycle controls in 
 
 ## RU
 Утверждены вариант B, Persistent TCP, автоматическое переподключение, очередь 128, приоритеты без голодания, три этапа и исправления UI. На 17.A менеджер изолирован от существующих вызовов; подключение сканера, мониторинга, ручного режима и UI выполняется на 17.B/17.C. Автоматические тесты не заменяют стендовые. Не сливать незавершённый PR.
+
+
+Staged merge of isolated 17.A approved and completed; 17.B/17.C are separate PRs. See [FUNCTIONAL_INTEGRATION](FUNCTIONAL_INTEGRATION.md) for the new approved parameters. The earlier full-PR merge restriction is superseded only for 17.A.

@@ -11,3 +11,7 @@ Persistent vs OnDemand are lifetime modes, reconnect is separate. Reconnect on s
 17.A: transport-independent worker, native transport factory, definitions/runtime state, tests. 17.B: integrate all callers including scanner/monitor/manual/serial test, CLI/API, exclusive serial discovery lease, framing/validation, per-connection metrics and Logger, independent polling, shared authorization. 17.C: IPC, saved definitions and Workbench UI, localization cleanup, complete end-to-end regression tests. Do not claim integration until 17.B and 17.C are verified.
 
 Tradeoff: no request pipelining, adaptive polling, full workspace migration, background probing or automatic retransmission. Explicit topology for gateways and electrical timing remain separate. Existing direct transport paths are unchanged in 17.A, so ownership is not yet application-wide. See [CONNECTION_MANAGER](../CONNECTION_MANAGER.md).
+
+
+## Amendment: staged merge and 17.B
+Maintainer approved merge of 17.A alone and separate PRs #18 (17.B) and #19 (17.C). PR #18 contract: [FUNCTIONAL_INTEGRATION](../FUNCTIONAL_INTEGRATION.md). No merge of #18 until all B stages verified and authorized.

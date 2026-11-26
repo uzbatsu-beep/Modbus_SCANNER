@@ -1,6 +1,7 @@
 //! PR #17.A: bounded, single-owner connection workers.
 //! No caller integration in this phase. Existing authorization and codecs remain caller responsibilities.
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -17,6 +18,8 @@ use super::timing::{micros, TransactionTiming};
 use super::{Transport, TransportError, TransportResult};
 
 pub const QUEUE_CAPACITY: usize = 128;
+pub const MANUAL_RESERVE: usize = 8;
+const NORMAL_CAPACITY: usize = QUEUE_CAPACITY - MANUAL_RESERVE;
 const INITIAL_BACKOFF: Duration = Duration::from_millis(500);
 const MAX_BACKOFF: Duration = Duration::from_secs(5);
 const MAX_OPERATION: Duration = Duration::from_secs(60);
@@ -37,10 +40,13 @@ pub enum ConnectionMode { Persistent, OnDemand }
 pub struct ConnectionPolicy {
     pub mode: ConnectionMode,
     pub auto_reconnect: bool,
+    /// None: derive from timeout and framing. Some: minimum additional quiet time.
+    #[serde(default)]
+    pub recovery_ms: Option<u32>,
 }
 impl Default for ConnectionPolicy {
     fn default() -> Self {
-        Self { mode: ConnectionMode::Persistent, auto_reconnect: true }
+        Self { mode: ConnectionMode::Persistent, auto_reconnect: true, recovery_ms: None }
     }
 }
 
@@ -62,6 +68,7 @@ pub struct ConnectionRuntimeState {
     pub queue_depth: usize,
     pub active_requests: usize,
     pub reconnect_count: u64,
+    pub queue_rejected: u64,
     pub last_error: Option<String>,
 }
 
@@ -82,6 +89,8 @@ pub struct TransactionOutcome {
     pub result: TransportResult<Vec<u8>>,
     pub timing: TransactionTiming,
     pub queue_wait_us: u64,
+    /// Complete ADU rejected by the validator; retain it for traffic diagnostics.
+    pub rejected_response: Option<Vec<u8>>,
 }
 
 fn invalid(message: &str) -> TransportError { TransportError::Other(message.into()) }
@@ -116,7 +125,8 @@ fn serial_key(port: &str) -> TransportResult<String> {
 }
 
 impl ConnectionDefinition {
-    fn resource_key(&self) -> TransportResult<String> {
+    pub fn resource_key(&self) -> TransportResult<String> {
+        if self.policy.recovery_ms.is_some_and(|ms|ms>60_000){return Err(invalid("recovery pause exceeds 60 seconds"));}
         if self.id.trim().is_empty() || self.name.trim().is_empty() {
             return Err(invalid("connection id and name required"));
         }
@@ -163,11 +173,52 @@ impl TransportFactory for NativeFactory {
     }
 }
 
+/// One tool operation (scan, monitor session or manual command).
+/// Stop closes admission atomically with dispatch, then waits only for its own active jobs.
+pub struct OperationScope {
+    cancelled: watch::Sender<bool>,
+    active: watch::Sender<usize>,
+    gate: parking_lot::Mutex<()>,
+}
+impl Default for OperationScope {
+    fn default()->Self{Self{cancelled:watch::channel(false).0,active:watch::channel(0).0,gate:parking_lot::Mutex::new(())}}
+}
+impl OperationScope {
+    pub fn is_cancelled(&self)->bool{*self.cancelled.borrow()}
+    pub fn cancel(&self){let _guard=self.gate.lock();self.cancelled.send_replace(true);}
+    pub async fn stop(&self){
+        self.cancel();
+        let mut active=self.active.subscribe();
+        while *active.borrow_and_update()!=0 {if active.changed().await.is_err(){break;}}
+    }
+    fn begin(self:&Arc<Self>,started:&AtomicBool)->Option<ActiveScope>{
+        let _guard=self.gate.lock();
+        if self.is_cancelled(){return None;}
+        started.store(true,Ordering::Release);
+        let count=*self.active.borrow();
+        self.active.send_replace(count+1);
+        Some(ActiveScope(self.clone()))
+    }
+}
+struct ActiveScope(Arc<OperationScope>);
+impl Drop for ActiveScope{
+    fn drop(&mut self){
+        let _guard=self.0.gate.lock();
+        let count=*self.0.active.borrow();
+        self.0.active.send_replace(count.saturating_sub(1));
+    }
+}
+pub type ResponseValidator = Box<dyn Fn(&[u8])->TransportResult<()> + Send + Sync>;
+
 struct Job {
     request: TransactionRequest,
     queued: Instant,
     reply: oneshot::Sender<TransactionOutcome>,
     _slot: OwnedSemaphorePermit,
+    _regular: Option<OwnedSemaphorePermit>,
+    scope: Arc<OperationScope>,
+    started: Arc<AtomicBool>,
+    validator: Option<ResponseValidator>,
 }
 
 // Weighted round robin; FIFO within each class. Empty classes are skipped.
@@ -197,6 +248,7 @@ struct Entry {
     resource: String,
     tx: mpsc::Sender<Job>,
     slots: Arc<Semaphore>,
+    regular: Arc<Semaphore>,
     stop: watch::Sender<bool>,
     state: Arc<parking_lot::Mutex<ConnectionRuntimeState>>,
     task: Mutex<Option<JoinHandle<()>>>,
@@ -205,12 +257,13 @@ struct Entry {
 pub struct ConnectionManager {
     entries: parking_lot::Mutex<HashMap<String,Arc<Entry>>>,
     factory: Arc<dyn TransportFactory>,
+    exclusive: parking_lot::Mutex<HashSet<String>>,
 }
 impl Default for ConnectionManager {fn default()->Self{Self::new()}}
 impl ConnectionManager {
     pub fn new()->Self{Self::with_factory(Arc::new(NativeFactory))}
     pub fn with_factory(factory:Arc<dyn TransportFactory>)->Self{
-        Self{entries:parking_lot::Mutex::new(HashMap::new()),factory}
+        Self{entries:parking_lot::Mutex::new(HashMap::new()),factory,exclusive:parking_lot::Mutex::new(HashSet::new())}
     }
 
     /// Register one lazy worker. Opening occurs on its first request.
@@ -220,17 +273,30 @@ impl ConnectionManager {
         let resource=definition.resource_key()?;
         let mut entries=self.entries.lock();
         if entries.contains_key(&definition.id) {return Err(invalid("connection id already registered"));}
-        if entries.values().any(|e|e.resource==resource) {return Err(invalid("physical resource already owned"));}
+        if entries.values().any(|e|e.resource==resource) || self.exclusive.lock().contains(&resource) {return Err(invalid("physical resource already owned"));}
         let (tx,rx)=mpsc::channel(QUEUE_CAPACITY);
         let (stop,stop_rx)=watch::channel(false);
         let state=Arc::new(parking_lot::Mutex::new(ConnectionRuntimeState{
             connection_id:definition.id.clone(),status:ConnectionStatus::Disconnected,
-            queue_depth:0,active_requests:0,reconnect_count:0,last_error:None,
+            queue_depth:0,active_requests:0,reconnect_count:0,queue_rejected:0,last_error:None,
         }));
         let slots=Arc::new(Semaphore::new(QUEUE_CAPACITY));
+        let regular=Arc::new(Semaphore::new(NORMAL_CAPACITY));
         let task=runtime.spawn(worker(definition.clone(),self.factory.clone(),state.clone(),rx,stop_rx));
-        entries.insert(definition.id.clone(),Arc::new(Entry{definition,resource,tx,slots,stop,state,task:Mutex::new(Some(task))}));
+        entries.insert(definition.id.clone(),Arc::new(Entry{definition,resource,tx,slots,regular,stop,state,task:Mutex::new(Some(task))}));
         Ok(())
+    }
+
+    /// Exclusive lease for discovery which must change serial framing.
+    /// No registered worker can own this port until the lease is dropped.
+    pub fn lease_serial(&self,port:&str)->TransportResult<SerialLease<'_>>{
+        let resource=serial_key(port)?;
+        let entries=self.entries.lock();
+        let mut exclusive=self.exclusive.lock();
+        if entries.values().any(|e|e.resource==resource)||!exclusive.insert(resource.clone()){
+            return Err(invalid("physical resource already owned"));
+        }
+        Ok(SerialLease{manager:self,resource})
     }
 
     fn entry(&self,id:&str)->TransportResult<Arc<Entry>>{
@@ -256,17 +322,38 @@ impl ConnectionManager {
     /// Dropping the caller future cancels a queued job; an active operation is
     /// allowed to finish within its bound, never replayed.
     pub async fn transact(&self,id:&str,request:TransactionRequest)->TransportResult<TransactionOutcome>{
+        self.transact_scoped(id,request,Arc::new(OperationScope::default()),None).await
+    }
+
+    /// Validator executes inside the worker before another transaction can start.
+    pub async fn transact_scoped(&self,id:&str,request:TransactionRequest,scope:Arc<OperationScope>,validator:Option<ResponseValidator>)->TransportResult<TransactionOutcome>{
         if request.adu.is_empty() || request.adu.len()>513 || request.response_timeout.is_zero()
             || request.response_timeout>MAX_OPERATION || request.expected_hint>1024 {
             return Err(invalid("invalid transaction bounds"));
         }
         let entry=self.entry(id)?;
-        if *entry.stop.borrow(){return Err(TransportError::Cancelled);}
-        let slot=entry.slots.clone().try_acquire_owned().map_err(|_|invalid("connection queue full"))?;
-        let (reply,rx)=oneshot::channel();
-        entry.tx.try_send(Job{request,queued:Instant::now(),reply,_slot:slot})
-            .map_err(|e|match e {mpsc::error::TrySendError::Full(_)=>invalid("connection queue full"),mpsc::error::TrySendError::Closed(_)=>TransportError::Cancelled})?;
-        rx.await.map_err(|_|TransportError::Cancelled)
+        if *entry.stop.borrow()||scope.is_cancelled(){return Err(TransportError::Cancelled);}
+        let reject=||{entry.state.lock().queue_rejected+=1;invalid("connection queue full")};
+        let regular=if matches!(request.priority,Priority::High){None}else{Some(entry.regular.clone().try_acquire_owned().map_err(|_|reject())?)};
+        let slot=entry.slots.clone().try_acquire_owned().map_err(|_|reject())?;
+        let (reply,mut rx)=oneshot::channel();
+        let started=Arc::new(AtomicBool::new(false));
+        let mut cancel=scope.cancelled.subscribe();
+        {
+            let _guard=scope.gate.lock();
+            if scope.is_cancelled(){return Err(TransportError::Cancelled);}
+            entry.tx.try_send(Job{request,queued:Instant::now(),reply,_slot:slot,_regular:regular,scope:scope.clone(),started:started.clone(),validator})
+                .map_err(|e|match e {mpsc::error::TrySendError::Full(_)=>reject(),mpsc::error::TrySendError::Closed(_)=>TransportError::Cancelled})?;
+        }
+        tokio::select!{biased;
+            result=&mut rx=>result.map_err(|_|TransportError::Cancelled),
+            // Drop the watch::Ref inside the future; select must not retain
+            // its read guard across the await of an active transaction.
+            _=async {let _=cancel.wait_for(|v|*v).await;}=>{
+                if started.load(Ordering::Acquire){rx.await.map_err(|_|TransportError::Cancelled)}
+                else{Err(TransportError::Cancelled)}
+            }
+        }
     }
 
     /// Stop outside the queue. Keep the lease until the worker has exited,
@@ -283,6 +370,9 @@ impl ConnectionManager {
     }
 }
 
+pub struct SerialLease<'a>{manager:&'a ConnectionManager,resource:String}
+impl Drop for SerialLease<'_>{fn drop(&mut self){self.manager.exclusive.lock().remove(&self.resource);}}
+
 impl Drop for ConnectionManager {
     fn drop(&mut self){
         for e in self.entries.get_mut().values(){e.stop.send_replace(true);}
@@ -296,8 +386,23 @@ async fn close(transport:&mut Option<Box<dyn Transport>>){
     if let Some(mut t)=transport.take(){let _=tokio::time::timeout(CLOSE_TIMEOUT,t.close()).await;}
 }
 
+/// Recovery interval for formats without transaction IDs. A finite quiet time
+/// reduces, but cannot eliminate, ambiguity from arbitrarily late slave replies.
+fn recovery_pause(definition:&ConnectionDefinition,timeout:Duration)->Duration{
+    let gap=match &definition.transport{
+        TransportConfig::Serial{config,mode}=>{
+            let gap=if *mode==SerialMode::Rtu{super::serial::required_rtu_gap(config.baud_rate,config.data_bits,config.parity,config.stop_bits)}else{Duration::from_millis(2)};
+            gap.max(config.frame_gap)
+        },
+        TransportConfig::Tcp(config) if config.framing==TcpFraming::Rtu=>Duration::from_millis(2),
+        TransportConfig::Udp{mbap:false,..}=>Duration::from_millis(2),
+        _=>return Duration::ZERO,
+    };
+    let configured=definition.policy.recovery_ms.map(|ms|Duration::from_millis(u64::from(ms))).unwrap_or(timeout);
+    configured.max(gap)
+}
 fn cancelled(job:Job){
-    let _=job.reply.send(TransactionOutcome{result:Err(TransportError::Cancelled),timing:TransactionTiming::default(),queue_wait_us:micros(job.queued)});
+    let _=job.reply.send(TransactionOutcome{result:Err(TransportError::Cancelled),timing:TransactionTiming::default(),queue_wait_us:micros(job.queued),rejected_response:None});
 }
 
 async fn worker(
@@ -321,12 +426,14 @@ async fn worker(
             }
         };
         if *stop.borrow(){cancelled(job);break;}
-        let Job{request,queued,mut reply,_slot}=job;
+        let Job{request,queued,mut reply,_slot,_regular,scope,started,validator}=job;
         if reply.is_closed(){continue;}
-        drop(_slot);
+        let Some(_active)=scope.begin(&started) else {let _=reply.send(TransactionOutcome{result:Err(TransportError::Cancelled),timing:TransactionTiming::default(),queue_wait_us:micros(queued),rejected_response:None});continue;};
+        drop(_slot);drop(_regular);
         let queue_wait_us=micros(queued);
         state.lock().active_requests=1;
         let mut timing=TransactionTiming::default();
+        let mut rejected_response=None;
         let result=async{
             if transport.is_none(){
                 if faulted&&!definition.policy.auto_reconnect {
@@ -337,10 +444,11 @@ async fn worker(
                     tokio::select!{biased;
                         _=stop.changed()=>return Err(TransportError::Cancelled),
                         _=reply.closed()=>return Err(TransportError::Cancelled),
+                        _=async {let mut signal=scope.cancelled.subscribe();let _=signal.wait_for(|v|*v).await;}=>return Err(TransportError::Cancelled),
                         _=tokio::time::sleep_until(until)=>{}
                     }
                 }
-                if *stop.borrow() || reply.is_closed(){return Err(TransportError::Cancelled);}
+                if *stop.borrow() || reply.is_closed() || scope.is_cancelled(){return Err(TransportError::Cancelled);}
                 set_status(&state,ConnectionStatus::Connecting);
                 let start=Instant::now();
                 let opened=tokio::time::timeout(MAX_OPEN,factory.open(&definition.transport)).await;
@@ -356,12 +464,21 @@ async fn worker(
                 s.status=ConnectionStatus::Connected;
                 s.last_error=None;
             }
-            if *stop.borrow() || reply.is_closed(){return Err(TransportError::Cancelled);}
+            if *stop.borrow() || reply.is_closed() || scope.is_cancelled(){return Err(TransportError::Cancelled);}
             let t=transport.as_mut().ok_or(TransportError::Closed)?;
             // Bound reset/TX as well as RX; the existing response timeout still applies.
             let budget=request.response_timeout.saturating_add(Duration::from_secs(2));
             match tokio::time::timeout(budget,t.transact_measured(&request.adu,request.response_timeout,request.expected_hint,&mut timing)).await{
-                Ok(result)=>result,
+                Ok(result)=>{
+                    let bytes=result?;
+                    if let Some(validate)=validator{
+                        let start=Instant::now();
+                        let checked=validate(&bytes);
+                        timing.validation_us=Some(micros(start));
+                        if let Err(error)=checked{timing.failure_stage=Some("validation".into());rejected_response=Some(bytes);return Err(error);}
+                    }
+                    Ok(bytes)
+                },
                 Err(_)=>{timing.failure_stage=Some("operation_deadline".into());Err(TransportError::Timeout(budget))}
             }
         }.await;
@@ -377,14 +494,15 @@ async fn worker(
             Err(e)=>{
                 close(&mut transport).await;
                 faulted=true;
-                retry_after=Some(tokio::time::Instant::now()+backoff);
+                let recovery=if timing.tx_us.is_some()||timing.tx_complete||timing.failure_stage.as_deref()==Some("operation_deadline"){recovery_pause(&definition,request.response_timeout)}else{Duration::ZERO};
+                retry_after=Some(tokio::time::Instant::now()+backoff.max(recovery));
                 backoff=(backoff*2).min(MAX_BACKOFF);
                 let mut s=state.lock();
                 s.status=ConnectionStatus::Faulted;s.last_error=Some(e.to_string());
             }
         }
         state.lock().active_requests=0;
-        let _=reply.send(TransactionOutcome{result,timing,queue_wait_us});
+        let _=reply.send(TransactionOutcome{result,timing,queue_wait_us,rejected_response});
     }
     set_status(&state,ConnectionStatus::Disconnecting);
     rx.close();
