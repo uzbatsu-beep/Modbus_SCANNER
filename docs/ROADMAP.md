@@ -29,21 +29,23 @@ Prototype: correct data, reliable communication, distinctive engineering workflo
 | #17 | 17.A Connection Core | R20 | merged, isolated worker core |
 | #18 | 17.B.1 Communication Service | R20/R03 | merged, validated service foundation |
 | #19 | 17.B.2 Scanner & Manual Integration | R20/R03 | in progress; [contract](FUNCTIONAL_INTEGRATION.md) |
-| #20 | 17.C Connection Manager UI | UI-03/R20 | editor, persistence, selectors and lifecycle controls |
-| #21 | Project Explorer & Workspace Manager | UI-03/UI-04, R08/R19/R25 | stable objects and independent session tabs |
-| #22 | Extended Data Types | R05 | exact 64-bit IPC, ENUM/bitfields |
-| #23 | Profile Schema v2 | R06 | validated versioned schema |
-| #24 | Profile Studio & Spreadsheet Import | UI-10/R21/R22 | preview and validation |
-| #25 | Addressing Assistant & Register Inspector | UI-05/R07 | explicit notation and conversion |
-| #26 | Polling Engine v2 | R09/R26 | single/group/adaptive and benchmarks |
-| #27 | Monitoring & Diagnostics Workspaces | UI-06/UI-07/UI-08, R08/R19/R25 | saved workspace and real independent sessions |
-| #28 | Advanced Trends & Oscilloscope | UI-11/R01/R08 | multiple series, cursor, quality gaps |
-| #29 | Industrial Profiles | R14/R24 | provenance, firmware, comparison |
-| #30 | Modbus Simulator | UI-12/R12 | isolated profile-driven device |
-| #31 | Engineering Test Center | UI-12/R16 | repeatable assertions |
-| #32 | Session Recorder & Replay | R13 | capture and offline playback |
-| #33 | PCAP & Traffic Analyzer | UI-09/R11 | offline authorized import and diagnostics |
-| #34 | Engineering Reports & PLC Export | R10/R29 | reproducible exports and PLC mapping |
+| #20 | 17.B.3 Independent Monitoring | R20/R01 | independent per-connection monitor loops and scoped stop |
+| #21 | 17.B.4 Diagnostics & Regression | R04/R20 | queue metrics, Logger and integration acceptance |
+| #22 | 17.C Connection Manager UI | UI-03/R20 | editor, persistence, selectors and lifecycle controls |
+| #23 | Project Explorer & Workspace Manager | UI-03/UI-04, R08/R19/R25 | stable objects and independent session tabs |
+| #24 | Extended Data Types | R05 | exact 64-bit IPC, ENUM/bitfields |
+| #25 | Profile Schema v2 | R06 | validated versioned schema |
+| #26 | Profile Studio & Spreadsheet Import | UI-10/R21/R22 | preview and validation |
+| #27 | Addressing Assistant & Register Inspector | UI-05/R07 | explicit notation and conversion |
+| #28 | Polling Engine v2 | R09/R26 | single/group/adaptive and benchmarks |
+| #29 | Monitoring & Diagnostics Workspaces | UI-06/UI-07/UI-08, R08/R19/R25 | saved workspace and real independent sessions |
+| #30 | Advanced Trends & Oscilloscope | UI-11/R01/R08 | multiple series, cursor, quality gaps |
+| #31 | Industrial Profiles | R14/R24 | provenance, firmware, comparison |
+| #32 | Modbus Simulator | UI-12/R12 | isolated profile-driven device |
+| #33 | Engineering Test Center | UI-12/R16 | repeatable assertions |
+| #34 | Session Recorder & Replay | R13 | capture and offline playback |
+| #35 | PCAP & Traffic Analyzer | UI-09/R11 | offline authorized import and diagnostics |
+| #36 | Engineering Reports & PLC Export | R10/R29 | reproducible exports and PLC mapping |
 
 UI-13 advanced docking/layout manager remains a later optional stage. PR numbering after #19 is indicative; backlog R identifiers remain stable. See [WORKBENCH_SHELL](WORKBENCH_SHELL.md).
 

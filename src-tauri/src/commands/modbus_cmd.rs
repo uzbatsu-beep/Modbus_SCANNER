@@ -406,7 +406,11 @@ pub async fn read_registers(
     };
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
-    match manual_transact(manager, &req, adu, 3 + (req.quantity as usize) * 2, ManualRetryPolicy::ReadOnly, Some(&pdu)).await {
+    let data_bytes=if matches!(expected_fc,1|2){usize::from(req.quantity).div_ceil(8)}else{usize::from(req.quantity)*2};
+    // Maximum legal read data is 250 bytes. Include framing overhead,
+    // not two bytes per bit (which exceeded the manager hint bound).
+    let hint=if req.target.kind==TransportKind::Ascii{2*(3+data_bytes)+3}else{9+data_bytes};
+    match manual_transact(manager, &req, adu, hint, ManualRetryPolicy::ReadOnly, Some(&pdu)).await {
         Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
@@ -863,6 +867,70 @@ mod write_safety_tests {
             }
             other => panic!("unexpected read reply: {other:?}"),
         }
+        server.await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod managed_manual_tests{
+    use super::*;
+    use tokio::io::{AsyncReadExt,AsyncWriteExt};
+    use tokio::net::TcpListener;
+    #[tokio::test]
+    async fn manual_serial_rejects_owned_port_before_io(){
+        use crate::transport::serial::{DataBitsSerde,ParitySerde,StopBitsSerde};
+        let manager=Arc::new(ConnectionManager::new());
+        let port=if cfg!(windows){"COM99"}else{"/dev/modbus-test-owned"};
+        let lease=manager.lease_serial(port).unwrap();
+        let req=ReadRequest{target:ManualTarget{kind:TransportKind::Rtu,endpoint:port.into(),port:None,unit_id:1,
+            serial:Some(crate::scanner::types::SerialPortParams{port_name:port.into(),baud_rate:9600,data_bits:DataBitsSerde::Eight,parity:ParitySerde::None,stop_bits:StopBitsSerde::One}),serial_mode:Some(SerialMode::Rtu)},
+            function:3,start_address:0,quantity:1,timing:None};
+        let pdu=request::read_holding_registers(0,1);
+        let adu=build_adu(TransportKind::Rtu,1,&pdu);
+        let err=manual_transact(manager.clone(),&req,adu,8,ManualRetryPolicy::ReadOnly,Some(&pdu)).await.unwrap_err();
+        assert!(err.to_string().contains("physical resource already owned"));
+        assert!(manager.snapshot().is_empty());
+        drop(lease);
+        assert!(manager.lease_serial(port).is_ok());
+    }
+    #[tokio::test]
+    async fn managed_manual_rejects_wrong_ack_and_releases_worker(){
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port=listener.local_addr().unwrap().port();
+        let server=tokio::spawn(async move{
+            let (mut socket,_)=listener.accept().await.unwrap();
+            let mut adu=[0u8;12];socket.read_exact(&mut adu).await.unwrap();
+            // Wrong echoed value: received bytes are retained, never success.
+            adu[11]^=1;
+            socket.write_all(&adu).await.unwrap();
+        });
+        let manager=Arc::new(ConnectionManager::new());
+        let req=WriteRequest{target:ManualTarget{kind:TransportKind::Tcp,endpoint:"127.0.0.1".into(),port:Some(port),unit_id:1,serial:None,serial_mode:None},function:6,start_address:1,values:vec![42],confirm_write:true,timing:Some(ManualTiming{timeout_ms:500,retries:5})};
+        let pdu=request::write_single_register(1,42);
+        let (bytes,_)=manual_transact(manager.clone(),&req,build_adu(TransportKind::Tcp,1,&pdu),8,ManualRetryPolicy::SingleShot,Some(&pdu)).await.unwrap();
+        let parsed=verify_and_parse(TransportKind::Tcp,1,6,&bytes).unwrap();
+        assert!(verify_write_ack(&parsed,&pdu).is_err());
+        assert!(manager.snapshot().is_empty());
+        server.await.unwrap();
+    }
+    #[tokio::test]
+    async fn managed_manual_reads_full_coil_span(){
+        let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port=listener.local_addr().unwrap().port();
+        let server=tokio::spawn(async move{
+            let (mut socket,_)=listener.accept().await.unwrap();
+            let mut adu=[0u8;12];socket.read_exact(&mut adu).await.unwrap();
+            assert_eq!(&adu[10..],[0x07,0xd0]);
+            let mut reply=vec![0,0,0,0,0,253,1,1,250];reply.extend([0xff;250]);
+            socket.write_all(&reply).await.unwrap();
+        });
+        let manager=Arc::new(ConnectionManager::new());
+        let req=ReadRequest{target:ManualTarget{kind:TransportKind::Tcp,endpoint:"127.0.0.1".into(),port:Some(port),unit_id:1,serial:None,serial_mode:None},function:1,start_address:0,quantity:2000,timing:Some(ManualTiming{timeout_ms:500,retries:0})};
+        let pdu=request::read_coils(0,2000);
+        let (bytes,_)=manual_transact(manager.clone(),&req,build_adu(TransportKind::Tcp,1,&pdu),259,ManualRetryPolicy::ReadOnly,Some(&pdu)).await.unwrap();
+        let Pdu::Response{data,..}=verify_and_parse(TransportKind::Tcp,1,1,&bytes).unwrap()else{panic!("expected coil data")};
+        assert_eq!(response::parse_read_values(1,&data,2000).unwrap(),vec![1;2000]);
+        assert!(manager.snapshot().is_empty());
         server.await.unwrap();
     }
 }

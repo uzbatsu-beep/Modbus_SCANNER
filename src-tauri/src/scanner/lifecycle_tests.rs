@@ -180,3 +180,28 @@ async fn after_stop_the_handle_accepts_a_new_scan_and_rejects_stale_controls() {
     assert_eq!(scanner.status(), ScanStatus::Stopped);
     assert_no_more_connections(&listener).await;
 }
+
+#[tokio::test]
+async fn scanner_and_monitor_respect_same_serial_registry_before_io(){
+    use std::sync::Arc;
+    use crate::communication::service::CommunicationService;
+    use crate::scanner::monitor::MonitorHandle;
+    use crate::scanner::types::{SerialPortParams,SerialSweepParams,SerialMode,MonitorWatch};
+    use crate::transport::serial::{DataBitsSerde,ParitySerde,StopBitsSerde};
+    let service=Arc::new(CommunicationService::default());
+    let scanner=ScannerHandle::with_communication(service.clone());
+    let monitor=MonitorHandle::with_communication(service.clone());
+    let port=if cfg!(windows){"COM99"}else{"/dev/modbus-test-locked"};
+    let lease=service.manager.lease_serial(port).unwrap();
+    let settings=SerialPortParams{port_name:port.into(),baud_rate:9600,data_bits:DataBitsSerde::Eight,parity:ParitySerde::None,stop_bits:StopBitsSerde::One};
+    let target=ScanTarget::UnitIdRange{from:1,to:1,port:settings.clone(),mode:SerialMode::Rtu};
+    assert!(scanner.start(EventSink::null(),target,ScanParams::default()).await.unwrap_err().contains("already owned"));
+    let target=ScanTarget::SerialAuto{sweep:SerialSweepParams::defaults(port.into(),SerialMode::Rtu,1,1)};
+    assert!(scanner.start(EventSink::null(),target,ScanParams::default()).await.unwrap_err().contains("already owned"));
+    let watch=MonitorWatch{key:"test".into(),target:DeviceTarget{kind:TransportKind::Rtu,endpoint:port.into(),port:None,unit_id:1,serial:Some(settings),serial_mode:Some(SerialMode::Rtu)},function:3,address:0,quantity:1,name:None,unit:None,tag_id:None,spec:None};
+    assert!(monitor.start(EventSink::null(),vec![watch],250,Some(100)).await.unwrap_err().contains("already owned"));
+    assert!(monitor.snapshot().is_empty());
+    assert_eq!(scanner.status(),ScanStatus::Idle);
+    drop(lease);
+    assert!(service.manager.lease_serial(port).is_ok());
+}
