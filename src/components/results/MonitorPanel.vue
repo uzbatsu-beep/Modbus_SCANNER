@@ -3,7 +3,7 @@ import { t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 import { addressSpace, readFunction, registerKey } from "@/types/registerIdentity";
 
-import type { LogFormat, LoggerConfig, MonitorWatch, RotationMode } from "@/types/ipc";
+import type { DecodedValue, LogFormat, LoggerConfig, MonitorValueState, MonitorWatch, RotationMode } from "@/types/ipc";
 import { useDevicesStore } from "@/stores/devices";
 import { useMonitorStore } from "@/stores/monitor";
 import { useSettingsStore } from "@/stores/settings";
@@ -13,6 +13,7 @@ const monitor = useMonitorStore();
 const settings = useSettingsStore();
 
 const interval = ref(1000);
+const historyCapacity = ref(10000);
 const selectedPoint = ref<string | null>(null);
 watch(() => devices.selected?.key, () => { selectedPoint.value = null; });
 const watches = ref<MonitorWatch[]>([]);
@@ -76,16 +77,16 @@ const available = computed(() => {
     points.push({ label, watch: {
       key: "raw:" + JSON.stringify([dev.key, registerKey(r.function, r.address)]),
       target: dev.target, function: r.function, address: r.address, quantity: 1,
-      name: `${dev.target.endpoint}/${dev.target.unit_id} · ${label}`, unit: null,
+      name: `${dev.target.endpoint}/${dev.target.unit_id} · ${label}`, unit: null, tag_id: null, spec: null,
     } });
   }
   for (const tag of settings.config.tags.filter(t => t.source.start.device_key === dev.key)) {
     const { start, quantity } = tag.source;
     const fc = readFunction(start.address_space);
-    const label = `${tag.name} · FC${String(fc).padStart(2,"0")} · 0x${start.address.toString(16).padStart(4,"0")} × ${quantity} · RAW`;
+    const label = `${tag.name} · FC${String(fc).padStart(2,"0")} · 0x${start.address.toString(16).padStart(4,"0")} × ${quantity} · ${tag.spec.data_type.toUpperCase()}`;
     points.push({ label, watch: {
       key: "tag:" + tag.id, target: dev.target, function: fc, address: start.address, quantity,
-      name: `${dev.target.endpoint}/${dev.target.unit_id} · ${label}`, unit: null,
+      name: `${dev.target.endpoint}/${dev.target.unit_id} · ${label}`, unit: tag.unit, tag_id: tag.id, spec: { ...tag.spec },
     } });
   }
   return points;
@@ -108,7 +109,7 @@ async function start() {
     error.value = t("noMonitorPoints");
     return;
   }
-  await monitor.start(watches.value, interval.value);
+  await monitor.start(watches.value, interval.value, historyCapacity.value);
   if (monitor.error) error.value = monitor.error;
   if (!trendKey.value) trendKey.value = watches.value[0].key;
 }
@@ -117,35 +118,47 @@ async function stop() {
   await monitor.stop();
 }
 
-function latest(state: { values: number[] }): string {
-  if (state.values.length === 0) return "—";
-  return state.values.map((v) => `0x${v.toString(16).padStart(4, "0")}`).join(" ");
+function formatValue(value: DecodedValue | null | undefined): string {
+  return value == null ? "—" : String(value.value);
 }
-
-const trendState = computed(() =>
-  monitor.values.find((v) => v.key === trendKey.value) ?? null
-);
-
-const trendPoints = computed(() => {
+function latest(state: MonitorValueState): string {
+  return formatValue(state.latest?.value ?? state.last_good?.value);
+}
+function raw(state: MonitorValueState): string {
+  return state.latest?.raw?.map(v => "0x" + v.toString(16).padStart(4,"0")).join(" ") ?? "—";
+}
+function stat(value: number | null): string {
+  return value === null ? "—" : Number(value.toPrecision(10)).toString();
+}
+const trendState = computed(() => monitor.values.find(v => v.key === trendKey.value) ?? null);
+const trend = computed(() => {
   const state = trendState.value;
-  if (!state || state.samples.length === 0) return "";
-  const cutoff = Date.now() - windowMs.value;
-  const samples = state.samples.filter((s) => s.timestamp_ms >= cutoff);
-  if (samples.length === 0) return "";
-  const values = samples.flatMap(s => s.values.length ? [s.values[0]] : []);
-  if (values.length === 0) return "";
-  const min = Math.min(...values);
-  const max = Math.max(...values);
-  const span = max - min || 1;
-  const width = 600;
-  const height = 120;
-  return values
-    .map((v, i) => {
-      const x = (i / Math.max(1, values.length - 1)) * width;
-      const y = height - ((v - min) / span) * height;
-      return `${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(" ");
+  const latest = state?.latest;
+  if (!state || !latest) return null;
+  const end = latest.elapsed_us;
+  const start = end - windowMs.value * 1000;
+  const samples = state.samples.filter(s => s.elapsed_us >= start && s.elapsed_us <= end);
+  const numbers = samples.flatMap(s => s.quality === "good" && typeof s.value?.value === "number" ? [s.value.value] : []);
+  if (!numbers.length) return null;
+  let lo = Math.min(0, ...numbers), hi = Math.max(0, ...numbers);
+  if (lo === hi) { lo -= 1; hi += 1; }
+  const magnitude = Math.max(Math.abs(lo), Math.abs(hi), 1);
+  const y = (v: number) => 120 - (v / magnitude - lo / magnitude) / (hi / magnitude - lo / magnitude) * 120;
+  const segments: string[][] = [];
+  let current: string[] = [];
+  let prev = 0;
+  for (const s of samples) {
+    if ((prev && s.sequence !== prev + 1) || s.quality !== "good" || typeof s.value?.value !== "number") {
+      if (current.length) segments.push(current);
+      current = [];
+    }
+    if (s.quality === "good" && typeof s.value?.value === "number") {
+      current.push(`${((s.elapsed_us - start) / (end - start) * 600).toFixed(2)},${y(s.value.value).toFixed(2)}`);
+    }
+    prev = s.sequence;
+  }
+  if (current.length) segments.push(current);
+  return { segments: segments.map(x => x.join(" ")), zero: y(0), lo, hi };
 });
 </script>
 
@@ -164,10 +177,12 @@ const trendPoints = computed(() => {
       </button>
       <label class="short">{{ t("period") }}</label>
       <input v-model.number="interval" type="number" min="250" max="10000" step="50" :disabled="monitor.running" />
-      <button v-if="!monitor.running" class="primary" :disabled="watches.length === 0" @click="start">
+      <label class="short">{{ t("historyCapacity") }}</label>
+      <input v-model.number="historyCapacity" type="number" min="100" max="50000" step="100" :disabled="monitor.running || monitor.busy" />
+      <button v-if="!monitor.running" class="primary" :disabled="watches.length === 0 || monitor.busy" @click="start">
         ▶ {{ t("start") }}
       </button>
-      <button v-else class="danger" @click="stop">■ {{ t("stop") }}</button>
+      <button v-else class="danger" :disabled="monitor.busy" @click="stop">■ {{ t("stop") }}</button>
       <span v-if="error || monitor.error" class="error-text">{{ error || monitor.error }}</span>
     </div>
 
@@ -180,28 +195,20 @@ const trendPoints = computed(() => {
 
     <table v-if="monitor.values.length" class="data">
       <thead>
-        <tr><th>Point</th><th>RAW</th><th>RAW Min</th><th>RAW Max</th><th>{{ t("change") }}</th><th>{{ t("errors") }}</th></tr>
+        <tr><th>{{ t("nameCol") }}</th><th>RAW</th><th>{{ t("value") }}</th><th>MIN</th><th>MAX</th><th>AVG</th><th>Δ</th><th>{{ t("qualityLabel") }}</th><th>OK / {{ t("errors") }}</th></tr>
       </thead>
       <tbody>
-        <tr
-          v-for="v in monitor.values"
-          :key="v.key"
-          :class="{ 'changed-row': v.changed }"
-          @click="trendKey = v.key"
-        >
-          <td>
-            {{ v.name }}
-            <span v-if="v.unit" class="dim">{{ v.unit }}</span>
-          </td>
-          <td class="mono">{{ latest(v) }}</td>
-          <td class="mono">{{ v.min ?? "—" }}</td>
-          <td class="mono">{{ v.max ?? "—" }}</td>
-          <td>
-            <span class="tag" :class="v.changed ? 'warn' : 'dim'">
-              {{ v.changed ? t("changed") : t("stable") }}
-            </span>
-          </td>
-          <td>{{ v.errors }}</td>
+        <tr v-for="v in monitor.values" :key="v.key" @click="trendKey = v.key">
+          <td>{{ v.watch.name || v.key }} <span v-if="v.watch.unit" class="dim">{{ v.watch.unit }}</span></td>
+          <td class="mono">{{ raw(v) }}</td>
+          <td class="mono" :class="{ dim: v.quality !== 'good' }">{{ latest(v) }} <span v-if="v.quality !== 'good' && v.last_good">({{ t("lastGood") }})</span></td>
+          <td class="mono">{{ stat(v.min) }}</td>
+          <td class="mono">{{ stat(v.max) }}</td>
+          <td class="mono">{{ stat(v.avg) }}</td>
+          <td class="mono">{{ stat(v.delta) }}</td>
+          <td><span class="tag" :class="v.quality === 'good' ? 'ok' : v.quality === 'not_sampled' ? 'dim' : 'warn'" :title="v.latest?.detail || ''">{{ v.quality }}{{ v.latest?.exception_code != null ? ' 0x' + v.latest.exception_code.toString(16).padStart(2,'0') : '' }}</span>
+            <small v-if="v.quality !== 'good' && v.last_good" class="dim"> {{ new Date(v.last_good.timestamp_ms).toLocaleTimeString() }}</small></td>
+          <td>{{ v.valid_samples }} / {{ v.invalid_samples }}</td>
         </tr>
       </tbody>
     </table>
@@ -209,9 +216,9 @@ const trendPoints = computed(() => {
 
     <div class="trend">
       <div class="form-row">
-        <label>{{ t("trend") }} · RAW[0]</label>
+        <label>{{ t("trend") }} · {{ trendState?.watch.unit || trendState?.watch.spec?.data_type || "RAW" }}</label>
         <select v-model="trendKey">
-          <option v-for="v in monitor.values" :key="v.key" :value="v.key">{{ v.name }}</option>
+          <option v-for="v in monitor.values" :key="v.key" :value="v.key">{{ v.watch.name || v.key }}</option>
         </select>
         <select v-model.number="windowMs">
           <option :value="60_000">{{ t("min1") }}</option>
@@ -219,8 +226,11 @@ const trendPoints = computed(() => {
           <option :value="3_600_000">{{ t("hour1") }}</option>
         </select>
       </div>
-      <svg v-if="trendPoints" viewBox="0 0 600 120" class="chart" preserveAspectRatio="none">
-        <polyline :points="trendPoints" fill="none" stroke="var(--accent)" stroke-width="2" />
+      <div v-if="trend" class="hint">{{ stat(trend.hi) }} / 0 / {{ stat(trend.lo) }} · {{ t("actualTimeAxis") }}</div>
+      <svg v-if="trend" viewBox="0 0 600 120" class="chart" preserveAspectRatio="none">
+        <line x1="0" x2="600" :y1="trend.zero" :y2="trend.zero" stroke="var(--fg-dim)" stroke-dasharray="4 4" />
+        <polyline v-for="(points, i) in trend.segments" :key="i" :points="points" fill="none" stroke="var(--accent)" stroke-width="2" />
+        <circle v-for="(points, i) in trend.segments.filter(s => !s.includes(' '))" :key="'dot'+i" :cx="Number(points.split(',')[0])" :cy="Number(points.split(',')[1])" r="2" fill="var(--accent)" />
       </svg>
       <div v-else class="hint">{{ t("noTrend") }}</div>
     </div>
@@ -274,13 +284,14 @@ const trendPoints = computed(() => {
 
       <table v-if="monitor.loggers.length" class="data">
         <thead>
-          <tr><th>ID</th><th>{{ t("file") }}</th><th>{{ t("records") }}</th><th>{{ t("status") }}</th></tr>
+          <tr><th>ID</th><th>{{ t("file") }}</th><th>{{ t("records") }}</th><th>{{ t("loggerQueue") }}</th><th>{{ t("status") }}</th></tr>
         </thead>
         <tbody>
           <tr v-for="s in monitor.loggers" :key="s.id">
             <td>{{ s.id }}</td>
             <td class="mono">{{ s.current_file || s.path }}</td>
             <td>{{ s.records_written }}</td>
+            <td>{{ s.pending_records }} / {{ s.dropped_records }} / {{ s.failed_records }}</td>
             <td>
               <span class="tag" :class="s.error ? 'error' : s.enabled ? 'ok' : 'dim'">
                 {{ s.error ?? (s.enabled ? t("active") : t("disabled")) }}

@@ -45,7 +45,6 @@ const tags = computed<TagDefinition[]>(() =>
   (settings.config.tags ?? []).filter((tag) => tag.source.start.device_key === props.record.key)
 );
 
-const needsTwo = computed(() => registerWidth(form.data_type) === 2);
 const allRegisters = computed(() => Object.values(props.record.registers).flatMap(r => r ? [r] : []));
 const source = computed<RegisterSpan | null>(() => {
   const first = props.selection[0];
@@ -192,7 +191,7 @@ async function removeTag(id: string) {
             <option value="ascii">ASCII</option>
           </select>
           <label class="short">{{ t("byteOrder") }}</label>
-          <select v-model="form.byte_order" :disabled="!needsTwo && form.data_type !== 'ascii'">
+          <select v-model="form.byte_order" >
             <option value="abcd">ABCD</option>
             <option value="badc">BADC</option>
             <option value="cdab">CDAB</option>
