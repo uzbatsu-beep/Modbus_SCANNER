@@ -78,8 +78,9 @@ onMounted(async () => {
         <main class="wb-workspace">
           <router-view v-if="ready" v-slot="{Component,route}">
             <KeepAlive :key="projectGeneration" include="ResultsView,ScanView">
-              <component :is="Component" :key="route.name" class="wb-page" />
+              <component v-if="route.name==='results' || route.name==='scan'" :is="Component" :key="route.name" class="wb-page" />
             </KeepAlive>
+            <component v-if="route.name!=='results' && route.name!=='scan'" :is="Component" :key="route.name" class="wb-page" />
           </router-view>
         </main>
         <PanelSplitter v-if="fitted.right" panel="right" :value="fitted.right" :label="t('wbResizeRight')" @resize="wb.resize('right',$event)" @finish="wb.persist()" />
