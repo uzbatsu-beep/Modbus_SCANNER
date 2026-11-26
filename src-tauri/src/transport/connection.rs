@@ -89,7 +89,8 @@ fn invalid(message: &str) -> TransportError { TransportError::Other(message.into
 fn network_key(host: &str, port: u16, kind: &str) -> TransportResult<String> {
     let host = host.trim();
     if host.is_empty() || port == 0 { return Err(invalid("invalid network endpoint")); }
-    let canonical = host.parse::<std::net::IpAddr>().map(|ip| ip.to_string())
+    let ip_host = host.strip_prefix('[').and_then(|v|v.strip_suffix(']')).unwrap_or(host);
+    let canonical = ip_host.parse::<std::net::IpAddr>().map(|ip| ip.to_string())
         .unwrap_or_else(|_| host.trim_end_matches('.').to_ascii_lowercase());
     if canonical.is_empty() { return Err(invalid("invalid network endpoint")); }
     Ok(format!("{kind}:{canonical}:{port}"))
@@ -215,6 +216,7 @@ impl ConnectionManager {
     /// Register one lazy worker. Opening occurs on its first request.
     /// The registry retains ownership until disconnect has joined the worker.
     pub fn register(&self,definition:ConnectionDefinition)->TransportResult<()> {
+        let runtime=tokio::runtime::Handle::try_current().map_err(|_|invalid("connection registration requires Tokio runtime"))?;
         let resource=definition.resource_key()?;
         let mut entries=self.entries.lock();
         if entries.contains_key(&definition.id) {return Err(invalid("connection id already registered"));}
@@ -226,7 +228,7 @@ impl ConnectionManager {
             queue_depth:0,active_requests:0,reconnect_count:0,last_error:None,
         }));
         let slots=Arc::new(Semaphore::new(QUEUE_CAPACITY));
-        let task=tokio::spawn(worker(definition.clone(),self.factory.clone(),state.clone(),rx,stop_rx));
+        let task=runtime.spawn(worker(definition.clone(),self.factory.clone(),state.clone(),rx,stop_rx));
         entries.insert(definition.id.clone(),Arc::new(Entry{definition,resource,tx,slots,stop,state,task:Mutex::new(Some(task))}));
         Ok(())
     }

@@ -129,3 +129,62 @@ async fn bounded_queue_disconnect_and_independent_endpoint(){
     assert_eq!(sent.load(Ordering::SeqCst),1);
     m.disconnect("b").await.unwrap();
 }
+
+#[tokio::test]
+async fn no_reconnect_when_disabled() {
+    let factory=Arc::new(ScriptFactory{opens:AtomicUsize::new(0),scripts:parking_lot::Mutex::new(VecDeque::from([vec![Err(TransportError::Closed)],vec![Ok(vec![9])]]))});
+    let m=ConnectionManager::with_factory(factory.clone());
+    let mut d=definition("a",502);d.policy.auto_reconnect=false;
+    m.register(d).unwrap();
+    for _ in 0..2 {assert!(m.transact("a",request(Priority::Normal)).await.unwrap().result.is_err());}
+    assert_eq!(factory.opens.load(Ordering::SeqCst),1);
+    m.disconnect("a").await.unwrap();
+}
+#[tokio::test]
+async fn dropped_queued_caller_does_not_send() {
+    let gate=Arc::new(Semaphore::new(0));let entered=Arc::new(Semaphore::new(0));let sent=Arc::new(AtomicUsize::new(0));
+    let m=Arc::new(ConnectionManager::with_factory(Arc::new(GateFactory{gate:gate.clone(),entered:entered.clone(),sent:sent.clone()})));
+    m.register(definition("a",502)).unwrap();
+    let active={let m=m.clone();tokio::spawn(async move{let mut r=request(Priority::Normal);r.response_timeout=Duration::from_secs(10);m.transact("a",r).await})};
+    tokio::time::timeout(Duration::from_secs(3),entered.acquire()).await.unwrap().unwrap().forget();
+    let pending={let m=m.clone();tokio::spawn(async move{m.transact("a",request(Priority::High)).await})};
+    tokio::time::timeout(Duration::from_secs(3),async{
+        while m.snapshot()[0].queue_depth!=1{tokio::task::yield_now().await;}
+    }).await.unwrap();
+    pending.abort();assert!(pending.await.is_err());
+    gate.add_permits(1);assert!(active.await.unwrap().unwrap().result.is_ok());
+    tokio::time::timeout(Duration::from_secs(3),async{
+        while m.snapshot()[0].queue_depth!=0{tokio::task::yield_now().await;}
+    }).await.unwrap();
+    assert_eq!(sent.load(Ordering::SeqCst),1);
+    m.disconnect("a").await.unwrap();
+}
+#[tokio::test]
+async fn native_tcp_reuses_one_socket_for_two_unit_ids() {
+    use tokio::io::{AsyncReadExt,AsyncWriteExt};
+    let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port=listener.local_addr().unwrap().port();
+    let server=tokio::spawn(async move{
+        let (mut socket,_)=listener.accept().await.unwrap();
+        for unit in [1u8,2] {
+            let mut req=[0u8;12];
+            socket.read_exact(&mut req).await.unwrap();
+            assert_eq!(req,[0,unit,0,0,0,6,unit,3,0,0,0,1]);
+            socket.write_all(&[0,unit,0,0,0,5,unit,3,2,0,42]).await.unwrap();
+        }
+    });
+    let m=ConnectionManager::new();m.register(definition("a",port)).unwrap();
+    for unit in [1u8,2]{
+        let outcome=m.transact("a",TransactionRequest{adu:vec![0,unit,0,0,0,6,unit,3,0,0,0,1],
+            response_timeout:Duration::from_secs(2),expected_hint:11,priority:Priority::Normal}).await.unwrap();
+        assert_eq!(outcome.result.unwrap(),vec![0,unit,0,0,0,5,unit,3,2,0,42]);
+        assert_eq!(outcome.timing.connect_us.is_some(),unit==1);
+        assert!(outcome.timing.rtt_us.is_some());
+    }
+    m.disconnect("a").await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3),server).await.unwrap().unwrap();
+}
+#[test]
+fn registration_outside_runtime_returns_error() {
+    assert!(ConnectionManager::new().register(definition("a",502)).is_err());
+}
