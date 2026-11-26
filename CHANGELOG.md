@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Workbench shell (PR #16)
+- Compact two-level header, explorer, contextual inspector, resizable and collapsible panels, dock and saved layout; preserve existing themes and workflows.
+- Results tabs retain monitor state during navigation; actual version and monitor metrics in status bar. No transport changes.
+- Approved roadmap reorders UI shell before connection manager; layout and grouping regression tests.
+
+
 ### Communication diagnostics (PR #15)
 - Common transport stage timing; monitor session/device/channel metrics, rolling RTT percentiles, cycle/period, jitter, stale and completed ADU counts.
 - Diagnostics panel and RTT trend; Logger v2 timing columns and distinct .v2-timing files.

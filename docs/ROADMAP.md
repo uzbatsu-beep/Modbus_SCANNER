@@ -1,9 +1,9 @@
 # Roadmap / Дорожная карта — Modbus Engineering Workbench
 
-**Revision: 2026-11-26.** Product direction approved; individual implementation contracts and future PR numbering are proposed. [VISION](VISION.md) · [BACKLOG R01–R30](BACKLOG.md) · [Previous roadmap](ROADMAP_LEGACY_2026-11-21.md) · [ADR](adr/README.md).
+**Revision: 2026-11-26.** Product direction and UI variant B approved; future implementation contracts remain subject to review. [VISION](VISION.md) · [BACKLOG R01–R30](BACKLOG.md) · [Previous roadmap](ROADMAP_LEGACY_2026-11-21.md) · [ADR](adr/README.md).
 
 ## Baseline
-At inspection on 2026-11-26, main was `7710ef262afb56c1dc18f850a67166ef3cbdfbf1`; PR #10/#11 changes merged, CI and Windows QA successful on that SHA. Published release v1.0.0; manifests v1.0.1; physical bench PASS not established. No release is implied by this strategy PR. See [field validation](FIELD_VALIDATION_v1.0.1.md). Existing discovery, adaptive register scan, FC43, basic decoding, profiles, raw monitor, logs, CLI/API and TLS are foundation, not finished workbench capabilities.
+Baseline at PR #16 start: main `cd6ffd8af5432dfb0b40fe55205421e3cf6c83dc`, PR #12–#15 merged; CI and Windows QA successful at this SHA. Published v1.0.0 / manifests v1.0.1, physical acceptance not established. FC-aware tags, typed monitor and communication metrics are implemented. See [field validation](FIELD_VALIDATION_v1.0.1.md).
 
 ## Priorities
 Prototype: correct data, reliable communication, distinctive engineering workflow, useful features, UI and performance. Keep existing baseline controls; advanced security and corporate authorization belong to late stages. CI/bench constraints remain in effect. No need to delay isolated development until a public release; physical acceptance remains necessary before publishing. Do not change versions prematurely.
@@ -25,20 +25,24 @@ Prototype: correct data, reliable communication, distinctive engineering workflo
 | #13 | Register Identity & Tag Model | R02 | FC/table preserved across storage, import and monitor; v2 round-trip and rejection tests |
 | #14 | Typed Monitoring Engine | R01 | signed values, consistent table/trend/log, quality |
 | #15 | Communication Metrics | R04 | measured RTT, cycle/period, error categories |
-| #16 | Connection & Transport Manager | R20, baseline R03 | serial resource ownership, independent sessions/cancellation |
-| #17 | Extended Data Types | R05 | golden vectors, exact 64-bit IPC, ENUM/bitfields |
-| #18 | Profile Schema v2 | R06 | versioned schema and round-trip migration |
-| #19 | Profile Editor & Spreadsheet Import | R21/R22 | user mapping, preview, validation |
-| #20 | Addressing Assistant | R07 | explicit notation and conversion |
-| #21 | Polling Engine v2 | R09/R26 | single/group/adaptive selection; benchmark evidence |
-| #22 | Multi-device Workspace | R08/R19/R25 | independent sessions, saved workspace, stable tree |
-| #23 | Advanced Trends & Oscilloscope | R01/R08 | multiple series, time cursor, quality gaps |
-| #24 | Industrial Profiles | R14/R24 | provenance, firmware, comparison |
-| #25 | Modbus Simulator | R12 | isolated profile-driven device |
-| #26 | Engineering Test Center | R16 | repeatable assertions on virtual bench |
-| #27 | Session Recorder & Replay | R13 | capture and offline playback |
-| #28 | PCAP Analyzer | R11 | offline authorized import and transaction diagnostics |
-| #29 | Engineering Reports | R10/R29 | reproducible exports and typed PLC mapping |
+| #16 | Workbench Shell & Design System | UI-01/UI-02 | approved variant B; resizable panels, compact RU/EN, themes, persistence, existing workflows |
+| #17 | Connection & Transport Manager | R20, baseline R03 | serial ownership, independent sessions/cancellation |
+| #18 | Project Explorer & Workspace Manager | UI-03/UI-04, R08/R19/R25 | stable objects and independent session tabs |
+| #19 | Extended Data Types | R05 | exact 64-bit IPC, ENUM/bitfields |
+| #20 | Profile Schema v2 | R06 | validated versioned schema |
+| #21 | Profile Studio & Spreadsheet Import | UI-10/R21/R22 | preview and validation |
+| #22 | Addressing Assistant & Register Inspector | UI-05/R07 | explicit notation and conversion |
+| #23 | Polling Engine v2 | R09/R26 | single/group/adaptive and benchmarks |
+| #24 | Monitoring & Diagnostics Workspaces | UI-06/UI-07/UI-08, R08/R19/R25 | saved workspace and real independent sessions |
+| #25 | Advanced Trends & Oscilloscope | UI-11/R01/R08 | multiple series, cursor, quality gaps |
+| #26 | Industrial Profiles | R14/R24 | provenance, firmware, comparison |
+| #27 | Modbus Simulator | UI-12/R12 | isolated profile-driven device |
+| #28 | Engineering Test Center | UI-12/R16 | repeatable assertions |
+| #29 | Session Recorder & Replay | R13 | capture and offline playback |
+| #30 | PCAP & Traffic Analyzer | UI-09/R11 | offline authorized import and diagnostics |
+| #31 | Engineering Reports & PLC Export | R10/R29 | reproducible exports and PLC mapping |
+
+UI-13 advanced docking/layout manager remains a later optional stage. PR numbering after #17 is indicative; backlog R identifiers remain stable. See [WORKBENCH_SHELL](WORKBENCH_SHELL.md).
 
 R15, R23, R27, R28 are follow-up P2 features; R03 expanded, R17 and R&D R18/R30 require separate decisions after core maturity. No blind probing of all FC codes; only known read-only functions/subfunctions, with explicit bounds. Do not use line count as refactoring target.
 

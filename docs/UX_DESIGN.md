@@ -1,6 +1,6 @@
 # Workbench UX / Интерфейс инженерной среды
 
-Approved direction 2026-11-26. Conceptual layout; not implemented.
+Approved direction 2026-11-26. Variant B and first shell approved; see [WORKBENCH_SHELL](WORKBENCH_SHELL.md) for the PR #16 implementation boundary. Diagram below is the long-term target, not a claim that all functions are implemented.
 
 ```text
 Toolbar: project | discovery | registers | monitor | diagnostics | simulator

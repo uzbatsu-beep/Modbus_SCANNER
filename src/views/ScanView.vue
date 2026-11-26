@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive } from "vue";
+defineOptions({name:"ScanView"});
 
 import ScanFormSerial from "@/components/scan/ScanFormSerial.vue";
 import ScanFormIp from "@/components/scan/ScanFormIp.vue";

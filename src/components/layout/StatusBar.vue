@@ -1,11 +1,19 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed,ref,onMounted } from "vue";
+import { api } from "@/api/mod";
+import {useMonitorStore} from "@/stores/monitor";
+import {useDevicesStore} from "@/stores/devices";
+import {useWorkbenchStore} from "@/stores/workbench";
 
 import { t } from "@/i18n";
 import { useScannerStore } from "@/stores/scanner";
 import type { ScanStatus } from "@/types/ipc";
 
 const scanner = useScannerStore();
+const monitor=useMonitorStore(),devices=useDevicesStore(),wb=useWorkbenchStore();
+const version=ref<string|null>(null);
+onMounted(async()=>{try{version.value=(await api.system.getAppInfo()).version;}catch(e){scanner.addLog('error',String(e));}});
+function ms(v:number|null|undefined){return v==null?'—':(v/1000).toFixed(1)+' ms';}
 
 const statusLabel = computed<Record<ScanStatus, string>>(() => ({
   idle: t("statusIdle"),
@@ -46,7 +54,12 @@ const pct = computed(() =>
       </div>
     </template>
 
-    <span v-else class="status-item dim">Modbus Scanner v0.1.0</span>
+    <span class="status-item">{{ t("monitorTitle") }}: {{ monitor.running?t("wbRunning"):t("statusIdle") }} · {{ monitor.count }}</span>
+    <span v-if="monitor.metrics && monitor.running" class="status-item">RTT {{ ms(monitor.metrics.session.rtt_avg_us) }} · {{ t("cyclePeriod") }} {{ ms(monitor.metrics.cycle_period_us) }}</span>
+    <span v-if="devices.selected" class="status-item">{{ devices.selected.target.kind.toUpperCase() }} · {{ devices.selected.target.endpoint }} / {{ devices.selected.target.unit_id }}</span>
+    <span v-if="wb.storageError" role="alert" class="status-item">{{ t("wbLayoutSaveError") }}</span>
+    <span v-if="monitor.error" :title="monitor.error" class="status-item">{{ t("errors") }}: {{ monitor.error }}</span>
+    <span class="wb-spacer"/><span class="status-item dim">Modbus Scanner {{ version ? "v"+version : "—" }}</span>
   </footer>
 </template>
 
