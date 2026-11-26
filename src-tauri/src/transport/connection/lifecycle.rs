@@ -2,6 +2,9 @@
 //! Automatic workers are cached only while unleased. Explicit workers are pinned.
 use super::*;
 
+mod serial_session;
+pub use serial_session::{ExclusiveSerialSession, SerialSessionSnapshot};
+
 pub const IDLE_TCP:Duration=Duration::from_secs(60);
 pub const IDLE_SERIAL:Duration=Duration::from_secs(30);
 pub const IDLE_CACHE_LIMIT:usize=32;

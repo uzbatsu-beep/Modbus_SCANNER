@@ -18,7 +18,7 @@ use super::timing::{micros, TransactionTiming};
 use super::{Transport, TransportError, TransportResult};
 
 mod lifecycle;
-pub use lifecycle::{ConnectionLease, IDLE_TCP, IDLE_SERIAL, IDLE_CACHE_LIMIT};
+pub use lifecycle::{ConnectionLease, ExclusiveSerialSession, SerialSessionSnapshot, IDLE_TCP, IDLE_SERIAL, IDLE_CACHE_LIMIT};
 use lifecycle::{LeaseState, RecoveryBook};
 
 pub const QUEUE_CAPACITY: usize = 128;

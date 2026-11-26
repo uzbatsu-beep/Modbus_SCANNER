@@ -18,3 +18,5 @@ ADR-007 — Prototype schema break (maintainer-approved 2026-11-26): no legacy m
 - [ADR-008 — Connection & Transport Manager](008-connection-manager.md): approved variant B and staged implementation.
 
 - [ADR-009 — Shared Connection Runtime](009-shared-connection-runtime.md): approved B.2.3 lifecycle, resource recovery and staged migration.
+
+- [ADR-010 — Managed Serial Runtime](010-managed-serial-runtime.md): exclusive session and staged serial migration.
