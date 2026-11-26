@@ -13,6 +13,7 @@
 pub mod diff;
 pub mod engine;
 pub mod monitor;
+pub mod measurement;
 pub mod safety;
 pub mod strategies;
 pub mod types;
@@ -25,7 +26,8 @@ mod lifecycle_tests;
 
 use std::sync::Arc;
 
-use types::{MonitorValueState, TrafficRecord};
+use types::TrafficRecord;
+use measurement::LogObservation;
 
 /// Sink for raw Modbus exchanges (implemented by the app's traffic log).
 pub trait TrafficSink: Send + Sync {
@@ -34,7 +36,7 @@ pub trait TrafficSink: Send + Sync {
 
 /// Sink for monitor samples (implemented by the app's file loggers).
 pub trait SampleSink: Send + Sync {
-    fn write(&self, values: &[MonitorValueState]);
+    fn write(&self, values: &[LogObservation]);
 }
 
 /// Transport for engine events. Payloads are JSON values so the core has no
@@ -74,7 +76,7 @@ impl EventSink {
         }
     }
 
-    pub fn samples(&self, values: &[MonitorValueState]) {
+    pub fn samples(&self, values: &[LogObservation]) {
         if let Some(sink) = &self.samples {
             sink.write(values);
         }

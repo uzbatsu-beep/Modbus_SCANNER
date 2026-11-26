@@ -5,4 +5,4 @@ import type { RotationMode } from "./RotationMode";
 /**
  * Runtime status of a file logger.
  */
-export type LoggerStatus = { id: string, path: string, format: LogFormat, rotation: RotationMode, enabled: boolean, records_written: number, current_file: string, last_write_ms: number | null, error: string | null, };
+export type LoggerStatus = { id: string, path: string, format: LogFormat, rotation: RotationMode, enabled: boolean, records_written: number, dropped_records: number, pending_records: number, failed_records: number, current_file: string, last_write_ms: number | null, error: string | null, };

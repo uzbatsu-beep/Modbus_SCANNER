@@ -7,7 +7,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use tokio::sync::{mpsc, Mutex};
@@ -18,14 +18,16 @@ use crate::transport::serial::SerialTransport;
 use crate::transport::tcp::TcpConfig;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
-use crate::transport::Transport;
+use crate::transport::{Transport, TransportError};
+use crate::modbus::frame::Pdu;
+use super::measurement::{Channel, DEFAULT_HISTORY, MAX_TOTAL_SAMPLES, UI_BATCH_MS};
 
 use super::engine::{
     build_adu, ensure_serial_settings, next_transaction_id, verify_adu, EngineParams,
 };
 use super::EventSink;
 use super::types::{
-    now_ms, MonitorSample, MonitorUpdate, MonitorValueState, MonitorWatch, ScanParams,
+    now_ms, DataQuality, MonitorUpdate, MonitorValueState, MonitorWatch, ScanParams, register_width,
 };
 
 /// Control messages for the monitor task.
@@ -37,7 +39,7 @@ pub enum ControlMsg {
 /// Cheap cloneable handle stored in Tauri state.
 pub struct MonitorHandle {
     control_tx: Mutex<Option<mpsc::Sender<ControlMsg>>>,
-    values: Arc<RwLock<HashMap<String, MonitorValueState>>>,
+    values: Arc<RwLock<HashMap<String, Channel>>>,
 }
 
 impl Default for MonitorHandle {
@@ -55,7 +57,7 @@ impl MonitorHandle {
     }
 
     pub fn snapshot(&self) -> Vec<MonitorValueState> {
-        let mut values: Vec<_> = self.values.read().values().cloned().collect();
+        let mut values: Vec<_> = self.values.read().values().map(Channel::snapshot).collect();
         values.sort_by(|a, b| a.key.cmp(&b.key));
         values
     }
@@ -66,7 +68,12 @@ impl MonitorHandle {
         sink: EventSink,
         watches: Vec<MonitorWatch>,
         interval_ms: u32,
-    ) -> Result<(), String> {
+        history_capacity: Option<u32>,
+    ) -> Result<String, String> {
+        let capacity = history_capacity.unwrap_or(DEFAULT_HISTORY);
+        if watches.is_empty() || !(100..=50_000).contains(&capacity) || watches.len().saturating_mul(capacity as usize) > MAX_TOTAL_SAMPLES {
+            return Err("history capacity must be 100..50000 per channel and total <= 1000000 observations".into());
+        }
         let mut keys = std::collections::HashSet::new();
         for watch in &watches {
             let space = super::types::AddressSpace::from_read_function(watch.function)?;
@@ -76,6 +83,15 @@ impl MonitorHandle {
                 },
                 quantity: watch.quantity,
             }.validate()?;
+            if let Some(spec) = &watch.spec {
+                if register_width(spec.data_type) != watch.quantity ||
+                    (space.is_bit_space() && spec.data_type != crate::modbus::decode::DataType::Uint16) ||
+                    !spec.multiplier.is_finite() || !spec.divider.is_finite() || spec.divider == 0.0 || !spec.offset.is_finite() {
+                    return Err("invalid monitor decode specification".into());
+                }
+            } else if watch.quantity != 1 {
+                return Err("RAW watch requires one word; use a typed tag for a multiword span".into());
+            }
             if watch.key.trim().is_empty() || !keys.insert(&watch.key) {
                 return Err("empty or duplicate monitor watch key".into());
             }
@@ -91,22 +107,10 @@ impl MonitorHandle {
             let (tx, rx) = mpsc::channel(4);
             *guard = Some(tx);
 
+            let session_id = format!("{:032x}", rand::random::<u128>());
             let mut values = HashMap::new();
             for w in &watches {
-                values.insert(
-                    w.key.clone(),
-                    MonitorValueState {
-                        key: w.key.clone(),
-                        name: w.name.clone().unwrap_or_else(|| w.key.clone()),
-                        unit: w.unit.clone().unwrap_or_default(),
-                        values: Vec::new(),
-                        min: None,
-                        max: None,
-                        changed: false,
-                        samples: Vec::new(),
-                        errors: 0,
-                    },
-                );
+                values.insert(w.key.clone(), Channel::new(session_id.clone(), w.clone(), capacity));
             }
             *self.values.write() = values;
 
@@ -115,17 +119,20 @@ impl MonitorHandle {
             defaults.retries = 0;
             let engine = EngineParams::from_scan_params(&defaults);
 
-            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine.clone()));
-            Ok(())
+            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine, session_id.clone()));
+            Ok(session_id)
         }
     }
 
     pub async fn stop(&self) -> Result<(), String> {
-        let guard = self.control_tx.lock().await;
-        match guard.as_ref() {
-            Some(tx) => tx.send(ControlMsg::Stop).await.map_err(|e| e.to_string()),
-            None => Err("monitor not running".into()),
+        let mut guard = self.control_tx.lock().await;
+        if let Some(tx) = guard.take() {
+            if !tx.is_closed() {
+                let _ = tx.send(ControlMsg::Stop).await;
+                tx.closed().await;
+            }
         }
+        Ok(())
     }
 }
 
@@ -134,14 +141,17 @@ async fn monitor_task(
     watches: Vec<MonitorWatch>,
     interval_ms: u32,
     mut control_rx: mpsc::Receiver<ControlMsg>,
-    values: Arc<RwLock<HashMap<String, MonitorValueState>>>,
+    values: Arc<RwLock<HashMap<String, Channel>>>,
     engine: EngineParams,
+    session_id: String,
 ) {
     let mut serial_transport: Option<SerialTransport> = None;
     let mut serial_signature: Option<String> = None;
     let interval = Duration::from_millis(interval_ms as u64);
 
-    loop {
+    let started = Instant::now();
+    let mut last_emit = Instant::now();
+    'poll: loop {
         tokio::select! {
             msg = control_rx.recv() => {
                 if matches!(msg, Some(ControlMsg::Stop) | None) { break; }
@@ -150,6 +160,7 @@ async fn monitor_task(
         }
 
         for watch in &watches {
+            if control_rx.try_recv().is_ok() { break 'poll; }
             let pdu = match watch.function {
                 0x01 => request::read_coils(watch.address, watch.quantity),
                 0x02 => request::read_discrete_inputs(watch.address, watch.quantity),
@@ -165,9 +176,9 @@ async fn monitor_task(
             let timeout = engine.timeout;
             let hint = 3 + (watch.quantity as usize) * 2;
 
-            let result: Result<Vec<u8>, String> = match watch.target.kind {
+            let result: Result<Vec<u8>, TransportError> = match watch.target.kind {
                 TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
-                    Some(t) => t.transact(&adu, timeout, hint).await.map_err(|e| e.to_string()),
+                    Some(t) => t.transact(&adu, timeout, hint).await,
                     None => match watch.target.serial.clone() {
                         Some(sp) => {
                             let cfg = crate::transport::serial::SerialPortConfig {
@@ -192,12 +203,11 @@ async fn monitor_task(
                                         .unwrap()
                                         .transact(&adu, timeout, hint)
                                         .await
-                                        .map_err(|e| e.to_string())
                                 }
-                                Err(e) => Err(e.to_string()),
+                                Err(e) => Err(e),
                             }
                         }
-                        None => Err("serial params required".into()),
+                        None => Err(TransportError::Other("serial params required".into())),
                     },
                 },
                 TransportKind::Tcp => match TcpTransport::connect(TcpConfig {
@@ -210,11 +220,11 @@ async fn monitor_task(
                 .await
                 {
                     Ok(mut t) => {
-                        let out = t.transact(&adu, timeout, hint).await.map_err(|e| e.to_string());
+                        let out = t.transact(&adu, timeout, hint).await;
                         let _ = t.close().await;
                         out
                     }
-                    Err(e) => Err(e.to_string()),
+                    Err(e) => Err(e),
                 },
                 TransportKind::Udp => match UdpTransport::connect(
                     &watch.target.endpoint,
@@ -222,74 +232,52 @@ async fn monitor_task(
                 )
                 .await
                 {
-                    Ok(mut t) => t.transact(&adu, timeout, hint).await.map_err(|e| e.to_string()),
-                    Err(e) => Err(e.to_string()),
+                    Ok(mut t) => t.transact(&adu, timeout, hint).await,
+                    Err(e) => Err(e),
                 },
             };
 
-            let parsed = result.ok().and_then(|resp| {
-                let pdu = verify_adu(watch.target.kind, watch.target.unit_id, watch.function, &resp, tx, engine.clone()).ok()?;
-                if pdu.is_exception() {
-                    return None;
+            let parsed = result.map_err(classify_transport).and_then(|resp| {
+                let pdu = verify_adu(watch.target.kind, watch.target.unit_id, watch.function, &resp, tx, engine.clone())
+                    .map_err(classify_transport)?;
+                match pdu {
+                    Pdu::Exception { code, .. } => Err((DataQuality::ModbusException, Some(code), format!("Modbus exception 0x{code:02X}"))),
+                    Pdu::Response { data, .. } => crate::modbus::frame::response::parse_read_values(watch.function, &data, watch.quantity)
+                        .map_err(|e| (DataQuality::InvalidResponse, None, e.to_string())),
+                    _ => Err((DataQuality::InvalidResponse, None, "unexpected PDU".into())),
                 }
-                let data = match &pdu {
-                    crate::modbus::frame::Pdu::Response { data, .. } => data.clone(),
-                    _ => return None,
-                };
-                crate::modbus::frame::response::parse_read_values(
-                    watch.function, &data, watch.quantity,
-                ).ok()
             });
-
-            // Update in a closed scope; no guard crosses an await.
-            {
+            let record = {
                 let mut all = values.write();
-                if let Some(state) = all.get_mut(&watch.key) {
-                    match parsed {
-                        Some(values) => {
-                            let previous = state.values.clone();
-                            let sample = MonitorSample {
-                                timestamp_ms: now_ms(),
-                                values: values.clone(),
-                                rtt_us: 0,
-                            };
-                            state.samples.push(sample);
-                            let cutoff = now_ms().saturating_sub(3_600_000);
-                            state.samples.retain(|s| s.timestamp_ms >= cutoff);
-                            if state.samples.len() > 5_000 {
-                                state.samples.drain(..state.samples.len() - 5_000);
-                            }
-                            for &v in &values {
-                                state.min = Some(state.min.map_or(v, |m| m.min(v)));
-                                state.max = Some(state.max.map_or(v, |m| m.max(v)));
-                            }
-                            state.changed = previous != values;
-                            state.values = values;
-                        }
-                        None => state.errors += 1,
-                    }
-                }
+                all.get_mut(&watch.key).map(|channel| channel.observe(now_ms(), started.elapsed().as_micros() as u64, parsed))
+            };
+            if let Some(record) = record { sink.samples(&[record]); }
+            if last_emit.elapsed() >= Duration::from_millis(UI_BATCH_MS) {
+                emit_delta(&sink, &values, &session_id, true);
+                last_emit = Instant::now();
             }
-        }
-
-        let snapshot: Vec<_> = {
-            let all = values.read();
-            let mut items: Vec<_> = all.values().cloned().collect();
-            items.sort_by(|a, b| a.key.cmp(&b.key));
-            items
-        };
-        // P3-07: feed all file loggers with this cycle's samples.
-        sink.samples(&snapshot);
-        let update = MonitorUpdate {
-            values: snapshot,
-            cycle_ms: interval_ms as u64,
-        };
-        if let Ok(value) = serde_json::to_value(&update) {
-            sink.emit("monitor:update", value);
         }
     }
 
     if let Some(mut t) = serial_transport.take() {
         let _ = t.close().await;
     }
+    emit_delta(&sink, &values, &session_id, false);
+}
+
+fn classify_transport(error: TransportError) -> (DataQuality, Option<u8>, String) {
+    let quality = match &error {
+        TransportError::Timeout(_) => DataQuality::Timeout,
+        TransportError::Modbus(_) => DataQuality::InvalidResponse,
+        _ => DataQuality::TransportError,
+    };
+    (quality, None, error.to_string())
+}
+
+fn emit_delta(sink: &EventSink, values: &RwLock<HashMap<String, Channel>>, session_id: &str, running: bool) {
+    let mut items: Vec<_> = values.write().values_mut().filter_map(Channel::delta).collect();
+    items.sort_by(|a,b| a.key.cmp(&b.key));
+    if items.is_empty() && running { return; }
+    let update = MonitorUpdate { session_id: session_id.into(), values: items, running };
+    if let Ok(value) = serde_json::to_value(&update) { sink.emit("monitor:update", value); }
 }

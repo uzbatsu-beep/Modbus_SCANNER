@@ -183,13 +183,14 @@ pub async fn start_monitor(
     state: State<'_, AppState>,
     watches: Vec<MonitorWatch>,
     interval_ms: u32,
-) -> Result<(), String> {
+    history_capacity: Option<u32>,
+) -> Result<String, String> {
     let sink = crate::bridge::tauri_event_sink(
         app,
         state.traffic.clone(),
         state.loggers.clone(),
     );
-    state.monitor.start(sink, watches, interval_ms).await
+    state.monitor.start(sink, watches, interval_ms, history_capacity).await
 }
 
 #[tauri::command]

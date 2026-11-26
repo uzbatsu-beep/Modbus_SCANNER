@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::modbus::common::TransportKind;
-use crate::modbus::decode::{DataType, DecodeSpec};
+use crate::modbus::decode::{DataType, DecodeSpec, DecodedValue};
 use crate::modbus::frame::DeviceIdentification;
 use crate::transport::tcp::TcpFraming;
 use crate::transport::tls::TlsParams;
@@ -744,6 +744,12 @@ pub struct LoggerStatus {
     pub enabled: bool,
     #[ts(type = "number")]
     pub records_written: u64,
+    #[ts(type = "number")]
+    pub dropped_records: u64,
+    #[ts(type = "number")]
+    pub pending_records: u64,
+    #[ts(type = "number")]
+    pub failed_records: u64,
     pub current_file: String,
     #[ts(type = "number | null")]
     pub last_write_ms: Option<u64>,
@@ -771,7 +777,7 @@ pub struct TrafficRecord {
     pub status: String,
 }
 
-/// One register address watched by the live monitor (P3-05).
+/// A raw or typed monitoring channel, frozen for a session.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorWatch {
     pub key: String,
@@ -779,43 +785,68 @@ pub struct MonitorWatch {
     pub function: u8,
     pub address: u16,
     pub quantity: u16,
-    #[serde(default)]
     pub name: Option<String>,
-    #[serde(default)]
     pub unit: Option<String>,
+    pub tag_id: Option<String>,
+    pub spec: Option<DecodeSpec>,
 }
 
-/// One poll result for a watch.
+/// Quality of the latest observation, not of its retained last good value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum DataQuality {
+    Good,
+    NotSampled,
+    Timeout,
+    ModbusException,
+    InvalidResponse,
+    TransportError,
+    DecodeError,
+}
+
+/// One observation, including unsuccessful attempts.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorSample {
     #[ts(type = "number")]
-    pub timestamp_ms: u64,
-    pub values: Vec<u16>,
+    pub sequence: u64,
     #[ts(type = "number")]
-    pub rtt_us: u128,
+    pub timestamp_ms: u64,
+    #[ts(type = "number")]
+    pub elapsed_us: u64,
+    pub raw: Option<Vec<u16>>,
+    pub value: Option<DecodedValue>,
+    pub quality: DataQuality,
+    pub exception_code: Option<u8>,
+    pub detail: Option<String>,
 }
 
-/// Aggregated state of a watched register.
+/// Channel summary plus history (snapshot) or new samples (delta).
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorValueState {
+    pub session_id: String,
     pub key: String,
-    pub name: String,
-    pub unit: String,
-    pub values: Vec<u16>,
-    pub min: Option<u16>,
-    pub max: Option<u16>,
-    /// True when the last poll differed from the previous one.
-    pub changed: bool,
+    pub watch: MonitorWatch,
+    pub latest: Option<MonitorSample>,
+    pub last_good: Option<MonitorSample>,
+    pub min: Option<f64>,
+    pub max: Option<f64>,
+    pub avg: Option<f64>,
+    pub delta: Option<f64>,
+    #[ts(type = "number")]
+    pub valid_samples: u64,
+    #[ts(type = "number")]
+    pub invalid_samples: u64,
+    pub quality: DataQuality,
     pub samples: Vec<MonitorSample>,
-    pub errors: u32,
+    pub history_capacity: u32,
 }
 
-/// Event emitted once per monitor poll cycle.
+/// Incremental monitor update; no complete history in live events.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct MonitorUpdate {
+    pub session_id: String,
     pub values: Vec<MonitorValueState>,
-    #[ts(type = "number")]
-    pub cycle_ms: u64,
+    pub running: bool,
 }
 
 /// One saved scan snapshot inside a project (P3-04).

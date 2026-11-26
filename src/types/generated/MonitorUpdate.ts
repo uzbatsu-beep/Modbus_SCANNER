@@ -2,6 +2,6 @@
 import type { MonitorValueState } from "./MonitorValueState";
 
 /**
- * Event emitted once per monitor poll cycle.
+ * Incremental monitor update; no complete history in live events.
  */
-export type MonitorUpdate = { values: Array<MonitorValueState>, cycle_ms: number, };
+export type MonitorUpdate = { session_id: string, values: Array<MonitorValueState>, running: boolean, };
