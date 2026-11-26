@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { t } from "@/i18n";
 import { computed, reactive, ref, watch, onMounted, onUnmounted } from "vue";
-import { trendSegments } from "@/types/measurement";
+import { trendSegments, rttTrend } from "@/types/measurement";
 import { addressSpace, readFunction, registerKey } from "@/types/registerIdentity";
 
-import type { DecodedValue, LogFormat, LoggerConfig, MonitorValueState, MonitorWatch, RotationMode } from "@/types/ipc";
+import type { CommunicationSnapshot, DecodedValue, LogFormat, LoggerConfig, MonitorValueState, MonitorWatch, RotationMode } from "@/types/ipc";
 import { useDevicesStore } from "@/stores/devices";
 import { useMonitorStore } from "@/stores/monitor";
 import { useSettingsStore } from "@/stores/settings";
@@ -19,6 +19,7 @@ const selectedPoint = ref<string | null>(null);
 watch(() => devices.selected?.key, () => { selectedPoint.value = null; });
 const watches = ref<MonitorWatch[]>([]);
 const trendKey = ref<string | null>(null);
+const diagnosticsMode = ref<"devices" | "channels">("devices");
 const windowMs = ref(60_000);
 const error = ref<string | null>(null);
 
@@ -151,6 +152,17 @@ const trend = computed(() => {
   const state = trendState.value;
   return state?.latest ? trendSegments(state.samples, state.latest.elapsed_us, windowMs.value) : null;
 });
+const diagnosticRows = computed(() => monitor.metrics?.[diagnosticsMode.value] ?? []);
+const staleKeys = computed(() => new Set(monitor.metrics?.channels.filter(c=>c.stale).map(c=>c.key) ?? []));
+function effectiveQuality(state: MonitorValueState): string {
+  return state.quality === "good" && (!monitor.running || staleKeys.value.has(state.key)) ? "stale" : state.quality;
+}
+function ms(us: number | null | undefined): string { return us == null ? "—" : (us/1000).toFixed(2); }
+function rate(ok: number, total: number): string { return total ? (ok*100/total).toFixed(1)+"%" : "—"; }
+function hz(us: number | null): string { return us && us > 0 ? (1000000/us).toFixed(2) : "—"; }
+const rttGraph = computed(() => {const s=trendState.value;return s?.latest ? rttTrend(s.samples,s.latest.elapsed_us,windowMs.value) : null;});
+const timing = computed(() => trendState.value?.latest?.timing);
+const diagnostics = computed<CommunicationSnapshot | null>(() => monitor.metrics);
 function age(state: MonitorValueState): string {
   return state.last_good ? Math.max(0,(clock.value - state.last_good.timestamp_ms)/1000).toFixed(1) + " s" : "—";
 }
@@ -169,7 +181,7 @@ function age(state: MonitorValueState): string {
       <button :disabled="monitor.running || selectedPoint === null" @click="addWatch">
         {{ t("add") }}
       </button>
-      <label class="short">{{ t("period") }}</label>
+      <label class="short">{{ t("pollDelay") }}</label>
       <input v-model.number="interval" type="number" min="250" max="10000" step="50" :disabled="monitor.running" />
       <label class="short">{{ t("historyCapacity") }}</label>
       <input v-model.number="historyCapacity" type="number" min="100" max="50000" step="100" :disabled="monitor.running || monitor.busy" />
@@ -195,12 +207,12 @@ function age(state: MonitorValueState): string {
         <tr v-for="v in monitor.values" :key="v.key" @click="trendKey = v.key">
           <td>{{ v.watch.name || v.key }} <span v-if="v.watch.unit" class="dim">{{ v.watch.unit }}</span></td>
           <td class="mono">{{ raw(v) }}</td>
-          <td class="mono" :class="{ dim: v.quality !== 'good' || !monitor.running }">{{ latest(v) }} <span v-if="(v.quality !== 'good' || !monitor.running) && v.last_good">({{ t("lastGood") }})</span></td>
+          <td class="mono" :class="{ dim: effectiveQuality(v) !== 'good' }">{{ latest(v) }} <span v-if="(effectiveQuality(v) !== 'good') && v.last_good">({{ t("lastGood") }})</span></td>
           <td class="mono">{{ stat(v.min) }}</td>
           <td class="mono">{{ stat(v.max) }}</td>
           <td class="mono">{{ stat(v.avg) }}</td>
           <td class="mono">{{ stat(v.delta) }}</td>
-          <td><span class="tag" :class="v.quality === 'good' && monitor.running ? 'ok' : v.quality === 'not_sampled' ? 'dim' : 'warn'" :title="v.latest?.detail || ''">{{ !monitor.running && v.quality === "good" ? "stale (stopped)" : v.quality }}{{ v.latest?.exception_code != null ? ' 0x' + v.latest.exception_code.toString(16).padStart(2,'0') : '' }}</span>
+          <td><span class="tag" :class="effectiveQuality(v) === 'good' ? 'ok' : v.quality === 'not_sampled' ? 'dim' : 'warn'" :title="v.latest?.detail || ''">{{ effectiveQuality(v) }}{{ v.latest?.exception_code != null ? ' 0x' + v.latest.exception_code.toString(16).padStart(2,'0') : '' }}</span>
             <small v-if="v.quality !== 'good' && v.last_good" class="dim"> {{ new Date(v.last_good.timestamp_ms).toLocaleTimeString() }}</small> <small class="dim">{{ age(v) }}</small></td>
           <td>{{ v.valid_samples }} / {{ v.invalid_samples }}</td>
         </tr>
@@ -227,6 +239,44 @@ function age(state: MonitorValueState): string {
         <circle v-for="(points, i) in trend.segments.filter(s => !s.includes(' '))" :key="'dot'+i" :cx="Number(points.split(',')[0])" :cy="Number(points.split(',')[1])" r="2" fill="var(--accent)" />
       </svg>
       <div v-else class="hint">{{ t("noTrend") }}</div>
+    </div>
+
+    <div v-if="diagnostics" class="comm-diag">
+      <div class="section-title">{{ t("communicationDiagnostics") }}</div>
+      <div class="metric-cards">
+        <div><small>{{ t("readSuccess") }}</small><strong>{{ rate(diagnostics.session.reads_ok,diagnostics.session.attempts) }}</strong></div>
+        <div><small>RTT AVG / P95 (ms)</small><strong>{{ ms(diagnostics.session.rtt_avg_us) }} / {{ ms(diagnostics.session.rtt_p95_us) }}</strong></div>
+        <div><small>{{ t("cycleDuration") }} / {{ t("cyclePeriod") }} (ms)</small><strong>{{ ms(diagnostics.cycle_us) }} / {{ ms(diagnostics.cycle_period_us) }}</strong></div>
+        <div><small>{{ t("expectedInterval") }} (ms)</small><strong>{{ ms(diagnostics.expected_interval_us) }}</strong></div>
+        <div><small>TX / RX (ADU)</small><strong>{{ diagnostics.session.requests }} / {{ diagnostics.session.responses }}</strong><small>{{ diagnostics.session.tx_bytes }} / {{ diagnostics.session.rx_bytes }} B</small></div>
+        <div><small>{{ t("errors") }}: Timeout / Exception / Invalid / I/O / Decode</small><strong>{{ diagnostics.session.timeouts }} / {{ diagnostics.session.exceptions }} / {{ diagnostics.session.invalid_responses }} / {{ diagnostics.session.transport_errors }} / {{ diagnostics.session.decode_errors }}</strong></div>
+      </div>
+      <div class="hint">RTT: {{ diagnostics.session.rtt_count }} / 1000 · P50 {{ ms(diagnostics.session.rtt_p50_us) }} · P99 {{ ms(diagnostics.session.rtt_p99_us) }} ms</div>
+      <div class="hint">{{ t("exceptionCodes") }}: {{ JSON.stringify(diagnostics.session.exception_codes) }} · {{ t("failureStages") }}: {{ JSON.stringify(diagnostics.session.failure_stages) }}</div>
+      <div class="form-row">
+        <label>{{ t("communicationDiagnostics") }}</label>
+        <select v-model="diagnosticsMode">
+          <option value="devices">{{ t("diagDevices") }}</option>
+          <option value="channels">{{ t("diagChannels") }}</option>
+        </select>
+      </div>
+      <div class="metric-scroll"><table class="data">
+        <thead><tr><th>{{ t("nameCol") }}</th><th>TX/RX</th><th>Read OK</th><th>RTT MIN/MAX</th><th>AVG/P50/P95/P99 (ms)</th><th>{{ t("sampleInterval") }} (ms)</th><th>Hz</th><th>Jitter (ms)</th><th>Errors*</th></tr></thead>
+        <tbody><tr v-for="r in diagnosticRows" :key="r.key">
+          <td>{{ r.label }} <span v-if="r.stale" class="tag warn">Stale</span></td><td>{{ r.requests }}/{{ r.responses }}</td><td>{{ rate(r.reads_ok,r.attempts) }}</td>
+          <td>{{ ms(r.rtt_min_us) }}/{{ ms(r.rtt_max_us) }}</td><td>{{ ms(r.rtt_avg_us) }}/{{ ms(r.rtt_p50_us) }}/{{ ms(r.rtt_p95_us) }}/{{ ms(r.rtt_p99_us) }}</td>
+          <td>{{ ms(r.interval_avg_us) }}</td><td>{{ hz(r.interval_avg_us) }}</td><td>{{ ms(r.jitter_avg_us) }}</td><td>{{ r.timeouts }}/{{ r.exceptions }}/{{ r.invalid_responses }}/{{ r.transport_errors }}/{{ r.decode_errors }}</td>
+        </tr></tbody>
+      </table></div>
+      <div class="hint">* Timeout / Exception / Invalid / I/O / Decode</div>
+      <div class="section-title">RTT · {{ trendState?.watch.name || trendKey || "—" }} (ms)</div>
+      <div v-if="rttGraph" class="hint">0 – {{ ms(rttGraph.hi*1000) }} ms · {{ t("actualTimeAxis") }}</div>
+      <svg v-if="rttGraph" viewBox="0 0 600 120" class="chart" preserveAspectRatio="none">
+        <polyline v-for="(points,i) in rttGraph.segments" :key="i" :points="points" fill="none" stroke="var(--accent)" stroke-width="2"/>
+        <circle v-for="(points,i) in rttGraph.segments.filter(s=>!s.includes(' '))" :key="'rtt'+i" :cx="Number(points.split(',')[0])" :cy="Number(points.split(',')[1])" r="2" fill="var(--accent)"/>
+      </svg>
+      <div v-else class="hint">{{ t("noTrend") }}</div>
+      <div v-if="timing" class="hint">Connect {{ ms(timing.connect_us) }} · Reset {{ ms(timing.reset_us) }} · TX {{ ms(timing.tx_us) }} · RX {{ ms(timing.rx_us) }} · RTT {{ ms(timing.rtt_us) }} · Validation {{ ms(timing.validation_us) }} · Decode {{ ms(timing.decode_us) }} · Total {{ ms(timing.acquisition_us) }} ms · {{ timing.failure_stage || "—" }}</div>
     </div>
 
     <div class="loggers">
@@ -365,4 +415,12 @@ function age(state: MonitorValueState): string {
   border-top: 1px solid var(--border);
   padding-top: 8px;
 }
+</style>
+
+<style scoped>
+.comm-diag { margin-top: 16px; }
+.metric-cards { display: grid; grid-template-columns: repeat(auto-fit,minmax(185px,1fr)); gap: 8px; margin: 8px 0; }
+.metric-cards > div { display:flex; flex-direction:column; gap:4px; border:1px solid var(--border, #64748b); border-radius:4px; padding:8px; }
+.metric-cards strong { font-variant-numeric:tabular-nums; font-size:1.1rem; }
+.metric-scroll {overflow-x:auto;}
 </style>

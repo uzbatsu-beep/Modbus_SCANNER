@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mergeChannel, trendSegments } from "../src/types/measurement.ts";
+import { mergeChannel, trendSegments, rttTrend } from "../src/types/measurement.ts";
 const sample = (sequence,elapsed_us,value,quality="good") => ({sequence,elapsed_us,timestamp_ms:0,quality,value:value===null?null:{kind:"float",value}});
 const state = (samples, session_id="a",capacity=3) => ({session_id,key:"x",latest:samples.at(-1),samples,history_capacity:capacity});
 test("incremental merge, deduplication, bounded history and stale snapshot",()=>{
@@ -19,4 +19,13 @@ test("negative values, real elapsed x spacing and explicit gaps",()=>{
   assert.equal(result.segments[0],"0.00,0.00 120.00,120.00");
   assert.equal(result.segments[1],"600.00,60.00");
   assert.equal(trendSegments([sample(1,0,null,"timeout")],0,500),null);
+});
+
+test("RTT graph excludes invalid frames and missing replies, includes valid exception",()=>{
+ const withTiming=(s,rtt)=>({...s,timing:{rtt_us:rtt}});
+ const result=rttTrend([withTiming(sample(1,0,50),10000),withTiming(sample(2,100000,null,"timeout"),null),withTiming(sample(3,200000,null,"invalid_response"),90000),withTiming(sample(4,300000,null,"modbus_exception"),20000)],300000,300);
+ assert.equal(result.hi,20);
+ assert.equal(result.segments.length,2);
+ assert.equal(result.segments[0],"0.00,60.00");
+ assert.equal(result.segments[1],"600.00,0.00");
 });

@@ -74,6 +74,7 @@ impl MonitorHandle {
         }
         let mut keys = std::collections::HashSet::new();
         let cycle_start = Instant::now();
+        metrics.write().begin_cycle(micros(started));
         for watch in &watches {
             let space = super::types::AddressSpace::from_read_function(watch.function)?;
             super::types::RegisterSpan {
@@ -283,12 +284,11 @@ async fn monitor_task(
             }
             let record = {
                 let mut all = values.write();
-                all.get_mut(&watch.key).map(|channel| channel.observe_timed(now_ms(), micros(started), parsed, timing, acquisition_start))
+                let record = all.get_mut(&watch.key).map(|channel| channel.observe_timed(now_ms(), micros(started), parsed, timing, acquisition_start));
+                if let Some(r) = &record { metrics.write().observe(watch, &r.sample); }
+                record
             };
-            if let Some(record) = record {
-                metrics.write().observe(watch, &record.sample);
-                sink.samples(&[record]);
-            }
+            if let Some(record) = record { sink.samples(&[record]); }
         }
         metrics.write().complete_cycle(micros(cycle_start));
     }
@@ -311,8 +311,12 @@ fn classify_transport(error: TransportError) -> (DataQuality, Option<u8>, String
 }
 
 fn emit_delta(sink: &EventSink, values: &RwLock<HashMap<String, Channel>>, metrics: &RwLock<Metrics>, elapsed: u64, session_id: &str, running: bool) {
-    let mut items: Vec<_> = values.write().values_mut().filter_map(Channel::delta).collect();
+    let (mut items, snapshot) = {
+        let mut channels = values.write();
+        let items: Vec<_> = channels.values_mut().filter_map(Channel::delta).collect();
+        (items, metrics.read().snapshot(elapsed,running))
+    };
     items.sort_by(|a,b| a.key.cmp(&b.key));
-    let update = MonitorUpdate { session_id: session_id.into(), values: items, running, metrics: metrics.read().snapshot(elapsed,running) };
+    let update = MonitorUpdate { session_id: session_id.into(), values: items, running, metrics: snapshot };
     if let Ok(value) = serde_json::to_value(&update) { sink.emit("monitor:update", value); }
 }

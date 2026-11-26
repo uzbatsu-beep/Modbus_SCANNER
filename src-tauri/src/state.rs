@@ -348,6 +348,10 @@ mod logger_v2_tests {
         assert_eq!(bad[13],"");
         assert_eq!(bad[14],"");
         assert_eq!(bad[16],"timeout");
+        assert_eq!(bad[23],""); // no RTT for a failed observation
+        let mut timed=record(DataQuality::Good,3);
+        timed.sample.timing.rtt_us=Some(1234);
+        assert_eq!(log_fields(&timed)[23],"1234");
         assert_eq!(quoted(&good[7]),"\"a;\"\"b\"");
     }
     #[test]

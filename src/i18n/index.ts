@@ -174,6 +174,7 @@ const ru = {
     qualityLabel: "Качество",
     lastGood: "последнее достоверное",
     actualTimeAxis: "Время от начала сеанса",
+    communicationDiagnostics: "Диагностика связи", pollDelay: "Задержка, мс", readSuccess: "Успешные чтения", cycleDuration: "Цикл", cyclePeriod: "Период цикла", expectedInterval: "Ожидаемый интервал", sampleInterval: "Фактический интервал", diagDevices: "Устройства", diagChannels: "Каналы", exceptionCodes: "Коды исключений", failureStages: "Стадии ошибок",
     loggerQueue: "Очередь / потери / ошибки записи",
   namedTags: "Именованные теги устройства",
 
@@ -473,6 +474,7 @@ const en: Record<TranslationKey, string> = {
     qualityLabel: "Quality",
     lastGood: "last good",
     actualTimeAxis: "Elapsed session time",
+    communicationDiagnostics: "Communication diagnostics", pollDelay: "Delay, ms", readSuccess: "Read success", cycleDuration: "Cycle duration", cyclePeriod: "Cycle period", expectedInterval: "Expected interval", sampleInterval: "Actual sample interval", diagDevices: "Devices", diagChannels: "Channels", exceptionCodes: "Exception codes", failureStages: "Failure stages",
     loggerQueue: "Pending / dropped / write failures",
   namedTags: "Named device tags",
 

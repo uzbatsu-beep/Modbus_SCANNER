@@ -35,3 +35,12 @@ export function trendSegments(samples: MonitorSample[], end: number, windowMs: n
   if (current.length) segments.push(current);
   return { segments: segments.map(x => x.join(" ")), zero: y(0), lo, hi };
 }
+
+/** Graph only validated complete responses; timeouts and invalid frames are gaps. */
+export function rttTrend(samples: MonitorSample[], end: number, windowMs: number) {
+  return trendSegments(samples.map(s => ({
+    ...s,
+    quality: (["good","decode_error","modbus_exception"].includes(s.quality) && s.timing?.rtt_us != null) ? "good" : "invalid_response",
+    value: s.timing?.rtt_us == null ? null : { kind: "float" as const, value: s.timing.rtt_us / 1000 },
+  })), end, windowMs);
+}

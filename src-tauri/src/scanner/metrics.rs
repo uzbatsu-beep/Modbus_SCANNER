@@ -1,4 +1,4 @@
-//! Session diagnostics. Exact nearest-rank percentiles over the last 1000 attempts.
+//! Session diagnostics. Exact nearest-rank percentiles over the last 1000 transmitted requests.
 use std::collections::{BTreeMap, VecDeque};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -61,6 +61,8 @@ pub struct CommunicationSnapshot {
     pub cycle_us: Option<u64>,
     #[ts(type = "number | null")]
     pub expected_interval_us: Option<u64>,
+    #[ts(type = "number | null")]
+    pub cycle_period_us: Option<u64>,
     #[ts(type = "number")]
     pub elapsed_us: u64,
 }
@@ -92,7 +94,7 @@ impl Accumulator {
         r.tx_bytes+=u64::from(s.timing.tx_bytes);
         r.rx_bytes+=u64::from(s.timing.rx_bytes);
         let valid_response=matches!(s.quality,DataQuality::Good|DataQuality::DecodeError|DataQuality::ModbusException);
-        push(&mut self.recent, if valid_response { s.timing.rtt_us } else { None });
+        if s.timing.tx_complete { push(&mut self.recent, if valid_response { s.timing.rtt_us } else { None }); }
         match s.quality {
             DataQuality::Good => {r.reads_ok+=1;r.good_values+=1;}
             DataQuality::DecodeError => {r.reads_ok+=1;r.decode_errors+=1;}
@@ -132,9 +134,12 @@ pub struct Metrics {
     channels: BTreeMap<String,Accumulator>,
     delay_ms:u32,
     cycle_us:Option<u64>,
+    cycle_period_us:Option<u64>,
+    last_cycle_start:Option<u64>,
 }
 impl Metrics {
-    pub fn new(delay_ms:u32)->Self {Self{session:Accumulator::new("session".into(),"Session".into()),devices:BTreeMap::new(),channels:BTreeMap::new(),delay_ms,cycle_us:None}}
+    pub fn new(delay_ms:u32)->Self {Self{session:Accumulator::new("session".into(),"Session".into()),devices:BTreeMap::new(),channels:BTreeMap::new(),delay_ms,cycle_us:None,cycle_period_us:None,last_cycle_start:None}}
+    pub fn begin_cycle(&mut self,elapsed:u64){self.cycle_period_us=self.last_cycle_start.map(|last|elapsed.saturating_sub(last));self.last_cycle_start=Some(elapsed);}
     pub fn complete_cycle(&mut self,us:u64){self.cycle_us=Some(us);}
     pub fn observe(&mut self,w:&MonitorWatch,s:&MonitorSample){
         let c=self.channels.entry(w.key.clone()).or_insert_with(||Accumulator::new(w.key.clone(),w.name.clone().unwrap_or_else(||w.key.clone())));
@@ -154,7 +159,7 @@ impl Metrics {
             session:self.session.snapshot(now,None,running),
             devices:self.devices.values().map(|a|a.snapshot(now,None,running)).collect(),
             channels:self.channels.values().map(|a|a.snapshot(now,expected,running)).collect(),
-            delay_ms:self.delay_ms,cycle_us:self.cycle_us,expected_interval_us:expected,elapsed_us:now,
+            delay_ms:self.delay_ms,cycle_us:self.cycle_us,expected_interval_us:expected,cycle_period_us:self.cycle_period_us,elapsed_us:now,
         }
     }
 }
@@ -198,5 +203,7 @@ mod tests {
         assert_eq!(s.channels[0].interval_avg_us,Some(325_000.0));assert_eq!(s.channels[0].jitter_avg_us,Some(50_000.0));
         assert!(s.channels[0].stale);assert!(!s.channels[1].stale);
         assert!(!m.snapshot(1_650_000,false).channels[0].stale);
+        m.begin_cycle(250_000);m.begin_cycle(550_000);
+        assert_eq!(m.snapshot(550_000,true).cycle_period_us,Some(300_000));
     }
 }

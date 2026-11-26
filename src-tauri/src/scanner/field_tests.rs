@@ -488,7 +488,16 @@ async fn typed_monitor_observes_errors_and_recovers_on_loopback() {
     assert_eq!(snapshot.samples[2].quality,DataQuality::InvalidResponse);
     assert_eq!(snapshot.samples[3].quality,DataQuality::Good);
     assert_eq!((snapshot.valid_samples,snapshot.invalid_samples),(2,2));
+    assert!(snapshot.samples.iter().all(|s|s.timing.connect_us.is_some() && s.timing.tx_complete && s.timing.rx_complete));
+    assert_eq!(snapshot.samples[2].timing.failure_stage.as_deref(),Some("validation"));
+    assert!(snapshot.samples[0].timing.decode_us.is_some());
     let updates=events.lock().unwrap();
     assert!(!updates.last().unwrap().running);
+    let diagnostics=&updates.last().unwrap().metrics;
+    assert_eq!(diagnostics.session.requests,4);
+    assert_eq!(diagnostics.session.reads_ok,2);
+    assert_eq!(diagnostics.session.rtt_count,3);
+    assert_eq!(diagnostics.session.invalid_responses,1);
+    assert!(diagnostics.cycle_us.is_some() && diagnostics.cycle_period_us.is_some());
     assert_eq!(updates.iter().flat_map(|u|u.values.iter()).flat_map(|v|v.samples.iter()).map(|s|s.sequence).collect::<Vec<_>>(),vec![1,2,3,4]);
 }
