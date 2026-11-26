@@ -1,6 +1,6 @@
 # PR #18 — 17.B Functional Integration
 
-Approved 2026-11-26: B Unified Runtime; independent per-connection monitor loops; 8 of 128 waiting slots reserved for manual/high priority; automatic RTU recovery with manual override; exclusive serial autodiscovery; scoped Stop cancels pending work and safely finishes active transactions; extend metrics and Logger; B.1–B.4; no merge before verification. PR #17 (17.A) is merged; #19 is 17.C UI.
+Approved 2026-11-26: B Unified Runtime; independent per-connection monitor loops; 8 of 128 waiting slots reserved for manual/high priority; automatic RTU recovery with manual override; exclusive serial autodiscovery; scoped Stop cancels pending work and safely finishes active transactions; extend metrics and Logger; B.1–B.4; no merge before verification. PR #17 (17.A) and #18 (B.1) are merged; #19 is B.2. B.3/B.4 and 17.C follow; final PR numbering remains indicative.
 
 ## B.1 — service foundation
 - Existing worker now limits normal/low admissions to 120; all priorities share 128 total waiting slots. High priority can use reserved capacity; dispatch weights remain 3:2:1. Queue rejection counter.
@@ -10,7 +10,7 @@ Approved 2026-11-26: B Unified Runtime; independent per-connection monitor loops
 - Structured service builds ADU using existing codecs, allocates MBAP IDs, checks request spans and supported functions, validates full response inside worker before next dispatch. Valid exceptions are not transport corruption; invalid reply triggers recovery. Complete rejected ADUs retained separately for later traffic logging. Native TCP loopback test covers valid exception on reused socket, wrong TID rejection and reconnect. No changes to existing authorization; callers must check policy. Raw frames and full FC43 workflow still require integration review.
 - Exact definition reuse only; incompatible config is rejected. No silent framing change. No application-wide registration/use yet. B.1 tests: reserve, scoped stop, exclusive lease, recovery policy, response validation and definition reuse.
 
-## B.2 — pending
+## B.2 — PR #19 in progress
 One service shared by GUI scanner/monitor/manual/COM test and local API; independent process instance for CLI. Route all production transport opens; special bounded discovery lease and ephemeral network scan connections; preserve Quiet Mode actual TX/connect pacing, retries only for reads, existing traffic records and raw frame semantics. Ensure resource lifetimes and validation do not bypass policy.
 
 ## B.3 — pending
@@ -21,3 +21,8 @@ Queue and reconnect metrics, Logger fields, source/connection identity, cross-to
 
 ## RU
 Утверждён вариант B. B.1 создаёт общий сервис и механизмы допуска, отмены и восстановления. B.2 переводит реальные инструменты, B.3 реализует независимый мониторинг, B.4 расширяет диагностику и завершает проверку. Не считать функциональную интеграцию законченной до прохождения всех этапов.
+
+### B.2 first integration commit
+One shared CommunicationService per GUI process, via ScannerHandle and MonitorHandle; local API shares ScannerHandle and CLI/headless gets its own instance. Serial scan and sweep claim the physical port for the whole run; monitor claims its serial ports atomically for the session; COM test uses same registry. Manual read/write/raw use operation-local managed workers (OnDemand while the persistent connection lifecycle is pending); validation before worker release, explicit write/raw authorization, read-only retries and deterministic cleanup. Existing TCP/UDP scanner and monitor paths remain direct for this intermediate commit. Serial legacy scan/monitor cannot share a port until they are migrated to workers; busy resource returns explicit error. No global resource lock. Existing quiet pacing, network scope policy and scan stop behavior unchanged. Persistent shared connections, network scanner migration, structured-service framing unification, FC43 integration and full cross-tool contention remain blocking B.2 acceptance.
+
+Intermediate verification includes real TCP loopback for invalid write echo and maximum 2000-coil read, manual rejection of an owned serial resource, and scanner/monitor/sweep refusal before I/O when the shared serial lease is busy. The previous manual API does not yet expose framing/TLS selection; full protocol unification and persistent shared connections are not implemented in this commit. Recovery wait is effective between requests to the same worker; cross-lifetime late RTU reply protection remains a B.2 blocker.

@@ -256,3 +256,31 @@ async fn scoped_transaction_future_is_send(){
     // No registered resource: this must fail without opening a transport.
     assert!(future.await.is_err());
 }
+
+#[tokio::test]
+async fn owned_multi_port_lease_is_atomic_and_moves_into_task(){
+    let m=Arc::new(ConnectionManager::new());
+    let a=if cfg!(windows){"COM91"}else{"/dev/modbus-test-a"};
+    let b=if cfg!(windows){"COM92"}else{"/dev/modbus-test-b"};
+    let held=m.lease_serial(b).unwrap();
+    assert!(m.lease_serials([a,b]).is_err());
+    let only_a=m.lease_serial(a).unwrap();
+    drop(only_a);drop(held);
+    let lease=m.lease_serials([a,b,a]).unwrap();
+    assert!(m.lease_serial(a).is_err());
+    tokio::spawn(async move{drop(lease);}).await.unwrap();
+    assert!(m.lease_serials([a,b]).is_ok());
+}
+#[tokio::test]
+async fn temporary_worker_releases_resource_after_close_and_drop(){
+    let m=Arc::new(ConnectionManager::new());
+    let t=m.temporary(definition("one",502)).unwrap();
+    assert!(m.temporary(definition("two",502)).is_err());
+    t.close().await.unwrap();
+    let t=m.temporary(definition("two",502)).unwrap();
+    drop(t);
+    tokio::time::timeout(Duration::from_secs(3),async{
+        while !m.snapshot().is_empty(){tokio::task::yield_now().await;}
+    }).await.unwrap();
+    m.temporary(definition("three",502)).unwrap().close().await.unwrap();
+}

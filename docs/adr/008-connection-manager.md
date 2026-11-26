@@ -15,3 +15,6 @@ Tradeoff: no request pipelining, adaptive polling, full workspace migration, bac
 
 ## Amendment: staged merge and 17.B
 Maintainer approved merge of 17.A alone and separate PRs #18 (17.B) and #19 (17.C). PR #18 contract: [FUNCTIONAL_INTEGRATION](../FUNCTIONAL_INTEGRATION.md). No merge of #18 until all B stages verified and authorized.
+
+
+B.1 merged after maintainer approval; B.2 is PR #19. Remaining B.3/B.4 and 17.C follow separately; no implied completion of Unified Runtime.

@@ -18,3 +18,6 @@ Persist connection definitions, generated IPC, editor and lifecycle controls in 
 
 
 Staged merge of isolated 17.A approved and completed; 17.B/17.C are separate PRs. See [FUNCTIONAL_INTEGRATION](FUNCTIONAL_INTEGRATION.md) for the new approved parameters. The earlier full-PR merge restriction is superseded only for 17.A.
+
+
+B.1 merged in PR #18; B.2 is PR #19. [Integration contract](FUNCTIONAL_INTEGRATION.md) tracks intermediate scope and remaining requirements.

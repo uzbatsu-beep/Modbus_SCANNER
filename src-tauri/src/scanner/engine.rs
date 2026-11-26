@@ -14,6 +14,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
+use crate::communication::service::CommunicationService;
+use crate::transport::connection::SerialLease;
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
@@ -204,6 +206,7 @@ struct ScanControl {
 
 /// Shared engine state handle.
 pub struct ScannerHandle {
+    communication: Arc<CommunicationService>,
     /// Lifecycle control for the active task (None when idle).
     control_tx: Mutex<Option<ScanControl>>,
     /// Current status (watch: UI reads it cheaply).
@@ -219,14 +222,19 @@ impl Default for ScannerHandle {
 }
 
 impl ScannerHandle {
-    pub fn new() -> Self {
+    pub fn new() -> Self {Self::with_communication(Arc::new(CommunicationService::default()))}
+
+    pub fn with_communication(communication:Arc<CommunicationService>)->Self {
         let (status_tx, _) = watch::channel(ScanStatus::Idle);
         Self {
+            communication,
             control_tx: Mutex::new(None),
             status_tx,
             results: Arc::new(RwLock::new(ScanResults::default())),
         }
     }
+
+    pub fn communication(&self)->Arc<CommunicationService>{self.communication.clone()}
 
     pub fn status(&self) -> ScanStatus {
         *self.status_tx.borrow()
@@ -305,11 +313,13 @@ impl ScannerHandle {
         }
 
         let engine_params = EngineParams::from_scan_params(&params);
+        let serial_port=scan_serial_port(&target).map(str::to_owned);
         let strategy = build_strategy(target, params).map_err(|error| {
             self.status_tx.send_replace(ScanStatus::Failed);
             error
         })?;
 
+        let lease=serial_port.as_deref().map(|port|self.communication.manager.lease_serial(port)).transpose().map_err(|e|e.to_string())?;
         let (tx, rx) = mpsc::channel(8);
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let (pause_tx, pause_rx) = watch::channel(false);
@@ -337,6 +347,7 @@ impl ScannerHandle {
             (pause_tx, pause_rx),
             self.results.clone(),
             self.status_tx.clone(),
+            lease,
         ));
         Ok(())
     }
@@ -368,6 +379,19 @@ impl ScannerHandle {
     }
 }
 
+fn scan_serial_port(target:&ScanTarget)->Option<&str>{
+    match target{
+        ScanTarget::UnitIdRange{port,..}=>Some(&port.port_name),
+        ScanTarget::SerialAuto{sweep}=>Some(&sweep.port_name),
+        ScanTarget::RegisterScan{scan}=>device_serial_port(&scan.target),
+        ScanTarget::SingleDevice{target,..}=>device_serial_port(target),
+        ScanTarget::IpRange{..}=>None,
+    }
+}
+pub(crate) fn device_serial_port(target:&DeviceTarget)->Option<&str>{
+    if matches!(target.kind,TransportKind::Rtu|TransportKind::Ascii){target.serial.as_ref().map(|s|s.port_name.as_str())}else{None}
+}
+
 /// Wait for a stop request independently of the normal control-message queue.
 /// The watch value is sticky, so a Stop issued before a worker starts is not lost.
 async fn wait_for_cancel(receiver: &mut watch::Receiver<bool>) {
@@ -392,6 +416,7 @@ async fn engine_task(
     (pause_tx, mut pause_rx): (watch::Sender<bool>, watch::Receiver<bool>),
     results: Arc<RwLock<ScanResults>>,
     status_tx: watch::Sender<ScanStatus>,
+    serial_lease: Option<SerialLease>,
 ) {
     let total = strategy.total();
     let request_gap = engine.request_gap;
@@ -711,6 +736,7 @@ async fn engine_task(
     if let Some(mut transport) = serial_transport.take() {
         let _ = transport.close().await;
     }
+    drop(serial_lease);
     control_rx.close();
     user_cancelled |= *cancel_rx.borrow();
     {
