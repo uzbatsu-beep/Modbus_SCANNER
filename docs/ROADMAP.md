@@ -26,7 +26,7 @@ Prototype: correct data, reliable communication, distinctive engineering workflo
 | #14 | Typed Monitoring Engine | R01 | signed values, consistent table/trend/log, quality |
 | #15 | Communication Metrics | R04 | measured RTT, cycle/period, error categories |
 | #16 | Workbench Shell & Design System | UI-01/UI-02 | approved variant B; resizable panels, compact RU/EN, themes, persistence, existing workflows |
-| #17 | Connection & Transport Manager | R20, baseline R03 | serial ownership, independent sessions/cancellation |
+| #17 | Connection & Transport Manager | R20, baseline R03 | approved B: 17.A core → 17.B integration → 17.C UI; [contract](CONNECTION_MANAGER.md) |
 | #18 | Project Explorer & Workspace Manager | UI-03/UI-04, R08/R19/R25 | stable objects and independent session tabs |
 | #19 | Extended Data Types | R05 | exact 64-bit IPC, ENUM/bitfields |
 | #20 | Profile Schema v2 | R06 | validated versioned schema |

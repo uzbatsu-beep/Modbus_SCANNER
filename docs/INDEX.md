@@ -82,3 +82,5 @@ These are target specifications, not claims of features already implemented. Exi
 - [COMMUNICATION_METRICS](COMMUNICATION_METRICS.md) — PR #15 measured stages, RTT distributions, cycle and stale diagnostics.
 
 - [WORKBENCH_SHELL](WORKBENCH_SHELL.md) — approved UI shell, layout and acceptance.
+
+- [CONNECTION_MANAGER](CONNECTION_MANAGER.md) — PR #17 phases, resource ownership and acceptance.
