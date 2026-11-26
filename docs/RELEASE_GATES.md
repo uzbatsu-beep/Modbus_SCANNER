@@ -5,7 +5,7 @@
 ## Policy
 
 The maintainer controls merges and official releases **without requiring a second person**.
-Technical safeguards stay strict: PR-only changes, five required CI checks,
+Technical safeguards stay strict: PR-only changes, three required development check contexts (five at final acceptance),
 up-to-date `main`, protected `v*` tags, successful Windows QA on the **exact**
 release commit, verifiable physical bench PASS, and a **manual** release dispatch.
 No `push.tags` trigger, telemetry, automated release after merge, or bypass list.
@@ -31,15 +31,14 @@ competing rule**. In *Require a pull request before merging*:
 
 Do **not** change: enforcement **Active**, main/default-branch target, empty
 bypass list, deletion/force-push restrictions, strict up-to-date status checks,
-and the five required jobs:
+and keep these three required jobs during development:
 
 ```text
 Governance (release gate tests)
 Frontend (typecheck + build)
 Backend (cargo check + tests) (windows-latest)
-Backend (cargo check + tests) (ubuntu-latest)
-Backend (cargo check + tests) (macos-latest)
 ```
+Remove the Linux and macOS contexts from this existing rule during development. Restore both at final acceptance using `.github/rulesets/main-final.json`; do not create a competing rule.
 
 Check the [release tag Ruleset](https://github.com/uzbatsu-beep/Modbus_SCANNER/rules/27728718):
 keep it **Active**, with deletion, update and non-fast-forward denied for
@@ -68,7 +67,7 @@ stop on any failed gate.
 
 Before starting the official release:
 
-1. Verify successful CI (all five jobs) and Windows QA on the *same final SHA of
+1. Restore both native Linux/macOS required checks in the active main Ruleset. Verify successful routine main-push CI, manually run CI on `main` (all five jobs must actually pass; no skips), and Windows QA on the *same final SHA of
    `main`*. PR-head QA artifacts do **not** qualify.
 2. Use **Issues → New issue → Release bench acceptance / Стендовая приёмка**
    and record a real, isolated physical hardware test (not simulated CI).
@@ -102,7 +101,7 @@ From **main**, run *Release (manual, verified)* with:
 - `bench_evidence_url` = repository GitHub Issue URL, without fragments.
 
 The preflight checks current main and checkout SHA, active main/tag Rulesets,
-all five successful CI checks, Windows QA completion and artifact, actual
+successful main-push CI plus all five actually successful jobs in a manual full-platform run on the exact SHA, Windows QA completion and artifact, actual
 bench Issue fields and release/tag nonexistence. Windows packaging repeats
 the tests and produces EXE, MSI, SHA256SUMS and BUILD-INFO. The publish job
 rechecks gates, verifies checksums and creates a **new** versioned GitHub
@@ -122,3 +121,7 @@ the relevant hardware, gateways, firmware and operational safety procedures.
 ## Live settings verification — 2026-11-21
 
 **Important distinction:** this page describes the **proposed PR #10 policy**. As read from GitHub on 2026-11-21, the *active* main Ruleset `27728708` still has `required_approving_review_count = 1` and `require_last_push_approval = true`; the `v*` tag Ruleset `27728718` is active. Do not report solo-maintainer merging as enabled until GitHub Settings is edited and verified. No hardware PASS evidence was established in this audit. See [dated facts](AUDIT_2026-11-21.md) and [documentation index](INDEX.md).
+
+
+## Windows-first transition (PR #23)
+Routine PR/push CI runs the Windows Rust backend, platform-independent frontend/governance and separate Windows QA. Native Linux/macOS jobs are skipped at job level; remove their required status contexts from the active development Ruleset. This does not establish Linux/macOS compatibility. On the final main SHA use Actions → CI → Run workflow to execute all three platforms. The release gate verifies actual successful job conclusions, not only the workflow result or skipped status. The live Ruleset must be edited by the administrator; all other protection and immutable tags remain unchanged. Final release refuses a development-only Ruleset. Linux/macOS installer build workflow is deferred to final development. The historical audit above is not the current state: live Ruleset 27728708 verified at PR #22 review with zero mandatory reviewers, resolved threads and strict checks.

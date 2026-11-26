@@ -158,3 +158,6 @@ full text.
 - **Automation:** tests and Windows QA verify code and installer generation, **not physical RS-485 operation**. Follow [field acceptance](docs/FIELD_VALIDATION_v1.0.1.md) before any new production release.
 - **Governance:** the live `main` Ruleset currently requires one independent review, while [PR #10](https://github.com/uzbatsu-beep/Modbus_SCANNER/pull/10) proposes a zero-review solo-maintainer policy. The JSON template alone does not change GitHub Settings.
 - For documentation by topic, risks and evidence, see [documentation index](docs/INDEX.md), [current audit](docs/AUDIT_2026-11-21.md) and [manual release gates](docs/RELEASE_GATES.md).
+
+
+**Windows-first:** routine native tests and installer QA target Windows; Linux/macOS are validated in an explicit final full-platform run on the final SHA. See [release gates](docs/RELEASE_GATES.md).

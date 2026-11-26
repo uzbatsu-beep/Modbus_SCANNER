@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { validateEvidence, REQUIRED_CHECKS } from "./verify-release-gates.mjs";
+import { validateEvidence, REQUIRED_CHECKS, DEVELOPMENT_CHECKS } from "./verify-release-gates.mjs";
 
 const SHA = "a".repeat(40);
 const branch = {
@@ -43,6 +43,9 @@ function fixture() {
     ciRuns: [{ head_sha: SHA, head_branch: "main", event: "push",
       status: "completed", conclusion: "success",
       path: ".github/workflows/ci.yml" }],
+    fullCiRuns: [{ head_sha: SHA, head_branch: "main", event: "workflow_dispatch",
+      status: "completed", conclusion: "success", path: ".github/workflows/ci.yml",
+      jobs: REQUIRED_CHECKS.map((name) => ({ name, status: "completed", conclusion: "success" })) }],
     qaRun: { id: 15, head_sha: SHA, head_branch: "main",
       status: "completed", conclusion: "success", event: "workflow_dispatch",
       path: ".github/workflows/windows-qa.yml" },
@@ -75,6 +78,15 @@ const cases = [
   ["refusing release overwrite", (f) => { f.releaseAlreadyExists = true; }, /already exists/],
   ["refusing tag replacement", (f) => { f.tagAlreadyExists = true; }, /already exists/],
   ["refusing missing main CI", (f) => { f.ciRuns = []; }, /CI/],
+  ["refusing missing final cross-platform CI", (f) => { f.fullCiRuns = []; }, /full three-platform CI/],
+  ["refusing skipped Linux test", (f) => { f.fullCiRuns[0].jobs[3].conclusion = "skipped"; }, /full three-platform CI/],
+  ["refusing skipped macOS test", (f) => { f.fullCiRuns[0].jobs[4].conclusion = "skipped"; }, /full three-platform CI/],
+  ["refusing missing final platform job", (f) => { f.fullCiRuns[0].jobs.pop(); }, /full three-platform CI/],
+  ["refusing failed final platform job", (f) => { f.fullCiRuns[0].jobs[4].conclusion = "failure"; }, /full three-platform CI/],
+  ["refusing final CI on old SHA", (f) => { f.fullCiRuns[0].head_sha = "b".repeat(40); }, /full three-platform CI/],
+  ["refusing final CI on another branch", (f) => { f.fullCiRuns[0].head_branch = "feature"; }, /full three-platform CI/],
+  ["refusing routine run as final CI", (f) => { f.fullCiRuns[0].event = "push"; }, /full three-platform CI/],
+  ["refusing wrong final workflow", (f) => { f.fullCiRuns[0].path = ".github/workflows/ci.yml.untrusted"; }, /full three-platform CI/],
   ["refusing PR-only CI", (f) => { f.ciRuns[0].event = "pull_request"; }, /CI/],
   ["refusing similar but wrong CI workflow", (f) => {
     f.ciRuns[0].path = ".github/workflows/ci.yml.insecure"; }, /CI/],
@@ -132,8 +144,7 @@ test("repository main Ruleset template requires PR but no second-person reviewer
   assert.equal(pr.parameters.required_review_thread_resolution, true);
   const checks = rule.rules.find((r) => r.type === "required_status_checks");
   assert.equal(checks.parameters.strict_required_status_checks_policy, true);
-  assert.ok(REQUIRED_CHECKS.every((c) =>
-    checks.parameters.required_status_checks.some((k) => k.context === c)));
+  assert.deepEqual(checks.parameters.required_status_checks.map((k) => k.context).sort(), [...DEVELOPMENT_CHECKS].sort());
   for (const type of ["deletion", "non_fast_forward"]) {
     assert.ok(rule.rules.some((r) => r.type === type));
   }
@@ -154,4 +165,38 @@ test("physical bench Issue template records every attestation field", () => {
   for (const marker of ["Source SHA:", "Bench result: PENDING", "Hardware:", "Transport:", "Test summary:"]) {
     assert.ok(template.includes(marker), marker);
   }
+});
+
+
+test("Windows-first workflow preserves required names and defers native Linux/macOS jobs", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(workflow, /^  workflow_dispatch:/m);
+  for (const name of REQUIRED_CHECKS) assert.ok(workflow.includes("name: " + name), name);
+  for (const [job, runner] of [["backend-linux", "ubuntu-latest"], ["backend-macos", "macos-latest"]]) {
+    const block = workflow.split("  " + job + ":\n")[1].split(/\n  [a-z][\w-]*:/)[0];
+    assert.ok(block.includes("if: github.event_name == 'workflow_dispatch'"));
+    assert.ok(block.includes("runs-on: " + runner));
+    assert.ok(block.includes("cargo test --lib"));
+  }
+  const windows = workflow.split("  backend:\n")[1].split("\n  backend-linux:")[0];
+  assert.ok(windows.includes("runs-on: windows-latest"));
+  assert.ok(!windows.includes("github.event_name == 'workflow_dispatch'"));
+});
+
+
+test("final Ruleset template restores exactly five required contexts without relaxing protection", () => {
+  const dev = JSON.parse(readFileSync(new URL("../.github/rulesets/main.json", import.meta.url), "utf8"));
+  const final = JSON.parse(readFileSync(new URL("../.github/rulesets/main-final.json", import.meta.url), "utf8"));
+  const contexts = final.rules.find((r) => r.type === "required_status_checks").parameters.required_status_checks;
+  assert.deepEqual(contexts.map((k) => k.context).sort(), [...REQUIRED_CHECKS].sort());
+  const normalized = structuredClone(final);
+  normalized.name = dev.name;
+  normalized.rules.find((r) => r.type === "required_status_checks").parameters.required_status_checks =
+    dev.rules.find((r) => r.type === "required_status_checks").parameters.required_status_checks;
+  assert.deepEqual(normalized, dev);
+});
+test("official release refuses development-only Ruleset even with successful final CI", () => {
+  const f = fixture();
+  f.rulesets = [JSON.parse(readFileSync(new URL("../.github/rulesets/main.json", import.meta.url), "utf8")), tags];
+  assert.throws(() => validateEvidence(f), /restore all 5 strict CI jobs/);
 });
