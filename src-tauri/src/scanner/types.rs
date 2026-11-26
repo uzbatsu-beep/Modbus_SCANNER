@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 
 use crate::modbus::common::TransportKind;
-use crate::modbus::decode::DecodeSpec;
+use crate::modbus::decode::{DataType, DecodeSpec};
 use crate::modbus::frame::DeviceIdentification;
 use crate::transport::tcp::TcpFraming;
 use crate::transport::tls::TlsParams;
@@ -342,33 +342,139 @@ impl DeviceProfile {
         }
     }
 
-    /// Turn the profile's register descriptions into tags for one device.
-    pub fn to_tags(&self, device_key: &str) -> Vec<TagDefinition> {
-        self.registers
-            .iter()
-            .map(|r| TagDefinition {
-                device_key: device_key.to_string(),
-                address: r.address,
-                name: r.name.clone(),
-                spec: r.spec,
-                unit: r.unit.clone(),
-                description: r.description.clone(),
-            })
-            .collect()
+    /// Turn profile registers into independently identified engineering tags.
+    pub fn to_tags(&self, device_key: &str) -> Result<Vec<TagDefinition>, String> {
+        let tags: Vec<TagDefinition> = self.registers.iter().map(|r| {
+            let source = RegisterSpan {
+                start: RegisterKey {
+                    device_key: device_key.to_string(),
+                    address_space: AddressSpace::from_read_function(r.function)?,
+                    address: r.address,
+                },
+                quantity: register_width(r.spec.data_type),
+            };
+            let id = format!("profile:{}", serde_json::to_string(&(device_key, &self.id, r.function, r.address, &r.name)).map_err(|e| e.to_string())?);
+            let tag = TagDefinition {
+                id, source, name: r.name.clone(), spec: r.spec,
+                unit: r.unit.clone(), description: r.description.clone(),
+                profile_id: Some(self.id.clone()),
+            };
+            tag.validate()?;
+            Ok(tag)
+        }).collect::<Result<Vec<_>, String>>()?;
+        validate_tags(&tags)?;
+        Ok(tags)
     }
 }
 
-/// A named register tag with decoding/scaling (P3-03).
+/// The four independent Modbus address spaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+#[serde(rename_all = "snake_case")]
+pub enum AddressSpace {
+    Coils,
+    DiscreteInputs,
+    HoldingRegisters,
+    InputRegisters,
+}
+
+impl AddressSpace {
+    pub fn from_read_function(function: u8) -> Result<Self, String> {
+        match function {
+            1 => Ok(Self::Coils),
+            2 => Ok(Self::DiscreteInputs),
+            3 => Ok(Self::HoldingRegisters),
+            4 => Ok(Self::InputRegisters),
+            _ => Err(format!("unsupported read function FC{function:02X}; expected FC01..FC04")),
+        }
+    }
+
+    pub fn read_function(self) -> u8 {
+        match self {
+            Self::Coils => 1, Self::DiscreteInputs => 2,
+            Self::HoldingRegisters => 3, Self::InputRegisters => 4,
+        }
+    }
+
+    pub fn is_bit_space(self) -> bool {
+        matches!(self, Self::Coils | Self::DiscreteInputs)
+    }
+}
+
+/// Identity of one raw Modbus address.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, TS)]
+pub struct RegisterKey {
+    pub device_key: String,
+    pub address_space: AddressSpace,
+    pub address: u16,
+}
+
+/// A contiguous range within one address space.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+pub struct RegisterSpan {
+    pub start: RegisterKey,
+    pub quantity: u16,
+}
+
+impl RegisterSpan {
+    pub fn validate(&self) -> Result<(), String> {
+        let max = if self.start.address_space.is_bit_space() { 2000 } else { 125 };
+        if self.start.device_key.trim().is_empty() || self.quantity == 0 || self.quantity > max ||
+            u32::from(self.start.address) + u32::from(self.quantity) > 65536 {
+            return Err("invalid register span (device, quantity or address boundary)".into());
+        }
+        Ok(())
+    }
+}
+
+pub fn register_width(data_type: DataType) -> u16 {
+    match data_type {
+        DataType::Int32 | DataType::Uint32 | DataType::Float32 => 2,
+        _ => 1,
+    }
+}
+
+/// An independently identified engineering tag.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
 pub struct TagDefinition {
-    pub device_key: String,
-    pub address: u16,
+    pub id: String,
+    pub source: RegisterSpan,
     pub name: String,
     pub spec: DecodeSpec,
     #[serde(default)]
     pub unit: Option<String>,
     #[serde(default)]
     pub description: Option<String>,
+    #[serde(default)]
+    pub profile_id: Option<String>,
+}
+
+impl TagDefinition {
+    pub fn validate(&self) -> Result<(), String> {
+        self.source.validate()?;
+        if self.id.trim().is_empty() || self.name.trim().is_empty() {
+            return Err("tag ID and name are required".into());
+        }
+        if self.source.quantity != register_width(self.spec.data_type) ||
+            (self.source.start.address_space.is_bit_space() && self.spec.data_type != DataType::Uint16) {
+            return Err("tag data type does not match register span/address space".into());
+        }
+        if !self.spec.multiplier.is_finite() || !self.spec.divider.is_finite() ||
+            self.spec.divider == 0.0 || !self.spec.offset.is_finite() {
+            return Err("invalid tag scaling".into());
+        }
+        Ok(())
+    }
+}
+
+pub fn validate_tags(tags: &[TagDefinition]) -> Result<(), String> {
+    let mut ids = std::collections::HashSet::new();
+    for tag in tags {
+        tag.validate()?;
+        if !ids.insert(&tag.id) {
+            return Err(format!("duplicate tag ID: {}", tag.id));
+        }
+    }
+    Ok(())
 }
 
 /// One discovered device + all its collected data.
@@ -769,5 +875,65 @@ impl ScanStats {
             (Some(s), None) => now_ms().saturating_sub(s),
             _ => 0,
         }
+    }
+}
+
+#[cfg(test)]
+mod register_identity_tests {
+    use super::*;
+
+    fn tag(id: &str, device: &str, space: AddressSpace, address: u16) -> TagDefinition {
+        TagDefinition {
+            id: id.into(), source: RegisterSpan { start: RegisterKey {
+                device_key: device.into(), address_space: space, address
+            }, quantity: 1 }, name: id.into(), spec: DecodeSpec::default(),
+            unit: None, description: None, profile_id: None,
+        }
+    }
+
+    #[test]
+    fn four_address_spaces_round_trip_and_reject_writes() {
+        for fc in 1..=4 {
+            assert_eq!(AddressSpace::from_read_function(fc).unwrap().read_function(), fc);
+        }
+        for fc in [0, 5, 6, 8, 16, 255] {
+            assert!(AddressSpace::from_read_function(fc).is_err());
+        }
+    }
+
+    #[test]
+    fn independent_tags_and_register_keys() {
+        let a = tag("a", "rtu:COM3:1", AddressSpace::HoldingRegisters, 8193);
+        let b = tag("b", "rtu:COM3:1", AddressSpace::InputRegisters, 8193);
+        let c = tag("c", "rtu:COM3:2", AddressSpace::HoldingRegisters, 8193);
+        let d = tag("d", "rtu:COM3:1", AddressSpace::HoldingRegisters, 8193);
+        assert_ne!(a.source.start, b.source.start);
+        assert_ne!(a.source.start, c.source.start);
+        assert_eq!(a.source.start, d.source.start);
+        assert!(validate_tags(&[a.clone(), b, c, d]).is_ok());
+        assert!(validate_tags(&[a.clone(), a]).is_err());
+    }
+
+    #[test]
+    fn span_boundary_and_decode_width() {
+        let mut t = tag("a", "device", AddressSpace::HoldingRegisters, 65535);
+        assert!(t.validate().is_ok());
+        t.spec.data_type = DataType::Float32;
+        t.source.quantity = 2;
+        assert!(t.validate().is_err());
+        t.source.start.address = 65534;
+        assert!(t.validate().is_ok());
+        t.source.quantity = 1;
+        assert!(t.validate().is_err());
+    }
+
+    #[test]
+    fn tag_json_round_trip_and_legacy_rejection() {
+        let t = tag("a", "device", AddressSpace::InputRegisters, 0);
+        let json = serde_json::to_string(&t).unwrap();
+        let back: TagDefinition = serde_json::from_str(&json).unwrap();
+        assert_eq!(back.id, t.id);
+        assert_eq!(back.source, t.source);
+        assert!(serde_json::from_str::<TagDefinition>(r#"{"device_key":"device","address":0,"name":"old","spec":{}}"#).is_err());
     }
 }

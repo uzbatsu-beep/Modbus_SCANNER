@@ -160,7 +160,7 @@ const ru = {
 
   // Register inspector
   inspectorTitle: "Интерпретация регистров / Register inspector",
-  selectRegisters: "Выберите 1–2 регистра в таблице выше (для 32-битных значений нужны два).",
+  selectRegisters: "Выберите 1–2 соседних регистра одного FC (для 32-битных значений нужны два).",
   inspectorAddresses: "Адреса",
   decoding: "декодирование…",
   type: "Тип",
@@ -454,7 +454,7 @@ const en: Record<TranslationKey, string> = {
   classUnknown: "not probed",
 
   inspectorTitle: "Register inspector",
-  selectRegisters: "Select 1–2 registers in the table above (32-bit values need two).",
+  selectRegisters: "Select 1–2 adjacent registers in one FC (32-bit values need two).",
   inspectorAddresses: "Addresses",
   decoding: "decoding…",
   type: "Type",

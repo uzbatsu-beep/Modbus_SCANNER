@@ -135,8 +135,8 @@ via `tauri::generate_handler!`.
 ## Configuration persistence
 
 `Config` lives in `state.rs`; `get_config`/`save_config`/`load_config` read/write
-`config.json` under Tauri's `app_config_dir()` (e.g.
-`%APPDATA%\com.modbus-scanner.app\config.json` on Windows).
+`config-v2.json` under Tauri's `app_config_dir()` (e.g.
+`%APPDATA%\com.modbus-scanner.app\config-v2.json` on Windows).
 
 ## Planned modules (v0.2+, see [PLAN.md](PLAN.md))
 
@@ -169,3 +169,5 @@ A future CLI can pass `EventSink::null()` or its own emitter — no engine chang
 The current execution path is Rust protocol/transport → scanner engine and safety checks → Tauri commands or opt-in loopback API → Vue/Pinia UI. Transport abstractions must preserve timeout, cancellation and read-only discovery invariants. The historical `Planned modules (v0.2+)` section below reflects the design **at the time it was written**, not an authoritative implementation tracker; use [ROADMAP](ROADMAP.md) and source/test evidence instead.
 
 Security review follow-up: `src-tauri/tauri.conf.json` currently has `app.security.csp: null`. Assess a restrictive CSP together with Tauri capabilities and actual WebView assets in a separate tested change. This note is not a claim of a demonstrated exploit. See [SECURITY](SECURITY.md), [audit](AUDIT_2026-11-21.md).
+
+PR #13: AddressSpace → RegisterKey → RegisterSpan → TagDefinition.id; register lookup does not mix FC03/FC04. Inspector decodes only complete spans; zero is a valid word. Project v1 is not migrated automatically; separate v2 config. [Data model](DATA_MODEL.md).

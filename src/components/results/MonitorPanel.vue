@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "@/i18n";
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
+import { addressSpace, readFunction, registerKey } from "@/types/registerIdentity";
 
 import type { LogFormat, LoggerConfig, MonitorWatch, RotationMode } from "@/types/ipc";
 import { useDevicesStore } from "@/stores/devices";
@@ -12,7 +13,8 @@ const monitor = useMonitorStore();
 const settings = useSettingsStore();
 
 const interval = ref(1000);
-const selectedAddress = ref<number | null>(null);
+const selectedPoint = ref<string | null>(null);
+watch(() => devices.selected?.key, () => { selectedPoint.value = null; });
 const watches = ref<MonitorWatch[]>([]);
 const trendKey = ref<string | null>(null);
 const windowMs = ref(60_000);
@@ -63,30 +65,36 @@ function removeLogger(id: string) {
 }
 
 const available = computed(() => {
-  if (!devices.selected) return [];
-  return Object.values(devices.selected.registers)
-    .flatMap((r) => (r ? [r] : []))
-    .sort((a, b) => a.address - b.address);
+  const dev = devices.selected;
+  if (!dev) return [];
+  const points: { label: string; watch: MonitorWatch }[] = [];
+  const raw = Object.values(dev.registers).flatMap(r => r ? [r] : [])
+    .sort((a,b) => a.function - b.function || a.address - b.address);
+  for (const r of raw) {
+    if (!addressSpace(r.function)) continue;
+    const label = `FC${String(r.function).padStart(2,"0")} · 0x${r.address.toString(16).padStart(4,"0")} · RAW`;
+    points.push({ label, watch: {
+      key: "raw:" + JSON.stringify([dev.key, registerKey(r.function, r.address)]),
+      target: dev.target, function: r.function, address: r.address, quantity: 1,
+      name: `${dev.target.endpoint}/${dev.target.unit_id} · ${label}`, unit: null,
+    } });
+  }
+  for (const tag of settings.config.tags.filter(t => t.source.start.device_key === dev.key)) {
+    const { start, quantity } = tag.source;
+    const fc = readFunction(start.address_space);
+    const label = `${tag.name} · FC${String(fc).padStart(2,"0")} · 0x${start.address.toString(16).padStart(4,"0")} × ${quantity} · RAW`;
+    points.push({ label, watch: {
+      key: "tag:" + tag.id, target: dev.target, function: fc, address: start.address, quantity,
+      name: `${dev.target.endpoint}/${dev.target.unit_id} · ${label}`, unit: null,
+    } });
+  }
+  return points;
 });
 
 function addWatch() {
-  const reg = available.value.find((r) => r.address === selectedAddress.value);
-  const dev = devices.selected;
-  if (!reg || !dev) return;
-  const key = `${dev.key}:${reg.function.toString(16)}:${reg.address.toString(16).padStart(4, "0")}`;
-  if (watches.value.some((w) => w.key === key)) return;
-  const tag = (settings.config.tags ?? []).find(
-    (t) => t.device_key === dev.key && t.address === reg.address
-  );
-  watches.value.push({
-    key,
-    target: dev.target,
-    function: reg.function,
-    address: reg.address,
-    quantity: 1,
-    name: tag?.name ?? `${dev.target.endpoint}:${reg.address}`,
-    unit: tag?.unit ?? null,
-  });
+  const point = available.value.find(p => p.watch.key === selectedPoint.value);
+  if (!point || watches.value.some(w => w.key === point.watch.key)) return;
+  watches.value.push(point.watch);
 }
 
 function removeWatch(key: string) {
@@ -124,7 +132,8 @@ const trendPoints = computed(() => {
   const cutoff = Date.now() - windowMs.value;
   const samples = state.samples.filter((s) => s.timestamp_ms >= cutoff);
   if (samples.length === 0) return "";
-  const values = samples.map((s) => s.values[0] ?? 0);
+  const values = samples.flatMap(s => s.values.length ? [s.values[0]] : []);
+  if (values.length === 0) return "";
   const min = Math.min(...values);
   const max = Math.max(...values);
   const span = max - min || 1;
@@ -146,14 +155,11 @@ const trendPoints = computed(() => {
 
     <div class="form-row">
       <label>{{ t("monitorRegister") }}</label>
-      <select v-model.number="selectedAddress" :disabled="monitor.running">
+      <select v-model="selectedPoint" :disabled="monitor.running">
         <option :value="null">{{ t("select") }}</option>
-        <option v-for="r in available" :key="r.address" :value="r.address">
-          0x{{ r.address.toString(16).padStart(4, "0") }} =
-          {{ r.as_hex.toUpperCase() }} (FC{{ r.function.toString(16).toUpperCase() }})
-        </option>
+        <option v-for="p in available" :key="p.watch.key" :value="p.watch.key">{{ p.label }}</option>
       </select>
-      <button :disabled="monitor.running || selectedAddress === null" @click="addWatch">
+      <button :disabled="monitor.running || selectedPoint === null" @click="addWatch">
         {{ t("add") }}
       </button>
       <label class="short">{{ t("period") }}</label>
@@ -174,7 +180,7 @@ const trendPoints = computed(() => {
 
     <table v-if="monitor.values.length" class="data">
       <thead>
-        <tr><th>Point</th><th>{{ t("value") }}</th><th>Min</th><th>Max</th><th>{{ t("change") }}</th><th>{{ t("errors") }}</th></tr>
+        <tr><th>Point</th><th>RAW</th><th>RAW Min</th><th>RAW Max</th><th>{{ t("change") }}</th><th>{{ t("errors") }}</th></tr>
       </thead>
       <tbody>
         <tr
@@ -203,7 +209,7 @@ const trendPoints = computed(() => {
 
     <div class="trend">
       <div class="form-row">
-        <label>{{ t("trend") }}</label>
+        <label>{{ t("trend") }} · RAW[0]</label>
         <select v-model="trendKey">
           <option v-for="v in monitor.values" :key="v.key" :value="v.key">{{ v.name }}</option>
         </select>

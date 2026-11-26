@@ -6,7 +6,7 @@ use tauri::{AppHandle, State};
 
 use crate::modbus::decode::{ByteOrder, DataType, DecodeSpec};
 use crate::scanner::types::{
-    DeviceProfile, ProfileRegister, TagDefinition,
+    AddressSpace, DeviceProfile, ProfileRegister, TagDefinition, validate_tags,
 };
 use crate::state::AppState;
 
@@ -28,6 +28,7 @@ pub fn save_profiles(
     state: State<'_, AppState>,
     profiles: Vec<DeviceProfile>,
 ) -> Result<Vec<DeviceProfile>, String> {
+    for profile in &profiles { profile.to_tags("validation")?; }
     {
         let mut config = state.config.lock();
         config.profiles = profiles.clone();
@@ -94,7 +95,12 @@ fn column<'a>(header: &[&str], row: &'a [&str], name: &str) -> &'a str {
         let id = format!("{vendor}|{product}|{revision}").to_lowercase().replace(' ', "_");
 
         let register = ProfileRegister {
-            function: column(&header, &row, "function").parse::<u8>().unwrap_or(3),
+            function: {
+                let raw = column(&header, &row, "function");
+                let fc = raw.parse::<u8>().map_err(|_| format!("invalid or missing read function: '{raw}'"))?;
+                AddressSpace::from_read_function(fc)?;
+                fc
+            },
             address: {
                 let raw = column(&header, &row, "address").trim();
                 if let Some(hex) = raw.strip_prefix("0x").or_else(|| raw.strip_prefix("0X")) {
@@ -135,6 +141,7 @@ fn column<'a>(header: &[&str], row: &'a [&str], name: &str) -> &'a str {
             });
         }
     }
+    for profile in &profiles { profile.to_tags("validation")?; }
     Ok(profiles)
 }
 
@@ -157,6 +164,7 @@ pub fn import_profiles(
         ProfileFormat::Csv => parse_csv(&data)?,
     };
 
+    for profile in &imported { profile.to_tags("validation")?; }
     let mut config = state.config.lock();
     for profile in imported {
         config
@@ -227,14 +235,15 @@ pub fn apply_profile(
         .find(|p| p.id == profile_id)
         .cloned()
         .ok_or_else(|| format!("profile not found: {profile_id}"))?;
-    let tags = profile.to_tags(&device_key);
-    {
-        let mut config = state.config.lock();
-        config.tags.retain(|tag| tag.device_key != device_key);
-        config.tags.extend(tags.iter().cloned());
-    }
-    let config = state.config.lock().clone();
+    let tags = profile.to_tags(&device_key)?;
+    let mut config = state.config.lock().clone();
+    // Replace only the same profile's tags on this device; preserve manual and other profile tags.
+    config.tags.retain(|tag| tag.source.start.device_key != device_key ||
+        tag.profile_id.as_deref() != Some(profile_id.as_str()));
+    config.tags.extend(tags.iter().cloned());
+    validate_tags(&config.tags)?;
     crate::commands::config::persist_config(&app, &config)?;
+    *state.config.lock() = config;
     Ok(tags)
 }
 
@@ -251,5 +260,29 @@ mod tests {
         assert_eq!(profiles[0].registers[0].name, "Voltage_L1");
         assert_eq!(profiles[0].registers[0].spec.data_type, DataType::Float32);
         assert_eq!(profiles[0].registers[1].address, 0x74);
+        let tags = profiles[0].to_tags("dev").unwrap();
+        assert_eq!(tags[0].source.quantity, 2);
+        assert_eq!(tags[0].source.start.address_space, AddressSpace::HoldingRegisters);
+    }
+
+    #[test]
+    fn rejects_missing_and_write_functions() {
+        let header = "vendor,product_code,revision,name,function,address,tag_name,data_type\n";
+        for fc in ["", "bad", "5", "16"] {
+            assert!(parse_csv(&format!("{header}V,M,R,N,{fc},0,Tag,uint16\n")).is_err());
+        }
+    }
+
+    #[test]
+    fn preserves_fc03_fc04_and_stable_ids() {
+        let csv = "vendor,product_code,revision,name,function,address,tag_name,data_type\nV,M,R,N,3,0,A,uint16\nV,M,R,N,4,0,B,uint16\n";
+        let p = parse_csv(csv).unwrap().remove(0);
+        let tags = p.to_tags("device").unwrap();
+        assert_ne!(tags[0].source.start, tags[1].source.start);
+        assert_ne!(tags[0].id, tags[1].id);
+        assert_eq!(tags[0].id, p.to_tags("device").unwrap()[0].id);
+        let mut reordered = p.clone();
+        reordered.registers.reverse();
+        assert_eq!(tags[0].id, reordered.to_tags("device").unwrap()[1].id);
     }
 }

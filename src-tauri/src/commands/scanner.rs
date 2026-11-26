@@ -217,7 +217,7 @@ pub async fn save_project(
     // Keep the existing history when overwriting a project file.
     let existing: Option<Project> = if file.exists() {
         let data = tokio::fs::read(&file).await.map_err(|e| e.to_string())?;
-        serde_json::from_slice(&data).ok()
+        Some(parse_project_v2(&data)?)
     } else {
         None
     };
@@ -239,19 +239,30 @@ pub async fn save_project(
 
     let project = Project {
         name,
-        version: 1,
+        version: 2,
         created_ms,
         updated_ms: now,
         results,
         tags,
         history,
     };
+    crate::scanner::types::validate_tags(&project.tags)?;
     let data = serde_json::to_vec_pretty(&project).map_err(|e| e.to_string())?;
     tokio::fs::write(&file, data).await.map_err(|e| e.to_string())?;
     Ok(path)
 }
 
-/// Load a project: results, tag map and history; also syncs config.json.
+fn parse_project_v2(data: &[u8]) -> Result<Project, String> {
+    let value: serde_json::Value = serde_json::from_slice(data).map_err(|e| e.to_string())?;
+    if value.get("version").and_then(|v| v.as_u64()) != Some(2) {
+        return Err("unsupported project schema; create a new schema v2 project (old file unchanged)".into());
+    }
+    let project: Project = serde_json::from_value(value).map_err(|e| e.to_string())?;
+    crate::scanner::types::validate_tags(&project.tags)?;
+    Ok(project)
+}
+
+/// Load a project: results, tag map and history; also syncs config-v2.json.
 #[tauri::command]
 pub async fn load_project(
     app: AppHandle,
@@ -261,15 +272,13 @@ pub async fn load_project(
     let data = tokio::fs::read(PathBuf::from(&path))
         .await
         .map_err(|e| e.to_string())?;
-    let project: Project = serde_json::from_slice(&data).map_err(|e| e.to_string())?;
+    let project = parse_project_v2(&data)?;
 
-    state.scanner.set_results(project.results.clone());
-    {
-        let mut config = state.config.lock();
-        config.tags = project.tags.clone();
-    }
-    let config = state.config.lock().clone();
+    let mut config = state.config.lock().clone();
+    config.tags = project.tags.clone();
     crate::commands::config::persist_config(&app, &config)?;
+    *state.config.lock() = config;
+    state.scanner.set_results(project.results.clone());
     Ok(project)
 }
 
@@ -493,3 +502,21 @@ fn results_to_xml(results: &ScanResults) -> Result<Vec<u8>, String> {
 /// Keep the handle import even if a command signature changes.
 #[allow(dead_code)]
 fn _handle_used(_h: &ScannerHandle) {}
+
+#[cfg(test)]
+mod project_schema_tests {
+    use super::*;
+    #[test]
+    fn rejects_legacy_and_future_project_schemas() {
+        assert!(parse_project_v2(br#"{"version":1}"#).unwrap_err().contains("unsupported project schema"));
+        assert!(parse_project_v2(br#"{"version":3}"#).is_err());
+        assert!(parse_project_v2(br#"{"version":2}"#).is_err());
+    }
+    #[test]
+    fn accepts_empty_v2_project() {
+        let p = Project { name: "test".into(), version: 2, created_ms: 1, updated_ms: 1,
+            results: ScanResults::default(), tags: Vec::new(), history: Vec::new() };
+        let bytes = serde_json::to_vec(&p).unwrap();
+        assert_eq!(parse_project_v2(&bytes).unwrap().version, 2);
+    }
+}

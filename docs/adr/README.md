@@ -12,3 +12,5 @@ Dated decisions, 2026-11-26. Direction approved; detailed contracts proposed for
 | ADR-006 Prototype-first priorities | Deliver functionality and correct data before enterprise controls | Preserve baseline safeguards, defer expanded RBAC/security architecture |
 
 Detailed design: [data model](../DATA_MODEL.md), [polling engine](../POLLING_ENGINE.md), [UX](../UX_DESIGN.md), [vision](../VISION.md). Future decisions use separate numbered records with context, alternatives, tradeoffs and tests.
+
+ADR-007 — Prototype schema break (maintainer-approved 2026-11-26): no legacy migration in PR #13. Explicit project v2 validation, separate config-v2.json, keep old files unchanged. This supersedes the backward-compatibility constraint for the prototype. Existing device_key retained until the later connection model.

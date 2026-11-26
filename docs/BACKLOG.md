@@ -4,7 +4,7 @@
 
 | ID | Priority | Scope / Результат | Acceptance / Проверка |
 |---|---|---|---|
-| R02 | P0 | FC-aware register identity and tags | FC03/FC04 at same address remain distinct end-to-end; migrate ambiguous legacy tags without guessing |
+| R02 | P0 | FC-aware register identity and tags | FC03/FC04 at same address remain distinct end-to-end; v2 schema, reject incompatible legacy projects; no implicit FC |
 | R01 | P0 | Typed monitor | -5000 INT16 × 0.01 = -50.00; same table/chart/export; invalid data is not zero |
 | R04 | P0 | RTT, cycle timing, data quality | Measure monotonic elapsed time; distinguish exception, timeout, invalid response, stale |
 | R20 | P0 | Connection manager | Serialize access per physical serial port; independent transports progress separately; stop releases ownership |

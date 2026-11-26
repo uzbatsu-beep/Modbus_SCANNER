@@ -10,6 +10,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Register identity (PR #13)
+- Introduce AddressSpace, RegisterKey, RegisterSpan and independent tag IDs. Preserve FC and width across profile, inspector, selection and watch paths.
+- Reject missing/invalid profile read FC and invalid spans; distinguish missing words from valid zero.
+- Breaking prototype project schema v2 and separate config-v2.json; old files unchanged, no automatic migration.
+- Monitor uses FC-aware raw watches, including full tag spans; typed trend/log decoding remains PR #14.
+
+
 ### Build / Governance — PR #10 (solo-maintainer release policy)
 - Keep protected main and immutable release tags, strict PR-only merges, five CI checks and Windows QA; set required PR approvals to zero, disable last-push and code-owner approval requirements.
 - Keep official Release strictly manual, with no independent Environment review or approval sentinel secret; do not publish automatically on tag push.

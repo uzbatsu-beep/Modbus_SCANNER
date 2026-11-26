@@ -67,6 +67,19 @@ impl MonitorHandle {
         watches: Vec<MonitorWatch>,
         interval_ms: u32,
     ) -> Result<(), String> {
+        let mut keys = std::collections::HashSet::new();
+        for watch in &watches {
+            let space = super::types::AddressSpace::from_read_function(watch.function)?;
+            super::types::RegisterSpan {
+                start: super::types::RegisterKey {
+                    device_key: watch.target.endpoint.clone(), address_space: space, address: watch.address,
+                },
+                quantity: watch.quantity,
+            }.validate()?;
+            if watch.key.trim().is_empty() || !keys.insert(&watch.key) {
+                return Err("empty or duplicate monitor watch key".into());
+            }
+        }
         let interval_ms = interval_ms.clamp(250, 10_000);
         {
             let mut guard = self.control_tx.lock().await;
