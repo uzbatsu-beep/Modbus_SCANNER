@@ -93,7 +93,7 @@ jobs:
 
   backend-linux:
     name: Backend (cargo check + tests) (ubuntu-latest)
-    # Keep the existing required check context; skipped on routine PR/push.
+    # Optional during development; restore as required at final acceptance.
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -142,7 +142,7 @@ jobs:
 
   backend-macos:
     name: Backend (cargo check + tests) (macos-latest)
-    # Keep the existing required check context; skipped on routine PR/push.
+    # Optional during development; restore as required at final acceptance.
     if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:

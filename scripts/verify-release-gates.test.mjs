@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { validateEvidence, REQUIRED_CHECKS } from "./verify-release-gates.mjs";
+import { validateEvidence, REQUIRED_CHECKS, DEVELOPMENT_CHECKS } from "./verify-release-gates.mjs";
 
 const SHA = "a".repeat(40);
 const branch = {
@@ -144,8 +144,7 @@ test("repository main Ruleset template requires PR but no second-person reviewer
   assert.equal(pr.parameters.required_review_thread_resolution, true);
   const checks = rule.rules.find((r) => r.type === "required_status_checks");
   assert.equal(checks.parameters.strict_required_status_checks_policy, true);
-  assert.ok(REQUIRED_CHECKS.every((c) =>
-    checks.parameters.required_status_checks.some((k) => k.context === c)));
+  assert.deepEqual(checks.parameters.required_status_checks.map((k) => k.context).sort(), [...DEVELOPMENT_CHECKS].sort());
   for (const type of ["deletion", "non_fast_forward"]) {
     assert.ok(rule.rules.some((r) => r.type === type));
   }
@@ -182,4 +181,22 @@ test("Windows-first workflow preserves required names and defers native Linux/ma
   const windows = workflow.split("  backend:\n")[1].split("\n  backend-linux:")[0];
   assert.ok(windows.includes("runs-on: windows-latest"));
   assert.ok(!windows.includes("github.event_name == 'workflow_dispatch'"));
+});
+
+
+test("final Ruleset template restores exactly five required contexts without relaxing protection", () => {
+  const dev = JSON.parse(readFileSync(new URL("../.github/rulesets/main.json", import.meta.url), "utf8"));
+  const final = JSON.parse(readFileSync(new URL("../.github/rulesets/main-final.json", import.meta.url), "utf8"));
+  const contexts = final.rules.find((r) => r.type === "required_status_checks").parameters.required_status_checks;
+  assert.deepEqual(contexts.map((k) => k.context).sort(), [...REQUIRED_CHECKS].sort());
+  const normalized = structuredClone(final);
+  normalized.name = dev.name;
+  normalized.rules.find((r) => r.type === "required_status_checks").parameters.required_status_checks =
+    dev.rules.find((r) => r.type === "required_status_checks").parameters.required_status_checks;
+  assert.deepEqual(normalized, dev);
+});
+test("official release refuses development-only Ruleset even with successful final CI", () => {
+  const f = fixture();
+  f.rulesets = [JSON.parse(readFileSync(new URL("../.github/rulesets/main.json", import.meta.url), "utf8")), tags];
+  assert.throws(() => validateEvidence(f), /restore all 5 strict CI jobs/);
 });

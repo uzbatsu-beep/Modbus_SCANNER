@@ -65,3 +65,5 @@ R15, R23, R27, R28 are follow-up P2 features; R03 expanded, R17 and R&D R18/R30 
 Основной продукт — локальная инженерная среда для АСУ ТП, от обнаружения оборудования до проверенной карты регистров, мониторинга и виртуального стенда. Сначала исправляем потерю Function Code и неверное декодирование, затем измеряем качество связи и строим менеджер соединений. Дальше — типы, профили, импорт, пользовательская настройка опроса, многоприборный интерфейс. Расширенная безопасность, корпоративная авторизация и шлюзы откладываются; базовые ограничения и защита от некорректного обмена сохраняются. Предыдущая редакция сохранена отдельно.
 
 Windows-first policy approved after PR #22: Windows native CI/QA during iterative development; Linux/macOS native checks deferred to explicit final CI, followed by final platform packaging and verification. See [release gates](RELEASE_GATES.md).
+
+Development Ruleset: require Frontend, Governance and Windows backend only; remove Linux/macOS required contexts in live settings. Final acceptance restores both via main-final.json and requires actual successful manual full CI on exact main SHA.

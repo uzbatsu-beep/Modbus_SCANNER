@@ -1,5 +1,5 @@
 {
-  "name": "main — PR + CI, solo maintainer (PR #10)",
+  "name": "main — Windows-first development",
   "target": "branch",
   "enforcement": "active",
   "bypass_actors": [],
@@ -48,12 +48,6 @@
           },
           {
             "context": "Backend (cargo check + tests) (windows-latest)"
-          },
-          {
-            "context": "Backend (cargo check + tests) (ubuntu-latest)"
-          },
-          {
-            "context": "Backend (cargo check + tests) (macos-latest)"
           }
         ]
       }

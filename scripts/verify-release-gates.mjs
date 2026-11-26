@@ -4,10 +4,15 @@ import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { pathToFileURL } from "node:url";
 
-export const REQUIRED_CHECKS = [
+export const DEVELOPMENT_CHECKS = [
   "Frontend (typecheck + build)",
   "Governance (release gate tests)",
   "Backend (cargo check + tests) (windows-latest)",
+];
+
+// Final acceptance restores native platform requirements in the live Ruleset.
+export const REQUIRED_CHECKS = [
+  ...DEVELOPMENT_CHECKS,
   "Backend (cargo check + tests) (ubuntu-latest)",
   "Backend (cargo check + tests) (macos-latest)",
 ];
@@ -79,7 +84,7 @@ export function validateEvidence({
   const contexts = (status?.parameters?.required_status_checks ?? []).map((x) => x.context);
   requireGate(status?.parameters?.strict_required_status_checks_policy === true &&
     REQUIRED_CHECKS.every((check) => contexts.includes(check)),
-    "main ruleset must require all 5 strict CI jobs");
+    "main ruleset must restore all 5 strict CI jobs before final release");
   for (const ruleType of ["deletion", "non_fast_forward"]) {
     requireGate(activeRule(rulesets, "branch", "refs/heads/main", ruleType),
       "main ruleset must block " + ruleType);
@@ -94,7 +99,7 @@ export function validateEvidence({
     r.event === "push" && r.status === "completed" && r.conclusion === "success" &&
     isWorkflowPath(r.path, ".github/workflows/ci.yml")),
     "no successful main-push CI for EXACT release commit");
-  // Skipped Linux/macOS checks satisfy routine branch protection, but must
+  // Linux/macOS are not required for routine branch protection, and skips must
   // never be counted as evidence of cross-platform release validation.
   requireGate(Array.isArray(fullCiRuns) && fullCiRuns.some((r) =>
     r.head_sha === sourceSha && r.head_branch === "main" &&
