@@ -17,3 +17,5 @@ Record transaction RTT with monotonic clock, connection establishment separately
 
 ## Acceptance
 Fake clock and scripted transport: grouping preserves values and word order; errors remain attributable; single/group/adaptive selectable; stop interrupts waits and prevents new requests; independent endpoints progress while slow device times out; serial conflicts are blocked. Benchmark serial and TCP separately using [BENCHMARKS](BENCHMARKS.md).
+
+PR #17 contract: [CONNECTION_MANAGER](CONNECTION_MANAGER.md). Phase A is isolated core; phase B integrates callers, phase C integrates Workbench. Existing scheduling changes remain deferred to PR #23.

@@ -12,6 +12,7 @@
 use std::time::{Duration, Instant};
 use timing::{micros, TransactionTiming};
 pub mod timing;
+pub mod connection;
 
 use async_trait::async_trait;
 use thiserror::Error;
