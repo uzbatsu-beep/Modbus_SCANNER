@@ -449,3 +449,46 @@ async fn quiet_mode_paces_tcp_connection_attempts_even_when_no_modbus_reply_exis
         "Quiet Mode must pace TCP handshake attempts, even when no PDU is received");
     assert_eq!(results.stats.responses_ok, 0);
 }
+
+#[tokio::test]
+async fn typed_monitor_observes_errors_and_recovers_on_loopback() {
+    use super::monitor::MonitorHandle;
+    use super::types::{DataQuality, MonitorWatch, MonitorUpdate};
+    use crate::modbus::decode::{DataType, DecodeSpec, DecodedValue};
+    let fixture = test_slave(vec![Reply::Data, Reply::Exception(2), Reply::WrongFunction, Reply::Data]).await;
+    let events: Arc<Mutex<Vec<MonitorUpdate>>> = Arc::new(Mutex::new(Vec::new()));
+    let collected = events.clone();
+    let sink = EventSink::new(Arc::new(move |name, payload| {
+        if name == "monitor:update" {
+            collected.lock().unwrap().push(serde_json::from_value(payload).unwrap());
+        }
+    }), None, None);
+    let watch = MonitorWatch {
+        key:"tag:frequency".into(),
+        target:DeviceTarget {kind:TransportKind::Tcp,endpoint:"127.0.0.1".into(),port:Some(fixture.port),unit_id:1,serial:None,serial_mode:None},
+        function:3,address:0,quantity:1,name:Some("frequency".into()),unit:Some("Hz".into()),tag_id:Some("frequency".into()),
+        spec:Some(DecodeSpec {data_type:DataType::Int16,divider:100.0,..Default::default()}),
+    };
+    let monitor = MonitorHandle::new();
+    let session = monitor.start(sink,vec![watch],250,Some(100)).await.unwrap();
+    tokio::time::timeout(Duration::from_secs(8),async {
+        loop {
+            if monitor.snapshot().first().and_then(|c|c.latest.as_ref()).map_or(false,|s|s.sequence>=4) {break;}
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    }).await.expect("monitor did not acquire four observations");
+    monitor.stop().await.unwrap();
+    fixture.task.await.unwrap();
+    let snapshot = monitor.snapshot().remove(0);
+    assert_eq!(snapshot.session_id,session);
+    assert_eq!(snapshot.samples.len(),4);
+    assert_eq!(snapshot.samples[0].value,Some(DecodedValue::Float{value:0.42}));
+    assert_eq!(snapshot.samples[1].quality,DataQuality::ModbusException);
+    assert_eq!(snapshot.samples[1].exception_code,Some(2));
+    assert_eq!(snapshot.samples[2].quality,DataQuality::InvalidResponse);
+    assert_eq!(snapshot.samples[3].quality,DataQuality::Good);
+    assert_eq!((snapshot.valid_samples,snapshot.invalid_samples),(2,2));
+    let updates=events.lock().unwrap();
+    assert!(!updates.last().unwrap().running);
+    assert_eq!(updates.iter().flat_map(|u|u.values.iter()).flat_map(|v|v.samples.iter()).map(|s|s.sequence).collect::<Vec<_>>(),vec![1,2,3,4]);
+}

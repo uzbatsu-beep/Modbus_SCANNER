@@ -17,7 +17,7 @@ pub struct LogObservation {
 pub struct Channel {
     pub state: MonitorValueState,
     history: VecDeque<MonitorSample>,
-    pending: Vec<MonitorSample>,
+    pending: VecDeque<MonitorSample>,
     numeric_count: u64,
 }
 
@@ -38,7 +38,7 @@ impl Channel {
                 invalid_samples: 0, quality: DataQuality::NotSampled, samples: Vec::new(),
                 history_capacity: capacity,
             },
-            history: VecDeque::new(), pending: Vec::new(), numeric_count: 0,
+            history: VecDeque::new(), pending: VecDeque::new(), numeric_count: 0,
         }
     }
 
@@ -80,7 +80,8 @@ impl Channel {
         self.state.latest = Some(sample.clone());
         if self.history.len() >= self.state.history_capacity as usize { self.history.pop_front(); }
         self.history.push_back(sample.clone());
-        self.pending.push(sample.clone());
+        if self.pending.len() >= self.state.history_capacity as usize { self.pending.pop_front(); }
+        self.pending.push_back(sample.clone());
         LogObservation { session_id: self.state.session_id.clone(), watch: self.state.watch.clone(), sample }
     }
 
@@ -93,7 +94,7 @@ impl Channel {
     pub fn delta(&mut self) -> Option<MonitorValueState> {
         if self.pending.is_empty() { return None; }
         let mut state = self.state.clone();
-        state.samples = std::mem::take(&mut self.pending);
+        state.samples = self.pending.drain(..).collect();
         Some(state)
     }
 }
@@ -123,10 +124,11 @@ mod tests {
         assert_eq!(failed.sample.quality, DataQuality::Timeout);
         assert!(failed.sample.raw.is_none() && failed.sample.value.is_none());
         assert_eq!(c.state.last_good.as_ref().unwrap().value, Some(DecodedValue::Float { value: -50.0 }));
-        assert_eq!((c.state.min,c.state.max,c.state.avg), (Some(-50.0),Some(50.0),Some(0.0)));
+        assert_eq!((c.state.min,c.state.max), (Some(-50.0),Some(50.0)));
+        assert!(c.state.avg.unwrap().abs() < 1e-12);
         assert_eq!(c.state.invalid_samples,1);
         assert_eq!(c.snapshot().samples.iter().map(|s|s.sequence).collect::<Vec<_>>(), vec![2,3,4]);
-        assert_eq!(c.delta().unwrap().samples.len(),4);
+        assert_eq!(c.delta().unwrap().samples.iter().map(|s|s.sequence).collect::<Vec<_>>(),vec![2,3,4]);
         assert!(c.delta().is_none());
         c.observe(5, 500, Ok(vec![2500]));
         assert_eq!(c.state.delta,Some(75.0));

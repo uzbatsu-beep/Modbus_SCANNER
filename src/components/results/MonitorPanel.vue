@@ -114,9 +114,20 @@ async function start() {
     error.value = t("noMonitorPoints");
     return;
   }
-  await monitor.start(watches.value, interval.value, historyCapacity.value);
+  const current: MonitorWatch[] = [];
+  for (const w of watches.value) {
+    if (!w.tag_id) { current.push(w); continue; }
+    const tag = settings.config.tags.find(t => t.id === w.tag_id);
+    if (!tag || readFunction(tag.source.start.address_space) !== w.function ||
+        tag.source.start.address !== w.address || tag.source.quantity !== w.quantity) {
+      error.value = "Tag changed or removed; remove and re-add the watch: " + w.key;
+      return;
+    }
+    current.push({ ...w, unit: tag.unit, spec: { ...tag.spec } });
+  }
+  await monitor.start(current, interval.value, historyCapacity.value);
   if (monitor.error) error.value = monitor.error;
-  if (!trendKey.value) trendKey.value = watches.value[0].key;
+  if (!trendKey.value || !watches.value.some(w => w.key === trendKey.value)) trendKey.value = watches.value[0].key;
 }
 
 async function stop() {
@@ -184,7 +195,7 @@ function age(state: MonitorValueState): string {
         <tr v-for="v in monitor.values" :key="v.key" @click="trendKey = v.key">
           <td>{{ v.watch.name || v.key }} <span v-if="v.watch.unit" class="dim">{{ v.watch.unit }}</span></td>
           <td class="mono">{{ raw(v) }}</td>
-          <td class="mono" :class="{ dim: v.quality !== 'good' || !monitor.running }">{{ latest(v) }} <span v-if="v.quality !== 'good' && v.last_good">({{ t("lastGood") }})</span></td>
+          <td class="mono" :class="{ dim: v.quality !== 'good' || !monitor.running }">{{ latest(v) }} <span v-if="(v.quality !== 'good' || !monitor.running) && v.last_good">({{ t("lastGood") }})</span></td>
           <td class="mono">{{ stat(v.min) }}</td>
           <td class="mono">{{ stat(v.max) }}</td>
           <td class="mono">{{ stat(v.avg) }}</td>
@@ -252,7 +263,7 @@ function age(state: MonitorValueState): string {
         <label class="check"><input v-model="loggerForm.allKeys" type="checkbox" /> {{ t("allPoints") }}</label>
         <label class="check"><input v-model="loggerForm.enabled" type="checkbox" /> {{ t("enabled") }}</label>
         <button :disabled="!loggerForm.path.trim()" @click="addLogger">{{ t("addToList") }}</button>
-        <button class="primary" :disabled="loggerConfigs.length === 0" @click="applyLoggers">
+        <button class="primary" :disabled="monitor.running || monitor.busy" @click="applyLoggers">
           {{ t("apply") }}
         </button>
         <button @click="monitor.refreshLoggers()">{{ t("statusRefresh") }}</button>

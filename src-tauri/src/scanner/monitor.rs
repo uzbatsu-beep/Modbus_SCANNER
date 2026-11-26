@@ -1,9 +1,5 @@
-//! Live register monitor (P3-05).
-//!
-//! Polls a set of registered watches at a fixed interval, keeps a bounded
-//! sample history per watch and emits `monitor:update` with min/max and change
-//! flags after every cycle. Serial watches reuse one open port; IP watches use
-//! a fresh transport per poll (same policy as the scanner).
+//! Typed live register monitor (R01). Existing serial/IP acquisition policy is
+//! retained; observations and bounded history are independent of the UI timer.
 
 use std::collections::HashMap;
 use std::sync::Arc;
