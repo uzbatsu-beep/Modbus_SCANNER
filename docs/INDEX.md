@@ -65,3 +65,14 @@
 **EN:** All scanning requires the asset owner's authorization; use an isolated, non-production bench for release testing.
 
 **RU:** Сканирование допускается только с разрешения владельца оборудования; испытания релиза проводятся на изолированном стенде.
+
+## Engineering Workbench strategy (2026-11-26) / Новая концепция
+
+- [VISION](VISION.md) — product direction and prototype priorities.
+- [BACKLOG](BACKLOG.md) — R01–R30 and acceptance criteria.
+- [ROADMAP](ROADMAP.md) — current implementation sequence; [previous roadmap](ROADMAP_LEGACY_2026-11-21.md) is historical.
+- [DATA_MODEL](DATA_MODEL.md), [DATA_TYPES](DATA_TYPES.md), [PROFILE_SCHEMA](PROFILE_SCHEMA.md) — target data contracts.
+- [POLLING_ENGINE](POLLING_ENGINE.md), [UX_DESIGN](UX_DESIGN.md) — target multi-device engineering workflow.
+- [TEST_STRATEGY](TEST_STRATEGY.md), [BENCHMARKS](BENCHMARKS.md), [ADR](adr/README.md), [AGENTS](../AGENTS.md) — implementation discipline.
+
+These are target specifications, not claims of features already implemented. Existing protocol/API references remain authoritative for the current runtime. The live governance and release state must be checked independently of historical snapshots.
