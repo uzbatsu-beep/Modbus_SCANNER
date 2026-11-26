@@ -80,3 +80,5 @@ These are target specifications, not claims of features already implemented. Exi
 - [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md) — PR #14 typed observations, ring buffers, IPC and Logger v2.
 
 - [COMMUNICATION_METRICS](COMMUNICATION_METRICS.md) — PR #15 measured stages, RTT distributions, cycle and stale diagnostics.
+
+- [WORKBENCH_SHELL](WORKBENCH_SHELL.md) — approved UI shell, layout and acceptance.

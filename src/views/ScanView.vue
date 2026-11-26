@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { reactive } from "vue";
+defineOptions({name:"ScanView"});
 
 import ScanFormSerial from "@/components/scan/ScanFormSerial.vue";
 import ScanFormIp from "@/components/scan/ScanFormIp.vue";
@@ -50,7 +51,7 @@ async function start(target: ScanTarget) {
 <style scoped>
 .scan-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0,1fr) minmax(0,1fr);
   gap: 12px;
 }
 

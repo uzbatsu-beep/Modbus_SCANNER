@@ -324,3 +324,81 @@ table.data tr.selected td {
 .log-entry.ok .msg { color: var(--ok); }
 .log-entry.warn .msg { color: var(--warn); }
 .log-entry.error .msg { color: var(--error); }
+
+/* Workbench design tokens — compact engineering density. */
+:root { --wb-gap: 6px; --wb-control: 28px; --wb-pad: 8px; --wb-font: 12px; --wb-selected: #2d3a4d; --wb-hover: #303843; --wb-log: #14161a; }
+:root[data-theme="light"] { --wb-selected:#dce8fb; --wb-hover:#e3e9f0; --wb-log:#f2f5f9; }
+body {font-size:var(--wb-font)}
+.wb-shell { flex:1; min-height:0; min-width:0; display:grid; overflow:hidden; }
+.wb-main { display:grid; min-width:0; min-height:0; overflow:hidden; }
+.wb-main > .wb-side:first-child {grid-column:1;grid-row:1}
+.wb-main > .split-left {grid-column:2;grid-row:1}
+.wb-workspace {grid-column:3;grid-row:1;container-type:inline-size; min-width:0; min-height:0; overflow:auto; padding:var(--wb-pad); }
+.wb-main > .split-right {grid-column:4;grid-row:1}
+.wb-main > .wb-side:last-child {grid-column:5;grid-row:1}
+.wb-shell > .wb-splitter.horizontal {grid-row:2}
+.wb-dock {grid-row:3}
+.wb-side,.wb-dock { display:flex; flex-direction:column; min-width:0; min-height:0; overflow:hidden; background:var(--bg-panel); }
+.wb-splitter { background:var(--border); cursor:col-resize; touch-action:none; min-height:0; min-width:0; }
+.wb-splitter.horizontal {cursor:row-resize}
+.wb-splitter:hover,.wb-splitter:focus-visible {background:var(--accent)}
+.wb-panel-head,.wb-tabs {display:flex; align-items:center; gap:4px; flex-shrink:0; padding:4px 6px; border-bottom:1px solid var(--border); min-height:32px; overflow-x:auto;}
+.wb-panel-head strong {flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.wb-panel-head button {padding:3px 6px}
+.wb-panel-body {flex:1;min-height:0;overflow:auto;padding:var(--wb-pad)}
+.wb-panel-body h3 {margin:12px 0 6px;font-size:12px}
+.wb-muted {color:var(--fg-dim)}
+.wb-spacer {flex:1;min-width:0}
+.wb-link {color:var(--accent);text-decoration:none}
+.wb-link:hover {text-decoration:underline}
+.wb-project-name {font-weight:600;margin-bottom:8px;overflow-wrap:anywhere}
+.explorer input {width:100%;margin-bottom:8px}
+.explorer hr {border:0;border-top:1px solid var(--border);margin:8px 0}
+.wb-tree-item {display:flex; align-items:center; gap:6px; width:100%; text-align:left; white-space:normal; overflow-wrap:anywhere; color:var(--fg); background:transparent; text-decoration:none; border:1px solid transparent; border-radius:3px; padding:5px; font-size:12px;}
+.wb-tree-item:hover,.wb-tree-item.selected {background:var(--wb-selected)}
+.wb-tree-item small {margin-left:auto;color:var(--fg-dim);font-size:10px;}
+.wb-device-children {padding-left:10px;border-left:1px solid var(--border);margin-left:5px}
+.wb-properties {display:grid;gap:3px;margin:8px 0;overflow-wrap:anywhere}
+.wb-properties dt {color:var(--fg-dim);font-size:11px}
+.wb-properties dd {margin:0 0 5px;font-family:var(--mono)}
+.wb-reading {display:grid;gap:2px;border-bottom:1px solid var(--border);padding:6px 0;overflow-wrap:anywhere}
+.wb-frame {display:flex;gap:8px;flex-wrap:wrap;border-bottom:1px solid var(--border);padding:3px 0;overflow-wrap:anywhere}
+.dock-body {font-family:var(--mono);font-size:11px;background:var(--wb-log)}
+.wb-header {background:var(--bg-panel);flex-shrink:0;border-bottom:1px solid var(--border)}
+.wb-menubar,.wb-commandbar {display:flex;align-items:center;gap:5px;padding:3px 8px;min-height:32px}
+.wb-menubar {border-bottom:1px solid var(--border);flex-wrap:wrap}
+.wb-commandbar {overflow-x:auto;white-space:nowrap;min-height:36px}
+.wb-commandbar > * {flex-shrink:0}
+.wb-brand {font-size:13px;margin-right:12px;white-space:nowrap}
+.wb-brand-sub {font-size:10px}
+.wb-menu {position:relative;z-index:20}
+.wb-menu summary {cursor:pointer;padding:4px;list-style:none}
+.wb-menu summary::-webkit-details-marker {display:none}
+.wb-menu-list {position:absolute;top:100%;left:0;background:var(--bg-panel);border:1px solid var(--border);min-width:180px;padding:4px;box-shadow:0 5px 14px #0003;display:grid;gap:3px}
+.wb-menu-list a,.wb-menu-list button {padding:6px;text-decoration:none;color:var(--fg);text-align:left;background:transparent;border:0;font-size:12px}
+.wb-menu-list a:hover,.wb-menu-list button:hover {background:var(--wb-hover)}
+.wb-command {color:var(--fg-dim);text-decoration:none;padding:5px 7px;border:1px solid transparent;border-radius:3px}
+.wb-command.active,.wb-tabs button.active,.wb-panel-head button.active,button[aria-pressed="true"] {background:var(--wb-selected);color:var(--fg);border-color:var(--accent)}
+.wb-command-divider {width:1px;height:23px;background:var(--border)}
+.wb-header button,.wb-tabs button {padding:4px 8px;min-height:var(--wb-control)}
+.wb-page {min-width:0}
+.wb-workspace .panel {padding:8px;margin-bottom:8px;min-width:0;overflow-x:auto;border-radius:4px}
+.wb-workspace .form-row {flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.wb-workspace .form-row label {min-width:110px;font-size:12px}
+.wb-workspace input,.wb-workspace select {max-width:100%;font-size:12px}
+.wb-workspace table.data {font-size:12px}
+.wb-workspace table.data th {white-space:nowrap}
+.wb-workspace table.data td {padding:4px 6px;border-bottom-color:var(--border)}
+.wb-workspace .log-panel {background:var(--wb-log)}
+.status-bar {flex-shrink:0;overflow-x:auto;gap:8px}
+button:hover:not(:disabled):not(.primary):not(.danger):not(.warn){background:var(--wb-hover)}
+button:focus-visible,a:focus-visible,summary:focus-visible,[role="separator"]:focus-visible {outline:2px solid var(--accent);outline-offset:-2px}
+@media(max-width:700px){.wb-brand-sub{display:none}.wb-menubar{gap:2px}.wb-brand{margin-right:4px}}
+
+.wb-header {position:relative;z-index:2}
+.wb-main {grid-row:1}
+.wb-commandbar > .wb-spacer {flex-shrink:1}
+.wb-panel-body .log-entry {overflow-wrap:anywhere}
+.wb-workspace .controls,.wb-workspace .controls-left,.wb-workspace .controls-right {flex-wrap:wrap}
+.wb-workspace .scan-forms,.wb-workspace .scan-params {min-width:0}
+@container (max-width:1100px) {.wb-workspace .scan-grid {grid-template-columns:minmax(0,1fr)}}
