@@ -364,3 +364,7 @@ await api.scanner.start(
 ## Идентификация регистров — PR #13
 
 Проекты только версии 2. Старый проект отклоняется; конфигурация хранится отдельно в config-v2.json. TagDefinition содержит id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan: start (RegisterKey), quantity; RegisterKey: device_key, address_space, нулевой адрес address. AddressSpace: coils, discrete_inputs, holding_registers, input_registers; соответственно FC01–FC04. CSV/JSON профиля требует явного поддерживаемого FC, без подстановки FC03. Монитор различает исходный регистр и именованный тег; количество слов берётся из диапазона тега. PR #14 добавляет типизированный мониторинг и Logger v2. См. [DATA_MODEL](DATA_MODEL.md).
+
+## Communication metrics (PR #15)
+
+В MonitorSample добавлен timing (TransactionTiming), в MonitorUpdate — metrics (CommunicationSnapshot). Пакеты диагностики поступают каждые 200 мс даже без новых измерений. Подробные определения и формат журнала: [COMMUNICATION_METRICS](COMMUNICATION_METRICS.md).

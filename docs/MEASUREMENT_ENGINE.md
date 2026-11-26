@@ -13,3 +13,5 @@ Tests: Rust signed/order/nonfinite, ring eviction, timeout/recovery, text stats,
 
 ## RU
 Новая модель измерений не подменяет отсутствие данных нулём. При ошибке отображается последнее достоверное значение с качеством текущего наблюдения; в журнале и тренде фиксируется именно ошибка. История ограничена числом измерений, UI получает только новые пакеты, полное состояние запрашивается при восстановлении. Запись на диск вынесена из цикла опроса; переполнение очереди отображается в диагностике. Старый формат логов не поддерживается. Физические показатели производительности ещё не установлены.
+
+PR #15 extends measurement timing and communication regression coverage. See [COMMUNICATION_METRICS](COMMUNICATION_METRICS.md) for current semantics; the original PR #14 description above is historical where superseded.

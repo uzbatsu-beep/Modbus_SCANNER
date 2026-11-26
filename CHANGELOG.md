@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Communication diagnostics (PR #15)
+- Common transport stage timing; monitor session/device/channel metrics, rolling RTT percentiles, cycle/period, jitter, stale and completed ADU counts.
+- Diagnostics panel and RTT trend; Logger v2 timing columns and distinct .v2-timing files.
+- Regression coverage for timings, statistics, error stages, loopback and graph gaps; polling behavior unchanged.
+
+
 ### Typed monitoring (PR #14)
 - Canonical typed decoding, signed trends and true time axis with quality gaps; last-good indication and session statistics.
 - Bounded 10,000/channel default ring and 200 ms incremental UI batches; Logger v2 asynchronous bounded queue and distinct output files.

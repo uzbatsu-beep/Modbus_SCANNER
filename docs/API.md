@@ -366,3 +366,7 @@ await api.scanner.start(
 ## Register identity — PR #13
 
 Project version 2 only. Old project files are explicitly rejected; config is stored in a separate config-v2.json. TagDefinition contains id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan contains start (RegisterKey) and quantity; RegisterKey contains device_key, address_space and zero-based address. AddressSpace values: coils, discrete_inputs, holding_registers, input_registers. FC mapping is 1, 2, 3, 4 respectively. Profile CSV/JSON requires an explicit supported read FC; no default to FC03. Watch identity distinguishes raw register keys from named tags; watch quantity is the tag span. PR #14 adds typed monitoring and Logger v2. See [DATA_MODEL](DATA_MODEL.md).
+
+## Communication metrics (PR #15)
+
+MonitorSample adds timing (TransactionTiming), MonitorUpdate adds metrics (CommunicationSnapshot). Diagnostic heartbeat every 200 ms even without new observations. Definitions and log schema: [COMMUNICATION_METRICS](COMMUNICATION_METRICS.md).
