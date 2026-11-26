@@ -5,12 +5,15 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::sync::mpsc::{sync_channel, SyncSender};
+use crate::scanner::measurement::LogObservation;
+use crate::modbus::decode::DecodedValue;
 
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
 use crate::scanner::types::{
-    now_ms, DeviceProfile, LogFormat, LoggerConfig, LoggerStatus, MonitorValueState,
+    now_ms, DeviceProfile, LogFormat, LoggerConfig, LoggerStatus,
     RotationMode, ScanParams, TagDefinition, TrafficRecord,
 };
 
@@ -87,198 +90,171 @@ fn date_suffix(ms: u64) -> String {
     format!("{year:04}{m:02}{d:02}")
 }
 
-fn datetime_suffix(ms: u64) -> String {
-    let secs = (ms / 1000) % 86_400;
-    format!(
-        "{}_{:02}{:02}{:02}",
-        date_suffix(ms),
-        secs / 3600,
-        (secs / 60) % 60,
-        secs % 60
-    )
+const LOGGER_QUEUE: usize = 4096;
+const LOG_HEADER: &str = "schema_version;session_id;sequence;timestamp_ms;elapsed_us;watch_id;tag_id;name;transport;endpoint;unit_id;function;address;raw_hex;value;unit;quality;exception_code;detail";
+
+fn quoted(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\"\""))
 }
 
-fn rotated_path(base: &str, rotation: &RotationMode, started_ms: u64, now: u64, seq: u64) -> String {
-    let (stem, ext) = match base.rsplit_once('.') {
-        Some((s, e)) => (s.to_string(), format!(".{e}")),
-        None => (base.to_string(), String::new()),
+fn log_fields(record: &LogObservation) -> Vec<String> {
+    let w = &record.watch;
+    let s = &record.sample;
+    let raw = s.raw.as_ref().map(|words| words.iter().map(|v| format!("{v:04X}")).collect::<Vec<_>>().join(" ")).unwrap_or_default();
+    let value = match &s.value {
+        Some(DecodedValue::Integer { value }) => value.to_string(),
+        Some(DecodedValue::Float { value }) => value.to_string(),
+        Some(DecodedValue::Text { value }) => value.clone(),
+        None => String::new(),
     };
-    match rotation {
-        RotationMode::None => base.to_string(),
-        RotationMode::Daily => format!("{stem}_{}{ext}", date_suffix(now)),
-        RotationMode::Session => format!("{stem}_{}{ext}", datetime_suffix(started_ms)),
-        RotationMode::SizeMb(limit) => {
-            let path = Path::new(base);
-            let oversized = path
-                .metadata()
-                .map(|m| m.len() > (*limit as u64) * 1024 * 1024)
-                .unwrap_or(false);
-            if oversized {
-                format!("{stem}_{}_{seq}{ext}", datetime_suffix(now))
-            } else {
-                base.to_string()
-            }
-        }
-    }
+    let quality = serde_json::to_value(s.quality).ok().and_then(|v| v.as_str().map(str::to_owned)).unwrap_or_default();
+    vec!["2".into(), record.session_id.clone(), s.sequence.to_string(), s.timestamp_ms.to_string(), s.elapsed_us.to_string(),
+        w.key.clone(), w.tag_id.clone().unwrap_or_default(), w.name.clone().unwrap_or_default(),
+        format!("{:?}", w.target.kind), format!("{}{}", w.target.endpoint, w.target.port.map(|p| format!(":{p}")).unwrap_or_default()),
+        w.target.unit_id.to_string(), w.function.to_string(), w.address.to_string(), raw, value,
+        w.unit.clone().unwrap_or_default(), quality, s.exception_code.map(|v| format!("0x{v:02X}")).unwrap_or_default(),
+        s.detail.clone().unwrap_or_default()]
+}
+
+fn log_path(config: &LoggerConfig, record: &LogObservation, index: u64) -> String {
+    let path = Path::new(&config.path);
+    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("modbus-values");
+    let extension = match config.format { LogFormat::Csv => "csv", LogFormat::Tsv => "tsv", LogFormat::Json => "jsonl" };
+    let suffix = match &config.rotation {
+        RotationMode::None => String::new(),
+        RotationMode::Daily => format!("_{}", date_suffix(record.sample.timestamp_ms)),
+        RotationMode::Session => format!("_{}", record.session_id),
+        RotationMode::SizeMb(_) => format!("_{}_{}", record.session_id, index),
+    };
+    path.with_file_name(format!("{stem}.v2{suffix}.{extension}")).to_string_lossy().into_owned()
 }
 
 struct LoggerState {
     config: LoggerConfig,
-    started_ms: u64,
     records_written: u64,
+    failed_records: u64,
     last_write_ms: Option<u64>,
     error: Option<String>,
     current_file: String,
+    rotation_index: u64,
+    rotation_session: String,
 }
 
-/// Multiple file loggers consuming monitor samples (P3-07).
-pub struct LoggerHandle {
+struct LogQueue {
     loggers: parking_lot::RwLock<HashMap<String, LoggerState>>,
+    generation: AtomicU64,
+    enabled: std::sync::atomic::AtomicBool,
+    pending: AtomicU64,
+    dropped: AtomicU64,
+}
+
+/// File IO is isolated on one worker; producers never wait for disk.
+pub struct LoggerHandle {
+    shared: Arc<LogQueue>,
+    tx: SyncSender<(u64, LogObservation)>,
 }
 
 impl Default for LoggerHandle {
-    fn default() -> Self {
-        Self::new()
-    }
+    fn default() -> Self { Self::new() }
 }
 
 impl LoggerHandle {
     pub fn new() -> Self {
-        Self {
+        let shared = Arc::new(LogQueue {
             loggers: parking_lot::RwLock::new(HashMap::new()),
-        }
-    }
-
-    pub fn set_loggers(&self, configs: Vec<LoggerConfig>) {
-        let now = now_ms();
-        let mut loggers = self.loggers.write();
-        loggers.clear();
-        for config in configs {
-            loggers.insert(
-                config.id.clone(),
-                LoggerState {
-                    config,
-                    started_ms: now,
-                    records_written: 0,
-                    last_write_ms: None,
-                    error: None,
-                    current_file: String::new(),
-                },
-            );
-        }
-    }
-
-    pub fn status(&self) -> Vec<LoggerStatus> {
-        let mut out: Vec<_> = self
-            .loggers
-            .read()
-            .values()
-            .map(|s| LoggerStatus {
-                id: s.config.id.clone(),
-                path: s.config.path.clone(),
-                format: s.config.format,
-                rotation: s.config.rotation.clone(),
-                enabled: s.config.enabled,
-                records_written: s.records_written,
-                current_file: s.current_file.clone(),
-                last_write_ms: s.last_write_ms,
-                error: s.error.clone(),
-            })
-            .collect();
-        out.sort_by(|a, b| a.id.cmp(&b.id));
-        out
-    }
-
-    /// Write one batch of monitor samples to every enabled logger.
-    pub fn write(&self, values: &[MonitorValueState]) {
-        let mut loggers = self.loggers.write();
-        for state in loggers.values_mut() {
-            if !state.config.enabled {
-                continue;
-            }
-            let selected: Vec<_> = values
-                .iter()
-                .filter(|v| {
-                    state.config.keys.is_empty() || state.config.keys.contains(&v.key)
-                })
-                .collect();
-            if selected.is_empty() {
-                continue;
-            }
-
-            let now = now_ms();
-            let file = rotated_path(
-                &state.config.path,
-                &state.config.rotation,
-                state.started_ms,
-                now,
-                state.records_written,
-            );
-            let is_new = !Path::new(&file).exists();
-            let mut rows = Vec::new();
-            if is_new && matches!(state.config.format, LogFormat::Csv | LogFormat::Tsv) {
-                let sep = if state.config.format == LogFormat::Csv { ";" } else { "\t" };
-                rows.push(
-                    ["timestamp_ms", "key", "name", "index", "value", "rtt_us", "errors"].join(sep),
-                );
-            }
-            for value in selected {
-                for sample in value.samples.iter().rev().take(1) {
-                    for (i, raw) in sample.values.iter().enumerate() {
-                        match state.config.format {
-                            LogFormat::Csv | LogFormat::Tsv => {
-                                let sep = if state.config.format == LogFormat::Csv { ";" } else { "\t" };
-                                rows.push(
-                                    [
-                                        sample.timestamp_ms.to_string(),
-                                        value.key.clone(),
-                                        value.name.clone(),
-                                        raw.to_string(),
-                                        sample.rtt_us.to_string(),
-                                        format!("idx{i}"),
-                                        value.errors.to_string(),
-                                    ]
-                                    .join(sep),
-                                );
-                            }
-                            LogFormat::Json => {
-                                let row = serde_json::json!({
-                                    "timestamp_ms": sample.timestamp_ms,
-                                    "key": value.key,
-                                    "name": value.name,
-                                    "index": i,
-                                    "value": raw,
-                                    "rtt_us": sample.rtt_us,
-                                    "errors": value.errors,
-                                });
-                                rows.push(row.to_string());
-                            }
+            generation: AtomicU64::new(0), enabled: std::sync::atomic::AtomicBool::new(false),
+            pending: AtomicU64::new(0), dropped: AtomicU64::new(0),
+        });
+        let (tx, rx) = sync_channel::<(u64, LogObservation)>(LOGGER_QUEUE);
+        let worker = shared.clone();
+        std::thread::spawn(move || {
+            while let Ok((generation, record)) = rx.recv() {
+                let mut loggers = worker.loggers.write();
+                if generation != worker.generation.load(Ordering::Acquire) {
+                    worker.dropped.fetch_add(1, Ordering::Relaxed);
+                } else {
+                    for state in loggers.values_mut() {
+                        if !state.config.enabled || (!state.config.keys.is_empty() && !state.config.keys.contains(&record.watch.key)) { continue; }
+                        if let Err(e) = write_observation(state, &record) {
+                            state.failed_records += 1;
+                            state.error = Some(e.to_string());
                         }
                     }
                 }
+                worker.pending.fetch_sub(1, Ordering::Relaxed);
             }
+        });
+        Self { shared, tx }
+    }
 
-            let result = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&file)
-                .and_then(|mut f| {
-                    for row in rows {
-                        writeln!(f, "{row}")?;
-                    }
-                    Ok(())
-                });
-            match result {
-                Ok(()) => {
-                    state.records_written += 1;
-                    state.last_write_ms = Some(now);
-                    state.current_file = file;
-                    state.error = None;
-                }
-                Err(e) => state.error = Some(e.to_string()),
+    pub fn set_loggers(&self, configs: Vec<LoggerConfig>) {
+        let mut loggers = self.shared.loggers.write();
+        self.shared.enabled.store(false, Ordering::Release);
+        self.shared.generation.fetch_add(1, Ordering::AcqRel);
+        loggers.clear();
+        for config in configs {
+            loggers.insert(config.id.clone(), LoggerState {
+                config, records_written: 0, failed_records: 0, last_write_ms: None,
+                error: None, current_file: String::new(), rotation_index: 0, rotation_session: String::new(),
+            });
+        }
+        self.shared.enabled.store(loggers.values().any(|s| s.config.enabled), Ordering::Release);
+    }
+
+    pub fn status(&self) -> Vec<LoggerStatus> {
+        let mut out: Vec<_> = self.shared.loggers.read().values().map(|s| LoggerStatus {
+            id: s.config.id.clone(), path: s.config.path.clone(), format: s.config.format,
+            rotation: s.config.rotation.clone(), enabled: s.config.enabled, records_written: s.records_written,
+            dropped_records: self.shared.dropped.load(Ordering::Relaxed),
+            pending_records: self.shared.pending.load(Ordering::Relaxed), failed_records: s.failed_records,
+            current_file: s.current_file.clone(), last_write_ms: s.last_write_ms, error: s.error.clone(),
+        }).collect();
+        out.sort_by(|a,b| a.id.cmp(&b.id));
+        out
+    }
+
+    pub fn write(&self, records: &[LogObservation]) {
+        if !self.shared.enabled.load(Ordering::Acquire) { return; }
+        let generation = self.shared.generation.load(Ordering::Acquire);
+        for record in records {
+            self.shared.pending.fetch_add(1, Ordering::Relaxed);
+            if self.tx.try_send((generation, record.clone())).is_err() {
+                self.shared.pending.fetch_sub(1, Ordering::Relaxed);
+                self.shared.dropped.fetch_add(1, Ordering::Relaxed);
             }
         }
     }
+}
+
+fn write_observation(state: &mut LoggerState, record: &LogObservation) -> std::io::Result<()> {
+    if state.rotation_session != record.session_id {
+        state.rotation_session = record.session_id.clone();
+        state.rotation_index = 0;
+    }
+    let mut path = log_path(&state.config, record, state.rotation_index);
+    if let RotationMode::SizeMb(limit) = &state.config.rotation {
+        let limit = (*limit as u64).max(1) * 1024 * 1024;
+        while Path::new(&path).metadata().map(|m| m.len() >= limit).unwrap_or(false) {
+            state.rotation_index += 1;
+            path = log_path(&state.config, record, state.rotation_index);
+        }
+    }
+    let mut file = std::fs::OpenOptions::new().create(true).append(true).open(&path)?;
+    if matches!(state.config.format, LogFormat::Csv | LogFormat::Tsv) {
+        let sep = if state.config.format == LogFormat::Csv { ";" } else { "\t" };
+        if file.metadata()?.len() == 0 { writeln!(file, "{}", LOG_HEADER.replace(';', sep))?; }
+        let row = log_fields(record).iter().map(|s| quoted(s)).collect::<Vec<_>>().join(sep);
+        writeln!(file, "{row}")?;
+    } else {
+        let row = serde_json::json!({"schema_version":2,"session_id":record.session_id,"watch":record.watch,"sample":record.sample});
+        writeln!(file, "{row}")?;
+    }
+    file.flush()?;
+    state.records_written += 1;
+    state.last_write_ms = Some(now_ms());
+    state.current_file = path;
+    state.error = None;
+    Ok(())
 }
 
 impl crate::scanner::TrafficSink for TrafficLogHandle {
@@ -288,7 +264,7 @@ impl crate::scanner::TrafficSink for TrafficLogHandle {
 }
 
 impl crate::scanner::SampleSink for LoggerHandle {
-    fn write(&self, values: &[MonitorValueState]) {
+    fn write(&self, values: &[LogObservation]) {
         LoggerHandle::write(self, values);
     }
 }
