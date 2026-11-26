@@ -78,3 +78,5 @@
 These are target specifications, not claims of features already implemented. Existing protocol/API references remain authoritative for the current runtime. The live governance and release state must be checked independently of historical snapshots.
 
 - [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md) — PR #14 typed observations, ring buffers, IPC and Logger v2.
+
+- [COMMUNICATION_METRICS](COMMUNICATION_METRICS.md) — PR #15 measured stages, RTT distributions, cycle and stale diagnostics.

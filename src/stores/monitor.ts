@@ -1,12 +1,12 @@
 /** Incremental monitor state; backend history remains authoritative. */
 import { defineStore } from "pinia";
 import { api } from "@/api/mod";
-import type { LoggerConfig, LoggerStatus, MonitorUpdate, MonitorValueState, MonitorWatch } from "@/types/ipc";
+import type { CommunicationSnapshot, LoggerConfig, LoggerStatus, MonitorUpdate, MonitorValueState, MonitorWatch } from "@/types/ipc";
 import { mergeChannel } from "@/types/measurement";
 
 export const useMonitorStore = defineStore("monitor", {
   state: () => ({
-    values: [] as MonitorValueState[], running: false, bound: false, lastCycleMs: 0,
+    values: [] as MonitorValueState[], running: false, bound: false, metrics: null as CommunicationSnapshot | null,
     sessionId: null as string | null, refreshing: false, busy: false,
     error: null as string | null, loggers: [] as LoggerStatus[],
   }),
@@ -29,6 +29,7 @@ export const useMonitorStore = defineStore("monitor", {
             map.set(v.key, mergeChannel(old, v));
           }
           this.values = [...map.values()];
+          this.metrics = u.metrics;
           this.running = u.running;
           if (gap) void this.refresh();
         });
@@ -58,6 +59,7 @@ export const useMonitorStore = defineStore("monitor", {
         if (!this.bound) return;
         this.sessionId = await api.scanner.startMonitor(watches, intervalMs, historyCapacity);
         this.values = [];
+        this.metrics = null;
         this.running = true;
         await this.refresh();
       } catch (e) { this.error = String(e); }

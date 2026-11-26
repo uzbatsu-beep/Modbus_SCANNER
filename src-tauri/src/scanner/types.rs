@@ -813,6 +813,7 @@ pub struct MonitorSample {
     pub timestamp_ms: u64,
     #[ts(type = "number")]
     pub elapsed_us: u64,
+    pub timing: crate::transport::timing::TransactionTiming,
     pub raw: Option<Vec<u16>>,
     pub value: Option<DecodedValue>,
     pub quality: DataQuality,
@@ -847,6 +848,7 @@ pub struct MonitorUpdate {
     pub session_id: String,
     pub values: Vec<MonitorValueState>,
     pub running: bool,
+    pub metrics: super::metrics::CommunicationSnapshot,
 }
 
 /// One saved scan snapshot inside a project (P3-04).

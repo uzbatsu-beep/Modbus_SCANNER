@@ -14,6 +14,7 @@ pub mod diff;
 pub mod engine;
 pub mod monitor;
 pub mod measurement;
+pub mod metrics;
 pub mod safety;
 pub mod strategies;
 pub mod types;

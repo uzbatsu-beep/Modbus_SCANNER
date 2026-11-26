@@ -91,7 +91,7 @@ fn date_suffix(ms: u64) -> String {
 }
 
 const LOGGER_QUEUE: usize = 4096;
-const LOG_HEADER: &str = "schema_version;session_id;sequence;timestamp_ms;elapsed_us;watch_id;tag_id;name;transport;endpoint;unit_id;function;address;raw_hex;value;unit;quality;exception_code;detail";
+const LOG_HEADER: &str = "schema_version;session_id;sequence;timestamp_ms;elapsed_us;watch_id;tag_id;name;transport;endpoint;unit_id;function;address;raw_hex;value;unit;quality;exception_code;detail;connect_us;reset_us;tx_us;rx_us;rtt_us;validation_us;decode_us;acquisition_us;tx_bytes;rx_bytes;tx_complete;rx_complete;failure_stage";
 
 fn quoted(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
@@ -113,7 +113,17 @@ fn log_fields(record: &LogObservation) -> Vec<String> {
         format!("{:?}", w.target.kind), format!("{}{}", w.target.endpoint, w.target.port.map(|p| format!(":{p}")).unwrap_or_default()),
         w.target.unit_id.to_string(), w.function.to_string(), w.address.to_string(), raw, value,
         w.unit.clone().unwrap_or_default(), quality, s.exception_code.map(|v| format!("0x{v:02X}")).unwrap_or_default(),
-        s.detail.clone().unwrap_or_default()]
+        s.detail.clone().unwrap_or_default(),
+        s.timing.connect_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.reset_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.tx_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.rx_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.rtt_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.validation_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.decode_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.acquisition_us.map(|v|v.to_string()).unwrap_or_default(),
+        s.timing.tx_bytes.to_string(),s.timing.rx_bytes.to_string(),
+        s.timing.tx_complete.to_string(),s.timing.rx_complete.to_string(),s.timing.failure_stage.clone().unwrap_or_default()]
 }
 
 fn log_path(config: &LoggerConfig, record: &LogObservation, index: u64) -> String {
@@ -126,7 +136,7 @@ fn log_path(config: &LoggerConfig, record: &LogObservation, index: u64) -> Strin
         RotationMode::Session => format!("_{}", record.session_id),
         RotationMode::SizeMb(_) => format!("_{}_{}", record.session_id, index),
     };
-    path.with_file_name(format!("{stem}.v2{suffix}.{extension}")).to_string_lossy().into_owned()
+    path.with_file_name(format!("{stem}.v2-timing{suffix}.{extension}")).to_string_lossy().into_owned()
 }
 
 struct LoggerState {
@@ -325,7 +335,7 @@ mod logger_v2_tests {
         LogObservation { session_id: "session".into(), watch: MonitorWatch {
             key:"tag:a".into(), target:DeviceTarget { kind:TransportKind::Tcp, endpoint:"localhost".into(), port:Some(502), unit_id:1, serial:None, serial_mode:None },
             function:3,address:8193,quantity:1,name:Some("a;\"b".into()),unit:Some("Hz".into()),tag_id:Some("a".into()),spec:None,
-        }, sample: MonitorSample { sequence,timestamp_ms:100,elapsed_us:100,raw:(quality==DataQuality::Good).then(||vec![0xec78]),
+        }, sample: MonitorSample { sequence,timestamp_ms:100,elapsed_us:100,timing:Default::default(),raw:(quality==DataQuality::Good).then(||vec![0xec78]),
             value:(quality==DataQuality::Good).then_some(DecodedValue::Float{value:-50.0}),quality,exception_code:None,detail:None } }
     }
     #[test]
@@ -338,12 +348,16 @@ mod logger_v2_tests {
         assert_eq!(bad[13],"");
         assert_eq!(bad[14],"");
         assert_eq!(bad[16],"timeout");
+        assert_eq!(bad[23],""); // no RTT for a failed observation
+        let mut timed=record(DataQuality::Good,3);
+        timed.sample.timing.rtt_us=Some(1234);
+        assert_eq!(log_fields(&timed)[23],"1234");
         assert_eq!(quoted(&good[7]),"\"a;\"\"b\"");
     }
     #[test]
     fn separate_v2_paths_and_session_rotation() {
         let config=LoggerConfig{id:"a".into(),path:"old.csv".into(),format:LogFormat::Csv,rotation:RotationMode::Session,keys:vec![],enabled:true};
-        assert_eq!(log_path(&config,&record(DataQuality::Good,1),0),"old.v2_session.csv");
+        assert_eq!(log_path(&config,&record(DataQuality::Good,1),0),"old.v2-timing_session.csv");
     }
     #[test]
     fn writer_records_each_observation_once() {

@@ -15,6 +15,8 @@ use crate::transport::tcp::TcpConfig;
 use crate::transport::tcp::TcpTransport;
 use crate::transport::udp::UdpTransport;
 use crate::transport::{Transport, TransportError};
+use crate::transport::timing::{micros, TransactionTiming};
+use super::metrics::Metrics;
 use crate::modbus::frame::Pdu;
 use super::measurement::{Channel, DEFAULT_HISTORY, MAX_TOTAL_SAMPLES, UI_BATCH_MS};
 
@@ -146,6 +148,8 @@ async fn monitor_task(
     let interval = Duration::from_millis(interval_ms as u64);
 
     let started = Instant::now();
+    let metrics = Arc::new(RwLock::new(Metrics::new(interval_ms)));
+    let ui_metrics = metrics.clone();
     let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
     let ui_values = values.clone();
     let ui_sink = sink.clone();
@@ -157,7 +161,7 @@ async fn monitor_task(
         loop {
             tokio::select! {
                 _ = &mut done_rx => break,
-                _ = tick.tick() => emit_delta(&ui_sink, &ui_values, &ui_session, true),
+                _ = tick.tick() => emit_delta(&ui_sink, &ui_values, &ui_metrics, micros(started), &ui_session, true),
             }
         }
     });
@@ -169,8 +173,12 @@ async fn monitor_task(
             _ = tokio::time::sleep(interval) => {}
         }
 
+        let cycle_start = Instant::now();
+        metrics.write().begin_cycle(micros(started));
         for watch in &watches {
             if !matches!(control_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)) { break 'poll; }
+            let acquisition_start = Instant::now();
+            let mut timing = TransactionTiming::default();
             let pdu = match watch.function {
                 0x01 => request::read_coils(watch.address, watch.quantity),
                 0x02 => request::read_discrete_inputs(watch.address, watch.quantity),
@@ -188,7 +196,7 @@ async fn monitor_task(
 
             let result: Result<Vec<u8>, TransportError> = match watch.target.kind {
                 TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
-                    Some(t) => t.transact(&adu, timeout, hint).await,
+                    Some(t) => t.transact_measured(&adu, timeout, hint, &mut timing).await,
                     None => match watch.target.serial.clone() {
                         Some(sp) => {
                             let cfg = crate::transport::serial::SerialPortConfig {
@@ -205,48 +213,61 @@ async fn monitor_task(
                                 }
                                 _ => crate::modbus::common::SerialMode::Rtu,
                             };
-                            match SerialTransport::open(cfg, mode).await {
+                            let connect_start = Instant::now();
+                            let opened = SerialTransport::open(cfg, mode).await;
+                            timing.connect_us = Some(micros(connect_start));
+                            match opened {
                                 Ok(t) => {
                                     serial_transport = Some(t);
                                     serial_transport
                                         .as_mut()
                                         .unwrap()
-                                        .transact(&adu, timeout, hint)
+                                        .transact_measured(&adu, timeout, hint, &mut timing)
                                         .await
                                 }
-                                Err(e) => Err(e),
+                                Err(e) => { timing.failure_stage = Some("connect".into()); Err(e) },
                             }
                         }
-                        None => Err(TransportError::Other("serial params required".into())),
+                        None => { timing.failure_stage = Some("connect".into()); Err(TransportError::Other("serial params required".into())) },
                     },
                 },
-                TransportKind::Tcp => match TcpTransport::connect(TcpConfig {
+                TransportKind::Tcp => {
+                    let connect_start = Instant::now();
+                    let connected = TcpTransport::connect(TcpConfig {
                     host: watch.target.endpoint.clone(),
                     port: watch.target.port.unwrap_or(502),
                     connect_timeout: timeout,
                     framing: engine.tcp_framing,
                 tls: engine.tls.clone(),
                 })
-                .await
-                {
-                    Ok(mut t) => {
-                        let out = t.transact(&adu, timeout, hint).await;
-                        let _ = t.close().await;
-                        out
+                .await;
+                    timing.connect_us = Some(micros(connect_start));
+                    match connected {
+                        Ok(mut t) => {
+                            let out = t.transact_measured(&adu, timeout, hint, &mut timing).await;
+                            let _ = t.close().await;
+                            out
+                        }
+                        Err(e) => { timing.failure_stage = Some("connect".into()); Err(e) },
                     }
-                    Err(e) => Err(e),
                 },
-                TransportKind::Udp => match UdpTransport::connect(
+                TransportKind::Udp => {
+                    let connect_start = Instant::now();
+                    let connected = UdpTransport::connect(
                     &watch.target.endpoint,
                     watch.target.port.unwrap_or(502),
                 )
-                .await
-                {
-                    Ok(mut t) => t.transact(&adu, timeout, hint).await,
-                    Err(e) => Err(e),
+                .await;
+                    timing.connect_us = Some(micros(connect_start));
+                    match connected {
+                        Ok(mut t) => t.transact_measured(&adu, timeout, hint, &mut timing).await,
+                        Err(e) => { timing.failure_stage = Some("connect".into()); Err(e) },
+                    }
                 },
             };
 
+            let validation_start = Instant::now();
+            let received = result.is_ok();
             let parsed = result.map_err(classify_transport).and_then(|resp| {
                 let pdu = verify_adu(watch.target.kind, watch.target.unit_id, watch.function, &resp, tx, engine.clone())
                     .map_err(classify_transport)?;
@@ -257,12 +278,19 @@ async fn monitor_task(
                     _ => Err((DataQuality::InvalidResponse, None, "unexpected PDU".into())),
                 }
             });
+            if received {
+                timing.validation_us = Some(micros(validation_start));
+                if matches!(&parsed, Err((DataQuality::InvalidResponse, _, _))) { timing.failure_stage = Some("validation".into()); }
+            }
             let record = {
                 let mut all = values.write();
-                all.get_mut(&watch.key).map(|channel| channel.observe(now_ms(), started.elapsed().as_micros() as u64, parsed))
+                let record = all.get_mut(&watch.key).map(|channel| channel.observe_timed(now_ms(), micros(started), parsed, timing, acquisition_start));
+                if let Some(r) = &record { metrics.write().observe(watch, &r.sample); }
+                record
             };
             if let Some(record) = record { sink.samples(&[record]); }
         }
+        metrics.write().complete_cycle(micros(cycle_start));
     }
 
     if let Some(mut t) = serial_transport.take() {
@@ -270,7 +298,7 @@ async fn monitor_task(
     }
     let _ = done_tx.send(());
     let _ = ui_task.await;
-    emit_delta(&sink, &values, &session_id, false);
+    emit_delta(&sink, &values, &metrics, micros(started), &session_id, false);
 }
 
 fn classify_transport(error: TransportError) -> (DataQuality, Option<u8>, String) {
@@ -282,10 +310,13 @@ fn classify_transport(error: TransportError) -> (DataQuality, Option<u8>, String
     (quality, None, error.to_string())
 }
 
-fn emit_delta(sink: &EventSink, values: &RwLock<HashMap<String, Channel>>, session_id: &str, running: bool) {
-    let mut items: Vec<_> = values.write().values_mut().filter_map(Channel::delta).collect();
+fn emit_delta(sink: &EventSink, values: &RwLock<HashMap<String, Channel>>, metrics: &RwLock<Metrics>, elapsed: u64, session_id: &str, running: bool) {
+    let (mut items, snapshot) = {
+        let mut channels = values.write();
+        let items: Vec<_> = channels.values_mut().filter_map(Channel::delta).collect();
+        (items, metrics.read().snapshot(elapsed,running))
+    };
     items.sort_by(|a,b| a.key.cmp(&b.key));
-    if items.is_empty() && running { return; }
-    let update = MonitorUpdate { session_id: session_id.into(), values: items, running };
+    let update = MonitorUpdate { session_id: session_id.into(), values: items, running, metrics: snapshot };
     if let Ok(value) = serde_json::to_value(&update) { sink.emit("monitor:update", value); }
 }

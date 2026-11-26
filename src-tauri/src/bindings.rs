@@ -30,6 +30,8 @@ use crate::scanner::types::{
 };
 use crate::transport::serial::{DataBitsSerde, ParitySerde, SerialPortConfig, StopBitsSerde};
 use crate::transport::tcp::TcpFraming;
+use crate::transport::timing::TransactionTiming;
+use crate::scanner::metrics::{MetricRow, CommunicationSnapshot};
 use crate::transport::tls::TlsParams;
 
 pub fn export_bindings(manifest_dir: &Path) {
@@ -77,6 +79,9 @@ pub fn export_bindings(manifest_dir: &Path) {
         LoggerStatus,
         ManualResponse,
         ManualTiming,
+        TransactionTiming,
+        MetricRow,
+        CommunicationSnapshot,
         MonitorSample,
         MonitorUpdate,
         MonitorValueState,

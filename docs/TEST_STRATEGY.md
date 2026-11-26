@@ -15,3 +15,5 @@ Prototype focus: deterministic engineering correctness, quick feedback, physical
 Use mock transport and existing loopback simulator first. For physical tests follow [FIELD_VALIDATION_v1.0.1](FIELD_VALIDATION_v1.0.1.md) and [release gates](RELEASE_GATES.ru.md); no invented PASS. Keep five existing CI checks; Windows QA remains separate. New behavior requires positive and negative regression tests. Stop discovery/monitor before physical cable or settings changes. Record exact source SHA, toolchain, environment and failures.
 
 PR #14 adds regression tests for negative/zero, endian permutations, decode errors, ring eviction, quality gap, delta merging and Logger v2. See [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md).
+
+PR #15 extends measurement timing and communication regression coverage. See [COMMUNICATION_METRICS](COMMUNICATION_METRICS.md) for current semantics; the original PR #14 description above is historical where superseded.

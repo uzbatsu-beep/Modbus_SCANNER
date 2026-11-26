@@ -9,7 +9,9 @@
 //! combination (RTU/ASCII codec over serial, RTU-over-TCP "Modbus RTU over TCP"
 //! or "Modbus UDP") can be composed freely.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use timing::{micros, TransactionTiming};
+pub mod timing;
 
 use async_trait::async_trait;
 use thiserror::Error;
@@ -70,12 +72,39 @@ pub trait Transport: Send {
         response_timeout: Duration,
         expected_hint: usize,
     ) -> TransportResult<Vec<u8>> {
-        self.reset().await?;
-        self.send_raw(adu).await?;
-        match tokio::time::timeout(response_timeout, self.recv_raw(expected_hint)).await {
+        self.transact_measured(adu, response_timeout, expected_hint, &mut TransactionTiming::default()).await
+    }
+
+    /// Same reset/send/receive sequence, with measured stages and completed ADU counts.
+    async fn transact_measured(
+        &mut self, adu: &[u8], response_timeout: Duration, expected_hint: usize,
+        timing: &mut TransactionTiming,
+    ) -> TransportResult<Vec<u8>> {
+        let start = Instant::now();
+        let reset = self.reset().await;
+        timing.reset_us = Some(micros(start));
+        if let Err(e) = reset { timing.failure_stage = Some("reset".into()); return Err(e); }
+        let tx = Instant::now();
+        let sent = self.send_raw(adu).await;
+        timing.tx_us = Some(micros(tx));
+        if let Err(e) = sent { timing.failure_stage = Some("tx".into()); return Err(e); }
+        timing.tx_complete = true;
+        timing.tx_bytes = adu.len().min(u32::MAX as usize) as u32;
+        let rx = Instant::now();
+        let result = match tokio::time::timeout(response_timeout, self.recv_raw(expected_hint)).await {
             Ok(res) => res,
             Err(_) => Err(TransportError::Timeout(response_timeout)),
+        };
+        timing.rx_us = Some(micros(rx));
+        match &result {
+            Ok(bytes) => {
+                timing.rtt_us = Some(micros(tx));
+                timing.rx_complete = true;
+                timing.rx_bytes = bytes.len().min(u32::MAX as usize) as u32;
+            }
+            Err(_) => timing.failure_stage = Some("rx".into()),
         }
+        result
     }
 }
 
@@ -85,3 +114,23 @@ pub mod serial;
 pub mod tcp;
 pub mod tls;
 pub mod udp;
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+    use mock::MockTransport;
+    #[tokio::test]
+    async fn measured_transaction_records_completed_frames_and_stage() {
+        let mut t=MockTransport::new(vec![Ok(vec![1,2,3]),Err(TransportError::Timeout(Duration::from_millis(10)))]);
+        let mut m=TransactionTiming::default();
+        assert!(t.transact_measured(&[1,3],Duration::from_millis(20),3,&mut m).await.is_ok());
+        assert!(m.tx_complete && m.rx_complete);
+        assert_eq!((m.tx_bytes,m.rx_bytes),(2,3));
+        assert!(m.rtt_us.is_some() && m.connect_us.is_none());
+        let mut m=TransactionTiming::default();
+        assert!(t.transact_measured(&[1,3],Duration::from_millis(20),3,&mut m).await.is_err());
+        assert!(m.tx_complete && !m.rx_complete);
+        assert!(m.rtt_us.is_none());
+        assert_eq!(m.failure_stage.as_deref(),Some("rx"));
+    }
+}
