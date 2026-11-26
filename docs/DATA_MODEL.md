@@ -23,3 +23,5 @@ Good, stale, timeout, Modbus exception (with code), invalid response, transport 
 
 ## Acceptance
 Round-trip new v2 fixtures; reject unsupported versions; distinguish same address in FC03/FC04 and two devices; ensure profile application, monitor, chart, log and export retain same tag identity and value. Generated IPC types checked in CI. See [DATA_TYPES](DATA_TYPES.md), [PROFILE_SCHEMA](PROFILE_SCHEMA.md).
+
+PR #14 implements the first measurement engine: frozen watch, session-scoped observation sequence, raw/typed quality, bounded history, deltas and Logger v2. See [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md).

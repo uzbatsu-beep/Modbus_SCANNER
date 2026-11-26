@@ -48,6 +48,7 @@ jobs:
 
       - run: npm ci
       - run: npm run test:identity
+      - run: npm run test:measurement
       - run: npm run typecheck
       - run: npm run build
 

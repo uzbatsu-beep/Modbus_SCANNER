@@ -21,7 +21,8 @@
     "typecheck": "vue-tsc --noEmit",
     "gen:types": "cd src-tauri && cargo run --bin gen_bindings",
     "docs:check": "node --test scripts/verify-markdown-links.test.mjs && node scripts/verify-markdown-links.mjs",
-    "test:identity": "node --experimental-strip-types --test scripts/register-identity.test.mjs"
+    "test:identity": "node --experimental-strip-types --test scripts/register-identity.test.mjs",
+    "test:measurement": "node --experimental-strip-types --test scripts/measurement.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.12.5",

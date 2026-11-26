@@ -75,8 +75,8 @@ export const api = {
     saveProject: (path: string, name: string) =>
       invoke<string>("save_project", { path, name }),
     loadProject: (path: string) => invoke<Project>("load_project", { path }),
-    startMonitor: (watches: MonitorWatch[], interval_ms: number) =>
-      invoke<void>("start_monitor", { watches, interval_ms }),
+    startMonitor: (watches: MonitorWatch[], intervalMs: number, historyCapacity: number) =>
+      invoke<string>("start_monitor", { watches, intervalMs, historyCapacity }),
     stopMonitor: () => invoke<void>("stop_monitor"),
     getMonitorState: () => invoke<MonitorValueState[]>("get_monitor_state"),
     getTrafficLog: () => invoke<TrafficRecord[]>("get_traffic_log"),

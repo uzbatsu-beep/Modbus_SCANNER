@@ -1,74 +1,80 @@
-/** Live register monitor state (P3-05). */
-
+/** Incremental monitor state; backend history remains authoritative. */
 import { defineStore } from "pinia";
-
 import { api } from "@/api/mod";
-import type {
-  LoggerConfig,
-  LoggerStatus,
-  MonitorUpdate,
-  MonitorValueState,
-  MonitorWatch,
-} from "@/types/ipc";
+import type { LoggerConfig, LoggerStatus, MonitorUpdate, MonitorValueState, MonitorWatch } from "@/types/ipc";
+import { mergeChannel } from "@/types/measurement";
 
 export const useMonitorStore = defineStore("monitor", {
   state: () => ({
-    values: [] as MonitorValueState[],
-    running: false,
-    bound: false,
-    lastCycleMs: 0,
-    error: null as string | null,
-    loggers: [] as LoggerStatus[],
+    values: [] as MonitorValueState[], running: false, bound: false, lastCycleMs: 0,
+    sessionId: null as string | null, refreshing: false, busy: false,
+    error: null as string | null, loggers: [] as LoggerStatus[],
   }),
-
   getters: {
-    count: (s) => s.values.length,
-    byKey: (s) => new Map(s.values.map((v) => [v.key, v])),
+    count: s => s.values.length,
+    byKey: s => new Map(s.values.map(v => [v.key, v])),
   },
-
   actions: {
     async bind() {
       if (this.bound) return;
       this.bound = true;
-      await api.monitor.onUpdate((u: MonitorUpdate) => {
-        this.values = u.values;
-        this.lastCycleMs = u.cycle_ms;
-      });
-    },
-
-    async refresh() {
       try {
-        this.values = await api.scanner.getMonitorState();
-      } catch (e) {
-        this.error = String(e);
-      }
+        await api.monitor.onUpdate((u: MonitorUpdate) => {
+          if (this.sessionId !== u.session_id) return;
+          const map = new Map(this.values.map(v => [v.key, v]));
+          let gap = false;
+          for (const v of u.values) {
+            const old = map.get(v.key);
+            if (v.samples.length && v.samples[0].sequence > (old?.latest?.sequence ?? 0) + 1) gap = true;
+            map.set(v.key, mergeChannel(old, v));
+          }
+          this.values = [...map.values()];
+          this.running = u.running;
+          if (gap) void this.refresh();
+        });
+      } catch (e) { this.bound = false; this.error = String(e); }
     },
-
-    async start(watches: MonitorWatch[], intervalMs: number) {
+    async refresh() {
+      if (this.refreshing) return;
+      this.refreshing = true;
+      const session = this.sessionId;
+      try {
+        const snapshot = await api.scanner.getMonitorState();
+        if (session !== this.sessionId) return;
+        if (!snapshot.length) return;
+        if (session && snapshot[0].session_id !== session) return;
+        this.sessionId = snapshot[0].session_id;
+        const map = new Map(this.values.map(v => [v.key, v]));
+        this.values = snapshot.map(v => mergeChannel(map.get(v.key), v));
+      } catch (e) { this.error = String(e); }
+      finally { this.refreshing = false; }
+    },
+    async start(watches: MonitorWatch[], intervalMs: number, historyCapacity = 10000) {
+      if (this.busy) return;
+      this.busy = true;
       this.error = null;
       try {
-        await api.scanner.startMonitor(watches, intervalMs);
+        await this.bind();
+        if (!this.bound) return;
+        this.sessionId = await api.scanner.startMonitor(watches, intervalMs, historyCapacity);
+        this.values = [];
         this.running = true;
-      } catch (e) {
-        this.error = String(e);
-      }
+        await this.refresh();
+      } catch (e) { this.error = String(e); }
+      finally { this.busy = false; }
     },
-
-    async refreshLoggers() {
-      this.loggers = await api.scanner.getLoggers();
-    },
-
-    async setLoggers(configs: LoggerConfig[]) {
-      this.loggers = await api.scanner.setLoggers(configs);
-    },
-
+    async refreshLoggers() { this.loggers = await api.scanner.getLoggers(); },
+    async setLoggers(configs: LoggerConfig[]) { try { this.loggers = await api.scanner.setLoggers(configs); } catch (e) { this.error = String(e); } },
     async stop() {
+      if (this.busy) return;
+      this.busy = true;
       try {
         await api.scanner.stopMonitor();
         this.running = false;
-      } catch (e) {
-        this.error = String(e);
-      }
+        await this.refresh();
+        await this.refreshLoggers();
+      } catch (e) { this.error = String(e); }
+      finally { this.busy = false; }
     },
   },
 });

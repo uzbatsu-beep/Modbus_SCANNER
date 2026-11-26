@@ -170,6 +170,11 @@ const ru = {
   scale: "Масштаб (× / ÷ / +)",
   unitShort: "Единица",
   saveTag: "Сохранить тег",
+    historyCapacity: "История / канал",
+    qualityLabel: "Качество",
+    lastGood: "последнее достоверное",
+    actualTimeAxis: "Время от начала сеанса",
+    loggerQueue: "Очередь / потери / ошибки записи",
   namedTags: "Именованные теги устройства",
 
   // Monitor
@@ -464,6 +469,11 @@ const en: Record<TranslationKey, string> = {
   scale: "Scaling (× / ÷ / +)",
   unitShort: "Unit",
   saveTag: "Save tag",
+    historyCapacity: "History / channel",
+    qualityLabel: "Quality",
+    lastGood: "last good",
+    actualTimeAxis: "Elapsed session time",
+    loggerQueue: "Pending / dropped / write failures",
   namedTags: "Named device tags",
 
   monitorTitle: "Live monitor",

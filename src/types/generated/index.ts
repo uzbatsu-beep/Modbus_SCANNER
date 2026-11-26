@@ -4,6 +4,7 @@ export * from "./ByteOrder";
 export * from "./ChangeKind";
 export * from "./Config";
 export * from "./DataBitsSerde";
+export * from "./DataQuality";
 export * from "./DataType";
 export * from "./DecodeResult";
 export * from "./DecodeSpec";

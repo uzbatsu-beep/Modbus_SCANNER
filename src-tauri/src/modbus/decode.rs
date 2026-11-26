@@ -130,13 +130,15 @@ fn has_scaling(spec: &DecodeSpec) -> bool {
 
 /// Decode raw registers with a user-chosen interpretation.
 pub fn decode(values: &[u16], spec: &DecodeSpec) -> Option<DecodedValue> {
-    if values.is_empty() {
+    if values.is_empty() || !spec.multiplier.is_finite() || !spec.divider.is_finite() ||
+        spec.divider == 0.0 || !spec.offset.is_finite() {
         return None;
     }
     if spec.data_type == DataType::Ascii {
         let mut text = String::new();
         for &word in values {
-            for byte in word.to_be_bytes() {
+            let bytes = if matches!(spec.byte_order, ByteOrder::Badc | ByteOrder::Dcba) { word.to_le_bytes() } else { word.to_be_bytes() };
+            for byte in bytes {
                 if (0x20..=0x7E).contains(&byte) {
                     text.push(byte as char);
                 }
@@ -149,9 +151,12 @@ pub fn decode(values: &[u16], spec: &DecodeSpec) -> Option<DecodedValue> {
         };
     }
 
+    let word = if matches!(spec.byte_order, ByteOrder::Badc | ByteOrder::Dcba) {
+        swap16(values[0])
+    } else { values[0] };
     let raw = match spec.data_type {
-        DataType::Int16 => values[0] as i16 as i64,
-        DataType::Uint16 => values[0] as i64,
+        DataType::Int16 => word as i16 as i64,
+        DataType::Uint16 => word as i64,
         DataType::Int32 => u32_from_words(values, spec.byte_order)? as i32 as i64,
         DataType::Uint32 => u32_from_words(values, spec.byte_order)? as i64,
         DataType::Float32 => {
@@ -167,9 +172,8 @@ pub fn decode(values: &[u16], spec: &DecodeSpec) -> Option<DecodedValue> {
     };
 
     if has_scaling(spec) {
-        Some(DecodedValue::Float {
-            value: scale(raw as f64, spec),
-        })
+        let value = scale(raw as f64, spec);
+        value.is_finite().then_some(DecodedValue::Float { value })
     } else {
         Some(DecodedValue::Integer { value: raw })
     }
@@ -315,5 +319,35 @@ mod tests {
         let result = interpret_all(&[0x4367, 0x3333]);
         assert!(result.suggestions.iter().any(|s| s.byte_order == ByteOrder::Abcd));
         assert!(result.suggestions.iter().all(|s| !s.reason.is_empty()));
+    }
+}
+
+#[cfg(test)]
+mod measurement_decoder_tests {
+    use super::*;
+    #[test]
+    fn signed_scaled_and_word_swap() {
+        let spec = DecodeSpec { data_type: DataType::Int16, divider: 100.0, ..Default::default() };
+        assert_eq!(decode(&[0xEC78], &spec), Some(DecodedValue::Float { value: -50.0 }));
+        assert_eq!(decode(&[0x78EC], &DecodeSpec { byte_order: ByteOrder::Badc, ..spec }), Some(DecodedValue::Float { value: -50.0 }));
+        assert_eq!(decode(&[0], &spec), Some(DecodedValue::Float { value: 0.0 }));
+    }
+    #[test]
+    fn rejects_nonfinite_scaling_and_float() {
+        for spec in [
+            DecodeSpec { divider: 0.0, ..Default::default() },
+            DecodeSpec { multiplier: f64::MAX, ..Default::default() },
+            DecodeSpec { multiplier: f64::NAN, ..Default::default() }
+        ] { assert!(decode(&[2], &spec).is_none()); }
+        assert!(decode(&[0x7f80, 0], &DecodeSpec { data_type: DataType::Float32, ..Default::default() }).is_none());
+    }
+    #[test]
+    fn four_orders_and_zero_word() {
+        for (order, words) in [
+            (ByteOrder::Abcd, [0x3f80, 0]), (ByteOrder::Badc, [0x803f, 0]),
+            (ByteOrder::Cdab, [0, 0x3f80]), (ByteOrder::Dcba, [0, 0x803f])
+        ] {
+            assert_eq!(decode(&words, &DecodeSpec { data_type: DataType::Float32, byte_order: order, ..Default::default() }), Some(DecodedValue::Float { value: 1.0 }));
+        }
     }
 }

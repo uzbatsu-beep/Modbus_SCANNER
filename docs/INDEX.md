@@ -76,3 +76,5 @@
 - [TEST_STRATEGY](TEST_STRATEGY.md), [BENCHMARKS](BENCHMARKS.md), [ADR](adr/README.md), [AGENTS](../AGENTS.md) — implementation discipline.
 
 These are target specifications, not claims of features already implemented. Existing protocol/API references remain authoritative for the current runtime. The live governance and release state must be checked independently of historical snapshots.
+
+- [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md) — PR #14 typed observations, ring buffers, IPC and Logger v2.

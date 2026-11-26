@@ -10,6 +10,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Typed monitoring (PR #14)
+- Canonical typed decoding, signed trends and true time axis with quality gaps; last-good indication and session statistics.
+- Bounded 10,000/channel default ring and 200 ms incremental UI batches; Logger v2 asynchronous bounded queue and distinct output files.
+- Reject invalid scaling and preserve RAW on decode errors; no fabricated RTT or cycle time. No new protocol scheduler or release.
+
+
 ### Register identity (PR #13)
 - Introduce AddressSpace, RegisterKey, RegisterSpan and independent tag IDs. Preserve FC and width across profile, inspector, selection and watch paths.
 - Reject missing/invalid profile read FC and invalid spans; distinguish missing words from valid zero.

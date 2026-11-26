@@ -118,7 +118,7 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: exports only the selected `DeviceRecord` (probes, registers, FC43 identity); `false`/error if key is unknown |
 | `save_project` | `{ path: string, name: string }` | `string` (path) | P3-04: writes devices + tag map + scan history to one JSON file; appends a snapshot (max 20) |
 | `load_project` | `{ path: string }` | `Project` | P3-04: restores results and tags, syncs `config-v2.json` |
-| `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: poll registers every 250–10000 ms |
+| `start_monitor` | `{ watches: MonitorWatch[], intervalMs: number, historyCapacity?: number }` | `string` | P3-05: poll registers every 250–10000 ms |
 | `stop_monitor` | — | `void` | Stop live polling |
 | `get_monitor_state` | — | `MonitorValueState[]` | Current min/max/changed values and sample history |
 | `get_traffic_log` | — | `TrafficRecord[]` | P3-06: last 2000 raw exchanges |
@@ -308,23 +308,9 @@ interface DeviceIdentification {
 results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, where
 `ScanSnapshot = { timestamp_ms, label, results }`.
 
-### `monitor:update` — `MonitorUpdate` (P3-05)
+### `monitor:update` — Measurement Engine (PR #14)
 
-`{ values: MonitorValueState[], cycle_ms: number }` — emitted once per monitor
-poll cycle. `MonitorValueState` carries `key`, `name`, `unit`, latest `values`,
-`min`/`max`, a `changed` flag and up to 5000 `samples` (one hour window).
-
-`LoggerConfig` (P3-07): `{ id, path, format: "csv"|"tsv"|"json",
-rotation: "none"|"daily"|"session"|{ size_mb: number }, keys?: string[],
-enabled?: boolean }`. Loggers consume monitor samples each cycle; `keys = []`
-means all watches. Daily/session rotation adds a date/timestamp suffix, size
-rotation starts a timestamped file when the limit is exceeded.
-
-`ScanDiff` (P3-08): `{ left_label, right_label, left_devices, right_devices,
-added_devices, removed_devices, devices: DeviceDiff[], registers: RegisterDiff[],
-added, removed, changed }`. Each `RegisterDiff` has `device_key`, `function`,
-`address`, `change: "added"|"removed"|"changed"|"unchanged"`, `old_value`,
-`new_value`. Only changed registers are listed.
+`{ session_id, values: MonitorValueState[], running }` — incremental batches of new observations at 200 ms while data is available; final batch on Stop. `get_monitor_state` returns a full bounded snapshot. Channel contains watch (source, tag_id, DecodeSpec), latest, last_good, quality, min/max/avg/delta, counters, samples. Observation: sequence, timestamp_ms, elapsed_us, raw, value, quality, exception_code, detail. Failed observations never repeat last_good. RAW channels read one word. Logger v2 writes one record per observation to separate .v2 files, CSV/TSV/JSONL and bounded queue. See [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md).
 
 ### `traffic:record` — `TrafficRecord` (P3-06)
 
@@ -379,4 +365,4 @@ await api.scanner.start(
 
 ## Register identity — PR #13
 
-Project version 2 only. Old project files are explicitly rejected; config is stored in a separate config-v2.json. TagDefinition contains id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan contains start (RegisterKey) and quantity; RegisterKey contains device_key, address_space and zero-based address. AddressSpace values: coils, discrete_inputs, holding_registers, input_registers. FC mapping is 1, 2, 3, 4 respectively. Profile CSV/JSON requires an explicit supported read FC; no default to FC03. Watch identity distinguishes raw register keys from named tags; watch quantity is the tag span. Monitoring and its file logs remain RAW until PR #14, not engineering values. See [DATA_MODEL](DATA_MODEL.md).
+Project version 2 only. Old project files are explicitly rejected; config is stored in a separate config-v2.json. TagDefinition contains id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan contains start (RegisterKey) and quantity; RegisterKey contains device_key, address_space and zero-based address. AddressSpace values: coils, discrete_inputs, holding_registers, input_registers. FC mapping is 1, 2, 3, 4 respectively. Profile CSV/JSON requires an explicit supported read FC; no default to FC03. Watch identity distinguishes raw register keys from named tags; watch quantity is the tag span. PR #14 adds typed monitoring and Logger v2. See [DATA_MODEL](DATA_MODEL.md).
