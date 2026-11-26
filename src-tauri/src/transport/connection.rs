@@ -347,7 +347,9 @@ impl ConnectionManager {
         }
         tokio::select!{biased;
             result=&mut rx=>result.map_err(|_|TransportError::Cancelled),
-            _=cancel.wait_for(|v|*v)=>{
+            // Drop the watch::Ref inside the future; select must not retain
+            // its read guard across the await of an active transaction.
+            _=async {let _=cancel.wait_for(|v|*v).await;}=>{
                 if started.load(Ordering::Acquire){rx.await.map_err(|_|TransportError::Cancelled)}
                 else{Err(TransportError::Cancelled)}
             }

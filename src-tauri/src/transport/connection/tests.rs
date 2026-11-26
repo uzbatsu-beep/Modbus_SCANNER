@@ -245,3 +245,14 @@ async fn invalid_response_is_recovered_before_next_dispatch(){
     assert_eq!(m.transact("a",request(Priority::Normal)).await.unwrap().result.unwrap(),vec![2]);
     assert_eq!(factory.opens.load(Ordering::SeqCst),2);m.disconnect("a").await.unwrap();
 }
+
+#[tokio::test]
+async fn scoped_transaction_future_is_send(){
+    fn require_send<T: Send>(value:T)->T{value}
+    let m=ConnectionManager::new();
+    let scope=Arc::new(OperationScope::default());
+    scope.cancel();
+    let future=require_send(m.transact_scoped("unused",request(Priority::Normal),scope,None));
+    // No registered resource: this must fail without opening a transport.
+    assert!(future.await.is_err());
+}
