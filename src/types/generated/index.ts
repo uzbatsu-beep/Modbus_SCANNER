@@ -1,3 +1,4 @@
+export * from "./AddressSpace";
 export * from "./AppInfo";
 export * from "./ByteOrder";
 export * from "./ChangeKind";
@@ -36,9 +37,11 @@ export * from "./Project";
 export * from "./RawFrameRequest";
 export * from "./ReadRequest";
 export * from "./RegisterDiff";
+export * from "./RegisterKey";
 export * from "./RegisterRange";
 export * from "./RegisterScanMode";
 export * from "./RegisterScanParams";
+export * from "./RegisterSpan";
 export * from "./RegisterValue";
 export * from "./RotationMode";
 export * from "./ScanDiff";

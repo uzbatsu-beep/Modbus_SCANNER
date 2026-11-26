@@ -20,7 +20,7 @@ use crate::modbus::decode::{ByteOrder, DataType, DecodeResult, DecodeSpec, Decod
 use crate::modbus::frame::{DeviceIdObject, DeviceIdentification};
 use crate::state::Config;
 use crate::scanner::types::{
-    ChangeKind, DeviceDiff, DeviceProfile, DeviceRecord, DeviceTarget, IpTargetClass,
+    AddressSpace, RegisterKey, RegisterSpan, ChangeKind, DeviceDiff, DeviceProfile, DeviceRecord, DeviceTarget, IpTargetClass,
     IpTargetStatus, LogFormat, LoggerConfig, LoggerStatus, MonitorSample, MonitorUpdate,
     MonitorValueState, MonitorWatch, ProfileRegister, ProbeResult, Project, RegisterDiff,
     RegisterRange, RegisterScanMode, RegisterScanParams, RegisterValue,
@@ -49,6 +49,9 @@ pub fn export_bindings(manifest_dir: &Path) {
     }
 
     export!(
+        AddressSpace,
+        RegisterKey,
+        RegisterSpan,
         AppInfo,
         ByteOrder,
         ChangeKind,
