@@ -3,7 +3,7 @@
 **Revision: 2026-11-26.** Product direction and UI variant B approved; future implementation contracts remain subject to review. [VISION](VISION.md) · [BACKLOG R01–R30](BACKLOG.md) · [Previous roadmap](ROADMAP_LEGACY_2026-11-21.md) · [ADR](adr/README.md).
 
 ## Baseline
-Baseline at PR #19 start: main `cfda900559315e4c2dca51c6ac463a1c7132d4ec`, PR #12–#18 merged; CI and Windows QA successful. 17.A and B.1 are implemented; operational integration is in progress. Published v1.0.0 / manifests v1.0.1, physical acceptance not established. FC-aware tags, typed monitor and communication metrics are implemented. See [field validation](FIELD_VALIDATION_v1.0.1.md).
+Baseline at PR #20 start: main `4065fd26fda7d2fa99924792c1cebf42aef17018`, PR #12–#19 merged; PR #19 CI and Windows QA passed, post-merge checks initially running. B.2.1 merged; remaining B.2 integration is in progress. Published v1.0.0 / manifests v1.0.1, physical acceptance not established. FC-aware tags, typed monitor and communication metrics are implemented. See [field validation](FIELD_VALIDATION_v1.0.1.md).
 
 ## Priorities
 Prototype: correct data, reliable communication, distinctive engineering workflow, useful features, UI and performance. Keep existing baseline controls; advanced security and corporate authorization belong to late stages. CI/bench constraints remain in effect. No need to delay isolated development until a public release; physical acceptance remains necessary before publishing. Do not change versions prematurely.
@@ -28,26 +28,27 @@ Prototype: correct data, reliable communication, distinctive engineering workflo
 | #16 | Workbench Shell & Design System | UI-01/UI-02 | approved variant B; resizable panels, compact RU/EN, themes, persistence, existing workflows |
 | #17 | 17.A Connection Core | R20 | merged, isolated worker core |
 | #18 | 17.B.1 Communication Service | R20/R03 | merged, validated service foundation |
-| #19 | 17.B.2 Scanner & Manual Integration | R20/R03 | in progress; [contract](FUNCTIONAL_INTEGRATION.md) |
-| #20 | 17.B.3 Independent Monitoring | R20/R01 | independent per-connection monitor loops and scoped stop |
-| #21 | 17.B.4 Diagnostics & Regression | R04/R20 | queue metrics, Logger and integration acceptance |
-| #22 | 17.C Connection Manager UI | UI-03/R20 | editor, persistence, selectors and lifecycle controls |
-| #23 | Project Explorer & Workspace Manager | UI-03/UI-04, R08/R19/R25 | stable objects and independent session tabs |
-| #24 | Extended Data Types | R05 | exact 64-bit IPC, ENUM/bitfields |
-| #25 | Profile Schema v2 | R06 | validated versioned schema |
-| #26 | Profile Studio & Spreadsheet Import | UI-10/R21/R22 | preview and validation |
-| #27 | Addressing Assistant & Register Inspector | UI-05/R07 | explicit notation and conversion |
-| #28 | Polling Engine v2 | R09/R26 | single/group/adaptive and benchmarks |
-| #29 | Monitoring & Diagnostics Workspaces | UI-06/UI-07/UI-08, R08/R19/R25 | saved workspace and real independent sessions |
-| #30 | Advanced Trends & Oscilloscope | UI-11/R01/R08 | multiple series, cursor, quality gaps |
-| #31 | Industrial Profiles | R14/R24 | provenance, firmware, comparison |
-| #32 | Modbus Simulator | UI-12/R12 | isolated profile-driven device |
-| #33 | Engineering Test Center | UI-12/R16 | repeatable assertions |
-| #34 | Session Recorder & Replay | R13 | capture and offline playback |
-| #35 | PCAP & Traffic Analyzer | UI-09/R11 | offline authorized import and diagnostics |
-| #36 | Engineering Reports & PLC Export | R10/R29 | reproducible exports and PLC mapping |
+| #19 | 17.B.2.1 Shared Runtime Foundation | R20/R03 | merged, intermediate serial exclusion and Manual worker |
+| #20 | 17.B.2.2 Scanner Network & FC43 | R20/R03 | in progress; [contract](FUNCTIONAL_INTEGRATION.md); remaining B.2 tasks must be verified before B.3 |
+| #21 | 17.B.3 Independent Monitoring | R20/R01 | independent per-connection monitor loops and scoped stop |
+| #22 | 17.B.4 Diagnostics & Regression | R04/R20 | queue metrics, Logger and integration acceptance |
+| #23 | 17.C Connection Manager UI | UI-03/R20 | editor, persistence, selectors and lifecycle controls |
+| #24 | Project Explorer & Workspace Manager | UI-03/UI-04, R08/R19/R25 | stable objects and independent session tabs |
+| #25 | Extended Data Types | R05 | exact 64-bit IPC, ENUM/bitfields |
+| #26 | Profile Schema v2 | R06 | validated versioned schema |
+| #27 | Profile Studio & Spreadsheet Import | UI-10/R21/R22 | preview and validation |
+| #28 | Addressing Assistant & Register Inspector | UI-05/R07 | explicit notation and conversion |
+| #29 | Polling Engine v2 | R09/R26 | single/group/adaptive and benchmarks |
+| #30 | Monitoring & Diagnostics Workspaces | UI-06/UI-07/UI-08, R08/R19/R25 | saved workspace and real independent sessions |
+| #31 | Advanced Trends & Oscilloscope | UI-11/R01/R08 | multiple series, cursor, quality gaps |
+| #32 | Industrial Profiles | R14/R24 | provenance, firmware, comparison |
+| #33 | Modbus Simulator | UI-12/R12 | isolated profile-driven device |
+| #34 | Engineering Test Center | UI-12/R16 | repeatable assertions |
+| #35 | Session Recorder & Replay | R13 | capture and offline playback |
+| #36 | PCAP & Traffic Analyzer | UI-09/R11 | offline authorized import and diagnostics |
+| #37 | Engineering Reports & PLC Export | R10/R29 | reproducible exports and PLC mapping |
 
-UI-13 advanced docking/layout manager remains a later optional stage. PR numbering after #19 is indicative; backlog R identifiers remain stable. See [WORKBENCH_SHELL](WORKBENCH_SHELL.md).
+UI-13 advanced docking/layout manager remains a later optional stage. PR numbering after #20 is indicative; backlog R identifiers remain stable. See [WORKBENCH_SHELL](WORKBENCH_SHELL.md).
 
 R15, R23, R27, R28 are follow-up P2 features; R03 expanded, R17 and R&D R18/R30 require separate decisions after core maturity. No blind probing of all FC codes; only known read-only functions/subfunctions, with explicit bounds. Do not use line count as refactoring target.
 

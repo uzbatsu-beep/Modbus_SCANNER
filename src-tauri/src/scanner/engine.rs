@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use crate::communication::service::CommunicationService;
-use crate::transport::connection::SerialLease;
+use crate::transport::connection::{SerialLease, ConnectionManager, ConnectionDefinition, ConnectionMode, ConnectionPolicy, TransportConfig, TransactionRequest, Priority, OperationScope, ResponseValidator};
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
@@ -24,9 +24,8 @@ use crate::modbus::frame::{
     validate_response_function, Pdu,
 };
 use crate::transport::serial::{SerialPortConfig, SerialTransport};
-use crate::transport::tcp::{TcpFraming, TcpTransport};
+use crate::transport::tcp::{TcpConfig, TcpFraming};
 use crate::transport::tls::TlsParams;
-use crate::transport::udp::UdpTransport;
 use crate::transport::{Transport, TransportError};
 
 use super::strategies::{build_strategy, RegisterReadOutcome, ScanStrategy, WorkItem};
@@ -67,6 +66,91 @@ pub struct EngineParams {
     /// Second independent limiter for TCP connection attempts, including
     /// refused/unreachable endpoints that never get to transmit a PDU.
     connect_gate: Option<Arc<QuietGate>>,
+    network: Option<Arc<ScanNetwork>>,
+}
+
+/// Network discovery owns transient workers, never a persistent worker per IP.
+struct ScanNetwork {
+    manager: Arc<ConnectionManager>,
+    scope: Arc<OperationScope>,
+    owned: parking_lot::Mutex<std::collections::HashSet<String>>,
+    endpoints: parking_lot::Mutex<HashMap<String,std::sync::Weak<Mutex<()>>>>,
+}
+impl std::fmt::Debug for ScanNetwork {
+    fn fmt(&self,f:&mut std::fmt::Formatter<'_>)->std::fmt::Result {f.debug_struct("ScanNetwork").finish_non_exhaustive()}
+}
+impl ScanNetwork {
+    fn new(manager:Arc<ConnectionManager>)->Self {
+        Self{manager,scope:Arc::new(OperationScope::default()),owned:Default::default(),endpoints:Default::default()}
+    }
+    fn endpoint(&self,key:String)->Arc<Mutex<()>> {
+        let mut entries=self.endpoints.lock();
+        entries.retain(|_,v|v.strong_count()>0);
+        if let Some(lock)=entries.get(&key).and_then(std::sync::Weak::upgrade){return lock;}
+        let lock=Arc::new(Mutex::new(()));entries.insert(key,Arc::downgrade(&lock));lock
+    }
+    async fn drain(&self) {
+        // Only called after all producers have been joined or cancelled.
+        let ids:Vec<_>=self.owned.lock().iter().cloned().collect();
+        for id in ids {
+            let _=self.manager.disconnect(&id).await;
+            self.owned.lock().remove(&id);
+        }
+    }
+}
+impl Drop for ScanNetwork {
+    fn drop(&mut self){
+        self.scope.cancel();
+        let ids=std::mem::take(self.owned.get_mut());
+        if let Ok(runtime)=tokio::runtime::Handle::try_current(){
+            let manager=self.manager.clone();
+            runtime.spawn(async move{for id in ids{let _=manager.disconnect(&id).await;}});
+        }
+    }
+}
+
+/// Preserve the existing scanner traffic/result parser; validation is also
+/// performed inside the worker, before the next operation owns the resource.
+async fn network_transact(engine:&EngineParams,target:&DeviceTarget,pdu:&[u8],adu:&[u8],tx:u16,hint:usize)->(Result<Vec<u8>,TransportError>,bool) {
+    let Some(runtime)=engine.network.as_ref() else{return (Err(TransportError::Other("missing scan network runtime".into())),false);};
+    let transport=match target.kind{
+        TransportKind::Tcp=>TransportConfig::Tcp(TcpConfig{host:target.endpoint.clone(),port:target.port.unwrap_or(502),connect_timeout:engine.timeout,framing:engine.tcp_framing,tls:engine.tls.clone()}),
+        TransportKind::Udp=>TransportConfig::Udp{host:target.endpoint.clone(),port:target.port.unwrap_or(502),mbap:engine.udp_mbap},
+        _=>return (Err(TransportError::Other("network target required".into())),false),
+    };
+    let definition=ConnectionDefinition{id:format!("scan:{:032x}",rand::random::<u128>()),name:"Discovery".into(),transport,policy:ConnectionPolicy{mode:ConnectionMode::OnDemand,..Default::default()}};
+    let key=match definition.resource_key(){Ok(k)=>k,Err(e)=>return (Err(e),false)};
+    let endpoint=runtime.endpoint(key);
+    let _endpoint=endpoint.lock().await;
+    // Quiet mode deliberately uses a conservative completion-to-start gap.
+    // Holding this gate through close also covers failed TCP handshakes,
+    // retries, FC43 and register reads, including concurrent engine tasks.
+    let mut quiet=if let Some(gate)=&engine.quiet_gate{
+        let guard=gate.next.lock().await;
+        tokio::time::sleep_until(*guard).await;Some(guard)
+    }else{None};
+    if target.kind==TransportKind::Tcp{engine.before_ip_connect().await;}
+    if runtime.scope.is_cancelled(){return (Err(TransportError::Cancelled),false);}
+    let id=definition.id.clone();
+    if let Err(e)=runtime.manager.register(definition){return (Err(e),false);}
+    runtime.owned.lock().insert(id.clone());
+    let request=pdu.to_vec();let unit=target.unit_id;let kind=target.kind;let validation_engine=engine.clone();
+    let validator:ResponseValidator=Box::new(move |bytes|{
+        let decoded=verify_adu(kind,unit,request[0],bytes,tx,validation_engine.clone())?;
+        crate::communication::service::verify_payload(&decoded,&request)
+    });
+    let result=runtime.manager.transact_scoped(&id,TransactionRequest{adu:adu.to_vec(),response_timeout:engine.timeout,expected_hint:hint,priority:Priority::Low},runtime.scope.clone(),Some(validator)).await;
+    let closed=runtime.manager.disconnect(&id).await;
+    runtime.owned.lock().remove(&id);
+    if let Some(guard)=quiet.as_mut(){**guard=tokio::time::Instant::now()+Duration::from_millis(500);}
+    match result{
+        Ok(o)=>{
+            let connected=kind==TransportKind::Tcp&&o.timing.connect_us.is_some()&&o.timing.failure_stage.as_deref()!=Some("connect");
+            if let Some(raw)=o.rejected_response{return (Ok(raw),connected);}
+            (match (o.result,closed){(Ok(v),Ok(()))=>Ok(v),(Err(e),_)|(_,Err(e))=>Err(e)},connected)
+        },
+        Err(e)=>(Err(e),false),
+    }
 }
 
 /// Shared for all worker tasks of a single scan, including retry and FC43.
@@ -102,6 +186,7 @@ impl EngineParams {
             tls: p.tls.clone(),
             quiet_gate: p.quiet_mode.then(|| Arc::new(QuietGate::new())),
             connect_gate: p.quiet_mode.then(|| Arc::new(QuietGate::new())),
+            network: None,
         }
     }
 }
@@ -312,7 +397,8 @@ impl ScannerHandle {
             return Err("scan already in progress".into());
         }
 
-        let engine_params = EngineParams::from_scan_params(&params);
+        let mut engine_params = EngineParams::from_scan_params(&params);
+        engine_params.network=Some(Arc::new(ScanNetwork::new(self.communication.manager.clone())));
         let serial_port=scan_serial_port(&target).map(str::to_owned);
         let strategy = build_strategy(target, params).map_err(|error| {
             self.status_tx.send_replace(ScanStatus::Failed);
@@ -679,6 +765,10 @@ async fn engine_task(
             }
         }
 
+        if stop_on_first {
+            if let Some(network)=&engine.network{network.drain().await;}
+            if let Some(gate)=&engine.quiet_gate{*gate.next.lock().await=tokio::time::Instant::now()+Duration::from_millis(500);}
+        }
         // Only automatic stop-on-first may complete its planned register reads.
         // An explicit user Stop must never drain this queue.
         while !user_cancelled {
@@ -724,13 +814,17 @@ async fn engine_task(
         status_tx.send_replace(ScanStatus::Stopping);
         emit_event(&sink, &ScanEvent::StatusChanged {
             status: ScanStatus::Stopping,
-            message: "cancelling in-flight requests and discarding queued reads".into(),
+            message: "discarding queued reads and finishing active network transactions".into(),
         });
         pending.clear();
         ip_tasks.abort_all();
         while ip_tasks.join_next().await.is_some() {}
     }
 
+    if let Some(network)=&engine.network{
+        network.scope.stop().await;
+        network.drain().await;
+    }
     // Drop transports and close the control receiver before the terminal
     // watch update. A caller may restart immediately after wait_finished().
     if let Some(mut transport) = serial_transport.take() {
@@ -1013,9 +1107,6 @@ async fn execute_probe(
         // P2-04: did the TCP handshake succeed? A connected socket that never
         // speaks Modbus is different from a refused/unreachable endpoint.
         let mut tcp_connected = false;
-        if target.kind == TransportKind::Tcp {
-            engine.before_ip_connect().await;
-        }
         let res: Result<Vec<u8>, TransportError> = match target.kind {
             TransportKind::Rtu | TransportKind::Ascii => {
                 let mode = match target.serial_mode {
@@ -1061,31 +1152,9 @@ async fn execute_probe(
                     }
                 }
             }
-            TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
-                host: target.endpoint.clone(),
-                port: target.port.unwrap_or(502),
-                connect_timeout: timeout,
-                framing: engine.tcp_framing,
-            tls: engine.tls.clone(),
-            })
-            .await
-            {
-                Ok(mut t) => {
-                    tcp_connected = true;
-                    engine.before_tx().await;
-                    match t.transact(&adu, timeout, 8).await {
-                        Ok(resp) => {
-                            let _ = t.close().await;
-                            Ok(resp)
-                        }
-                        Err(e) => Err(e),
-                    }
-                }
-                Err(e) => Err(e),
-            },
-            TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
-                Ok(mut t) => { engine.before_tx().await; t.transact(&adu, timeout, 8).await },
-                Err(e) => Err(e),
+            TransportKind::Tcp | TransportKind::Udp => {
+                let (result,connected)=network_transact(&engine,target,pdu,&adu,transaction_id,8).await;
+                tcp_connected=connected;result
             },
         };
 
@@ -1316,9 +1385,6 @@ async fn execute_register_read(
     let timeout = engine.timeout;
     let started = Instant::now();
 
-    if target.kind == TransportKind::Tcp {
-        engine.before_ip_connect().await;
-    }
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => {
             if serial_transport.is_none() {
@@ -1328,30 +1394,7 @@ async fn execute_register_read(
             engine.before_tx().await;
             t.transact(&adu, timeout, 3 + (quantity as usize) * 2).await
         }
-        TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
-            host: target.endpoint.clone(),
-            port: target.port.unwrap_or(502),
-            connect_timeout: timeout,
-            framing: engine.tcp_framing,
-        tls: engine.tls.clone(),
-        })
-        .await
-        {
-            Ok(mut t) => { engine.before_tx().await;
-                match t.transact(&adu, timeout, 8).await {
-                Ok(resp) => {
-                    let _ = t.close().await;
-                    Ok(resp)
-                }
-                Err(e) => Err(e),
-                }
-            },
-            Err(e) => Err(e),
-        },
-        TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
-            Ok(mut t) => { engine.before_tx().await; t.transact(&adu, timeout, 8).await },
-            Err(e) => Err(e),
-        },
+        TransportKind::Tcp | TransportKind::Udp => network_transact(&engine,target,pdu,&adu,transaction_id,8).await.0,
     };
 
     // Validate once, before both traffic logging and result storage. A reply
@@ -1570,38 +1613,19 @@ async fn identify_device(
     );
     let timeout = engine.timeout;
     let started = Instant::now();
-    if target.kind == TransportKind::Tcp {
-        engine.before_ip_connect().await;
-    }
     let res: Result<Vec<u8>, TransportError> = match target.kind {
         TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
             Some(t) => { engine.before_tx().await; t.transact(&adu, timeout, 32).await },
             None => return,
         },
-        TransportKind::Tcp => match TcpTransport::connect(crate::transport::tcp::TcpConfig {
-            host: target.endpoint.clone(),
-            port: target.port.unwrap_or(502),
-            connect_timeout: timeout,
-            framing: engine.tcp_framing,
-        tls: engine.tls.clone(),
-        })
-        .await
-        {
-            Ok(mut t) => {
-                engine.before_tx().await;
-                let out = t.transact(&adu, timeout, 32).await;
-                let _ = t.close().await;
-                out
-            }
-            Err(e) => Err(e),
-        },
-        TransportKind::Udp => match UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await {
-            Ok(mut t) => { engine.before_tx().await; t.transact(&adu, timeout, 32).await },
-            Err(e) => Err(e),
-        },
+        TransportKind::Tcp | TransportKind::Udp => network_transact(&engine,target,&read_device_identification(1,0),&adu,transaction_id,32).await.0,
     };
     let tx_status = match &res {
-        Ok(_) => "ok",
+        Ok(bytes) => match verify_adu(target.kind,target.unit_id,0x2b,bytes,transaction_id,engine.clone()){
+            Ok(p) if p.is_exception()=>"exception",
+            Ok(p) if crate::communication::service::verify_payload(&p,&read_device_identification(1,0)).is_ok()=>"ok",
+            _=>"invalid",
+        },
         Err(TransportError::Timeout(_)) => "timeout",
         Err(_) => "error",
     };
@@ -1628,8 +1652,8 @@ async fn identify_device(
         _ => return,
     };
     let identity = match parse_device_identification(&data) {
-        Ok(id) => id,
-        Err(_) => return,
+        Ok(id) if id.read_code==1 => id,
+        _ => return,
     };
     let record = {
         let mut r = results.write();
