@@ -1165,9 +1165,12 @@ async fn execute_probe(
             verify_adu(
                 target.kind, target.unit_id, function,
                 reply, transaction_id, engine.clone(),
-            ).map(|p| super::strategies::classify_response(
-                function, &p.to_bytes(), started.elapsed().as_micros(),
-            ))
+            ).and_then(|p| {
+                crate::communication::service::verify_payload(&p,pdu)?;
+                Ok(super::strategies::classify_response(
+                    function, &p.to_bytes(), started.elapsed().as_micros(),
+                ))
+            })
         });
         let status = match (&res, &verified) {
             (Ok(_), Some(Ok(ProbeResult::Ok { .. }))) => "ok",

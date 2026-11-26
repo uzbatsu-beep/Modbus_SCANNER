@@ -1,7 +1,7 @@
 //! Lifecycle regression tests using an isolated TCP loopback listener.
 //! Assert the absence of new outbound requests after Stop, not just UI status.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
