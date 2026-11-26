@@ -134,8 +134,8 @@ pub trait Transport: Send {
 ## Сохранение настроек
 
 `Config` описан в `state.rs`; команды `get_config`/`save_config`/`load_config`
-читают/пишут `config.json` в `app_config_dir()` Tauri (например,
-`%APPDATA%\com.modbus-scanner.app\config.json` в Windows).
+читают/пишут `config-v2.json` в `app_config_dir()` Tauri (например,
+`%APPDATA%\com.modbus-scanner.app\config-v2.json` в Windows).
 
 ## Планируемые модули (v0.2+, см. [PLAN.ru.md](PLAN.ru.md))
 
@@ -167,3 +167,5 @@ pub trait Transport: Send {
 Фактический тракт: Modbus-протокол и транспорт на Rust → движок сканирования с проверками безопасности → команды Tauri или опциональный API на loopback → интерфейс Vue/Pinia. При изменениях важно сохранить инварианты тайм-аутов, отмены и read-only обнаружения. Раздел `Планируемые модули (v0.2+)` ниже — **исторический проектный план**, а не актуальный перечень реализованных функций. Источник статуса — [ROADMAP](ROADMAP.md), код и тесты.
 
 Отдельный пункт анализа безопасности: в `src-tauri/tauri.conf.json` сейчас `app.security.csp: null`. Подбор ограничивающей CSP требует анализа Tauri capabilities и ресурсов WebView с последующими тестами. Само по себе наблюдение не доказывает наличие эксплуатируемой уязвимости. См. [SECURITY](SECURITY.md), [аудит](AUDIT_2026-11-21.md).
+
+PR #13: AddressSpace → RegisterKey → RegisterSpan → TagDefinition.id; идентификация не смешивает FC03/FC04. Декодирование инспектора использует только полный диапазон, ноль является корректным значением. Проекты v1 не мигрируют автоматически; отдельная конфигурация v2. [Модель данных](DATA_MODEL.md).

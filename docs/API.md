@@ -72,7 +72,7 @@ Tauri commands for the in-app server: `start_api_server(port)`, `stop_api_server
 | `import_profiles` | `{ path: string, format: "csv"\|"json" }` | `DeviceProfile[]` (merged into config) |
 | `create_profile_from_device` | `{ deviceKey: string }` | `DeviceProfile` (skeleton from FC43 identity) |
 | `suggest_profile` | `{ deviceKey: string }` | `DeviceProfile \| null` (matched by vendor/product/revision) |
-| `apply_profile` | `{ deviceKey: string, profileId: string }` | `TagDefinition[]` (replaces tags for that device) |
+| `apply_profile` | `{ deviceKey: string, profileId: string }` | `TagDefinition[]` (replaces only this profile's tags on that device) |
 
 `DeviceProfile = { id, vendor, product_code, revision, name, description?,
 registers: ProfileRegister[] }`; `ProfileRegister = { function, address, name,
@@ -117,7 +117,7 @@ The test sends FC03 (unit 1, address 0, quantity 1) and waits 800 ms.
 | `export_results` | `{ path: string, format: "csv"\|"json"\|"xml" }` | `number` | Writes file with the whole session; returns device count |
 | `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: exports only the selected `DeviceRecord` (probes, registers, FC43 identity); `false`/error if key is unknown |
 | `save_project` | `{ path: string, name: string }` | `string` (path) | P3-04: writes devices + tag map + scan history to one JSON file; appends a snapshot (max 20) |
-| `load_project` | `{ path: string }` | `Project` | P3-04: restores results and tags, syncs `config.json` |
+| `load_project` | `{ path: string }` | `Project` | P3-04: restores results and tags, syncs `config-v2.json` |
 | `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: poll registers every 250–10000 ms |
 | `stop_monitor` | — | `void` | Stop live polling |
 | `get_monitor_state` | — | `MonitorValueState[]` | Current min/max/changed values and sample history |
@@ -237,7 +237,7 @@ All three return `ManualResponse`:
 | Command | Args | Returns |
 |---------|------|---------|
 | `get_config` | — | in-memory `Config` |
-| `save_config` | `{ config: Config }` | `void` (also persists to `config.json`) |
+| `save_config` | `{ config: Config }` | `void` (also persists to `config-v2.json`) |
 | `load_config` | — | `Config` (reads from disk, or defaults) |
 
 `Config` fields: `language`, `theme`, `scan_params`, `last_serial`,
@@ -376,3 +376,7 @@ await api.scanner.start(
 - The optional REST/WebSocket server binds to loopback and requires `MODBUS_SCANNER_API_TOKEN` (at least 24 printable ASCII characters); origin and Bearer checks apply as described in [SECURITY](SECURITY.md). Do **not** expose it directly on a plant network.
 - Separate read-only discovery and manual write operations: operator authorization and isolated bench testing remain mandatory even when an API call succeeds.
 - For source-of-truth boundaries and current release state, see [INDEX](INDEX.md) and [audit](AUDIT_2026-11-21.md).
+
+## Register identity — PR #13
+
+Project version 2 only. Old project files are explicitly rejected; config is stored in a separate config-v2.json. TagDefinition contains id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan contains start (RegisterKey) and quantity; RegisterKey contains device_key, address_space and zero-based address. AddressSpace values: coils, discrete_inputs, holding_registers, input_registers. FC mapping is 1, 2, 3, 4 respectively. Profile CSV/JSON requires an explicit supported read FC; no default to FC03. Watch identity distinguishes raw register keys from named tags; watch quantity is the tag span. Monitoring and its file logs remain RAW until PR #14, not engineering values. See [DATA_MODEL](DATA_MODEL.md).

@@ -11,7 +11,7 @@ Prototype: correct data, reliable communication, distinctive engineering workflo
 | Version target | Theme | Scope / Exit gate |
 |---|---|---|
 | v1.0.1 | Stabilization | Existing candidate, automated and physical validation separate |
-| v1.1 | Engineering Core | FC-aware identity, typed monitoring, RTT/quality, connection ownership, extended types; old projects migrate |
+| v1.1 | Engineering Core | FC-aware identity, typed monitoring, RTT/quality, connection ownership, extended types; project schema v2 (clean prototype break) |
 | v1.2 | Device Engineering | Profiles v2, import/editor, address assistant, configurable poll planner, measured performance |
 | v1.3 | Professional Workbench | Independent sessions, project tree, multi-device trends, profiles and comparison |
 | v1.4 | Virtual Engineering Bench | Profile-driven simulator, tests, record/offline replay |
@@ -22,7 +22,7 @@ Prototype: correct data, reliable communication, distinctive engineering workflo
 | PR | Scope | Backlog | Completion |
 |---|---|---|---|
 | #12 | Strategy and roadmap | all | design docs and existing CI |
-| #13 | Register Identity & Tag Model | R02 | FC/table preserved across storage, import and monitor; migration tests |
+| #13 | Register Identity & Tag Model | R02 | FC/table preserved across storage, import and monitor; v2 round-trip and rejection tests |
 | #14 | Typed Monitoring Engine | R01 | signed values, consistent table/trend/log, quality |
 | #15 | Communication Metrics | R04 | measured RTT, cycle/period, error categories |
 | #16 | Connection & Transport Manager | R20, baseline R03 | serial resource ownership, independent sessions/cancellation |

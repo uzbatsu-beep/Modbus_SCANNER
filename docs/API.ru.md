@@ -71,7 +71,7 @@ DNS-имена не допускаются из-за риска подмены �
 | `import_profiles` | `{ path: string, format: "csv"\|"json" }` | `DeviceProfile[]` (сливаются в конфиг) |
 | `create_profile_from_device` | `{ deviceKey: string }` | `DeviceProfile` (заготовка по FC43) |
 | `suggest_profile` | `{ deviceKey: string }` | `DeviceProfile \| null` (по vendor/product/revision) |
-| `apply_profile` | `{ deviceKey: string, profileId: string }` | `TagDefinition[]` (заменяет теги устройства) |
+| `apply_profile` | `{ deviceKey: string, profileId: string }` | `TagDefinition[]` (заменяет только теги данного профиля на устройстве) |
 
 `DeviceProfile = { id, vendor, product_code, revision, name, description?,
 registers: ProfileRegister[] }`; `ProfileRegister = { function, address, name,
@@ -115,7 +115,7 @@ spec: DecodeSpec, unit?, description? }`. Сопоставление identity р
 | `export_results` | `{ path: string, format: "csv"\|"json"\|"xml" }` | `number` | Пишет файл со всей сессией, возвращает число устройств |
 | `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: экспортирует только выбранное устройство (зонды, регистры, FC43-идентификацию); ошибка, если ключ неизвестен |
 | `save_project` | `{ path: string, name: string }` | `string` (путь) | P3-04: пишет устройства + теги + историю сканов в один JSON; добавляет снимок (макс. 20) |
-| `load_project` | `{ path: string }` | `Project` | P3-04: восстанавливает результаты и теги, синхронизирует `config.json` |
+| `load_project` | `{ path: string }` | `Project` | P3-04: восстанавливает результаты и теги, синхронизирует `config-v2.json` |
 | `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: опрос регистров каждые 250–10000 мс |
 | `stop_monitor` | — | `void` | Остановить опрос |
 | `get_monitor_state` | — | `MonitorValueState[]` | Текущие min/max/изменения и история выборок |
@@ -236,7 +236,7 @@ Broadcast (unit 0) запрещён для записи и Raw Frame на все
 | Команда | Аргументы | Возврат |
 |---------|-----------|---------|
 | `get_config` | — | `Config` из памяти |
-| `save_config` | `{ config: Config }` | `void` (также пишет `config.json`) |
+| `save_config` | `{ config: Config }` | `void` (также пишет `config-v2.json`) |
 | `load_config` | — | `Config` (с диска или значения по умолчанию) |
 
 Поля `Config`: `language`, `theme`, `scan_params`, `last_serial`,
@@ -374,3 +374,7 @@ await api.scanner.start(
 - Опциональный REST/WebSocket API слушает только loopback; требуется `MODBUS_SCANNER_API_TOKEN` (не менее 24 печатных ASCII-символов). Bearer/Origin-проверки описаны в [SECURITY](SECURITY.md). Не публикуйте API непосредственно в технологической сети.
 - Обнаружение и ручная запись — разные операции. Успешный ответ API не заменяет разрешение владельца оборудования и стендовую приёмку.
 - [Карта документации](INDEX.md), [актуальный аудит](AUDIT_2026-11-21.md).
+
+## Идентификация регистров — PR #13
+
+Проекты только версии 2. Старый проект отклоняется; конфигурация хранится отдельно в config-v2.json. TagDefinition содержит id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan: start (RegisterKey), quantity; RegisterKey: device_key, address_space, нулевой адрес address. AddressSpace: coils, discrete_inputs, holding_registers, input_registers; соответственно FC01–FC04. CSV/JSON профиля требует явного поддерживаемого FC, без подстановки FC03. Монитор различает исходный регистр и именованный тег; количество слов берётся из диапазона тега. Монитор и его файловые логи до PR #14 остаются RAW, а не инженерными значениями. См. [DATA_MODEL](DATA_MODEL.md).
