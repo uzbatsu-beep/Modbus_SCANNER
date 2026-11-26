@@ -84,3 +84,5 @@ These are target specifications, not claims of features already implemented. Exi
 - [WORKBENCH_SHELL](WORKBENCH_SHELL.md) — approved UI shell, layout and acceptance.
 
 - [CONNECTION_MANAGER](CONNECTION_MANAGER.md) — PR #17 phases, resource ownership and acceptance.
+
+- [FUNCTIONAL_INTEGRATION](FUNCTIONAL_INTEGRATION.md) — PR #18 approved B.1–B.4 contract.

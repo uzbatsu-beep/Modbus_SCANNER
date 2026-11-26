@@ -1,0 +1,23 @@
+# PR #18 — 17.B Functional Integration
+
+Approved 2026-11-26: B Unified Runtime; independent per-connection monitor loops; 8 of 128 waiting slots reserved for manual/high priority; automatic RTU recovery with manual override; exclusive serial autodiscovery; scoped Stop cancels pending work and safely finishes active transactions; extend metrics and Logger; B.1–B.4; no merge before verification. PR #17 (17.A) is merged; #19 is 17.C UI.
+
+## B.1 — service foundation
+- Existing worker now limits normal/low admissions to 120; all priorities share 128 total waiting slots. High priority can use reserved capacity; dispatch weights remain 3:2:1. Queue rejection counter.
+- OperationScope atomically closes its own admission and dispatch on cancellation; stop waits for its dispatched jobs, not other clients. Cancelled pending callers return without TX; their queue slots are reclaimed when worker discards jobs. Already dispatched work is not aborted mid-frame; cancellation during retry/pre-TX can avoid sending.
+- Exclusive serial discovery lease mutually excludes registered workers. Caller must retain lease until all discovery I/O and handles are closed. B.2 wires it into actual sweep.
+- Recovery for serial RTU/ASCII, RTU over TCP and RTU over UDP: after failure following TX (or operation deadline), close and wait max(backoff, automatic response timeout or manual override, minimum framing gap), then reopen and use existing pre-TX reset. This is bounded mitigation, not proof against arbitrary late replies. No background retransmission.
+- Structured service builds ADU using existing codecs, allocates MBAP IDs, checks request spans and supported functions, validates full response inside worker before next dispatch. Valid exceptions are not transport corruption; invalid reply triggers recovery. No changes to existing authorization; callers must check policy. Raw frames and full FC43 workflow still require integration review.
+- Exact definition reuse only; incompatible config is rejected. No silent framing change. No application-wide registration/use yet. B.1 tests: reserve, scoped stop, exclusive lease, recovery policy, response validation and definition reuse.
+
+## B.2 — pending
+One service shared by GUI scanner/monitor/manual/COM test and local API; independent process instance for CLI. Route all production transport opens; special bounded discovery lease and ephemeral network scan connections; preserve Quiet Mode actual TX/connect pacing, retries only for reads, existing traffic records and raw frame semantics. Ensure resource lifetimes and validation do not bypass policy.
+
+## B.3 — pending
+Independent cycles per connection with no global barrier, preserve session identity/sequence/quality/history and 200 ms incremental UI; scoped stop and per-resource expected interval/stale; no grouped/adaptive poll scheduling.
+
+## B.4 — pending
+Queue and reconnect metrics, Logger fields, source/connection identity, cross-tool contention, late reply tests, independent monitor loops, protocol matrix, cancellation/ownership and existing regressions. CI and Windows QA plus explicit maintainer review. Physical validation remains separate.
+
+## RU
+Утверждён вариант B. B.1 создаёт общий сервис и механизмы допуска, отмены и восстановления. B.2 переводит реальные инструменты, B.3 реализует независимый мониторинг, B.4 расширяет диагностику и завершает проверку. Не считать функциональную интеграцию законченной до прохождения всех этапов.

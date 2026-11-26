@@ -12,6 +12,7 @@ pub mod bindings;
 pub mod bridge;
 pub mod cli;
 pub mod commands;
+pub mod communication;
 pub mod modbus;
 pub mod scanner;
 pub mod state;

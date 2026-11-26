@@ -112,7 +112,10 @@ async fn bounded_queue_disconnect_and_independent_endpoint(){
     let slow={let m=m.clone();tokio::spawn(async move{let mut r=request(Priority::Normal);r.response_timeout=Duration::from_secs(10);m.transact("a",r).await})};
     tokio::time::timeout(Duration::from_secs(3),entered.acquire()).await.unwrap().unwrap().forget();
     let mut queued=Vec::new();
-    for _ in 0..QUEUE_CAPACITY{let m=m.clone();queued.push(tokio::spawn(async move{m.transact("a",request(Priority::Low)).await}));}
+    for _ in 0..NORMAL_CAPACITY{let m=m.clone();queued.push(tokio::spawn(async move{m.transact("a",request(Priority::Low)).await}));}
+    tokio::time::timeout(Duration::from_secs(3),async{while m.snapshot()[0].queue_depth!=NORMAL_CAPACITY{tokio::task::yield_now().await;}}).await.unwrap();
+    assert!(m.transact("a",request(Priority::Normal)).await.is_err());
+    for _ in 0..MANUAL_RESERVE{let m=m.clone();queued.push(tokio::spawn(async move{m.transact("a",request(Priority::High)).await}));}
     tokio::time::timeout(Duration::from_secs(3),async{
         while m.snapshot()[0].queue_depth!=QUEUE_CAPACITY{tokio::task::yield_now().await;}
     }).await.unwrap();
@@ -187,4 +190,58 @@ async fn native_tcp_reuses_one_socket_for_two_unit_ids() {
 #[test]
 fn registration_outside_runtime_returns_error() {
     assert!(ConnectionManager::new().register(definition("a",502)).is_err());
+}
+
+#[tokio::test]
+async fn scoped_stop_does_not_cancel_other_clients(){
+    let gate=Arc::new(Semaphore::new(0));let entered=Arc::new(Semaphore::new(0));let sent=Arc::new(AtomicUsize::new(0));
+    let m=Arc::new(ConnectionManager::with_factory(Arc::new(GateFactory{gate:gate.clone(),entered:entered.clone(),sent:sent.clone()})));
+    m.register(definition("a",502)).unwrap();
+    let scope=Arc::new(OperationScope::default());
+    let active={let m=m.clone();let scope=scope.clone();tokio::spawn(async move{
+        let mut r=request(Priority::Normal);r.response_timeout=Duration::from_secs(10);
+        m.transact_scoped("a",r,scope,None).await
+    })};
+    tokio::time::timeout(Duration::from_secs(3),entered.acquire()).await.unwrap().unwrap().forget();
+    let pending={let m=m.clone();let scope=scope.clone();tokio::spawn(async move{m.transact_scoped("a",request(Priority::Normal),scope,None).await})};
+    let other={let m=m.clone();tokio::spawn(async move{let mut r=request(Priority::High);r.response_timeout=Duration::from_secs(10);m.transact("a",r).await})};
+    tokio::time::timeout(Duration::from_secs(3),async{while m.snapshot()[0].queue_depth!=2{tokio::task::yield_now().await;}}).await.unwrap();
+    let stopping={let scope=scope.clone();tokio::spawn(async move{scope.stop().await})};
+    assert!(matches!(tokio::time::timeout(Duration::from_secs(3),pending).await.unwrap().unwrap(),Err(TransportError::Cancelled)));
+    assert!(!stopping.is_finished());
+    gate.add_permits(2);
+    assert!(active.await.unwrap().unwrap().result.is_ok());
+    stopping.await.unwrap();
+    assert!(other.await.unwrap().unwrap().result.is_ok());
+    assert_eq!(sent.load(Ordering::SeqCst),2);
+    assert!(matches!(m.transact_scoped("a",request(Priority::Normal),scope,None).await,Err(TransportError::Cancelled)));
+    m.disconnect("a").await.unwrap();
+}
+#[tokio::test]
+async fn exclusive_discovery_lease_blocks_worker_and_releases_on_drop(){
+    let m=ConnectionManager::new();
+    let port=if cfg!(windows){"COM99"}else{"/dev/modbus-test-port"};
+    let d=ConnectionDefinition{id:"s".into(),name:"s".into(),transport:TransportConfig::Serial{config:SerialPortConfig{port_name:port.into(),..Default::default()},mode:SerialMode::Rtu},policy:Default::default()};
+    let lease=m.lease_serial(port).unwrap();
+    assert!(m.register(d.clone()).is_err());assert!(m.lease_serial(port).is_err());
+    drop(lease);m.register(d).unwrap();assert!(m.lease_serial(port).is_err());
+    m.disconnect("s").await.unwrap();assert!(m.lease_serial(port).is_ok());
+}
+#[test]
+fn recovery_respects_framing_and_override(){
+    let mut d=definition("a",502);
+    assert_eq!(recovery_pause(&d,Duration::from_millis(800)),Duration::ZERO);
+    if let TransportConfig::Tcp(c)=&mut d.transport{c.framing=TcpFraming::Rtu;}
+    assert_eq!(recovery_pause(&d,Duration::from_millis(800)),Duration::from_millis(800));
+    d.policy.recovery_ms=Some(1200);
+    assert_eq!(recovery_pause(&d,Duration::from_millis(800)),Duration::from_millis(1200));
+}
+#[tokio::test]
+async fn invalid_response_is_recovered_before_next_dispatch(){
+    let factory=Arc::new(ScriptFactory{opens:AtomicUsize::new(0),scripts:parking_lot::Mutex::new(VecDeque::from([vec![Ok(vec![1])],vec![Ok(vec![2])]]))});
+    let m=ConnectionManager::with_factory(factory.clone());m.register(definition("a",502)).unwrap();
+    let o=m.transact_scoped("a",request(Priority::Normal),Arc::new(OperationScope::default()),Some(Box::new(|_|Err(invalid("wrong response"))))).await.unwrap();
+    assert!(o.result.is_err());assert_eq!(o.timing.failure_stage.as_deref(),Some("validation"));
+    assert_eq!(m.transact("a",request(Priority::Normal)).await.unwrap().result.unwrap(),vec![2]);
+    assert_eq!(factory.opens.load(Ordering::SeqCst),2);m.disconnect("a").await.unwrap();
 }
