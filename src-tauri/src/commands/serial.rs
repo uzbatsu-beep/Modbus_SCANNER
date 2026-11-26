@@ -98,7 +98,7 @@ pub async fn list_serial_ports() -> Result<Vec<SerialPortInfo>, String> {
 }
 
 #[tauri::command]
-pub async fn test_serial_port(params: TestSerialParams) -> Result<TestSerialResult, String> {
+pub async fn test_serial_port(state: State<'_, AppState>, params: TestSerialParams) -> Result<TestSerialResult, String> {
     use crate::transport::serial::{DataBitsSerde, ParitySerde, StopBitsSerde};
 
     let data_bits = match params.data_bits {
@@ -134,6 +134,11 @@ pub async fn test_serial_port(params: TestSerialParams) -> Result<TestSerialResu
         response_hex: None,
     };
 
+    let communication=state.scanner.communication();
+    let _lease=match communication.manager.lease_serial(&params.port_name){
+        Ok(lease)=>lease,
+        Err(e)=>{result.error=Some(e.to_string());return Ok(result);}
+    };
     let mut transport = match SerialTransport::open(cfg, params.mode).await {
         Ok(t) => t,
         Err(e) => {
@@ -155,9 +160,9 @@ pub async fn test_serial_port(params: TestSerialParams) -> Result<TestSerialResu
                 result.response_hex = Some(hex::encode(&resp));
                 let valid = match params.mode {
                     SerialMode::Rtu => crate::modbus::rtu::decode(&resp)
-                        .map(|frame| frame.unit_id.0 == 1 && (frame.pdu.function() == 0x03 || frame.pdu.is_exception())),
+                        .map(|frame| frame.unit_id.0 == 1 && (frame.pdu.function() == 0x03)),
                     SerialMode::Ascii => crate::modbus::ascii::decode(&resp)
-                        .map(|frame| frame.unit_id.0 == 1 && (frame.pdu.function() == 0x03 || frame.pdu.is_exception())),
+                        .map(|frame| frame.unit_id.0 == 1 && (frame.pdu.function() == 0x03)),
                 };
                 match valid {
                     Ok(true) => {

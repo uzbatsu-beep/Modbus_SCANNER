@@ -4,7 +4,9 @@
 //! against a single device with full control over the PDU.
 
 use ts_rs::TS;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use std::sync::Arc;
+use crate::transport::connection::{ConnectionManager,ConnectionDefinition,ConnectionPolicy,ConnectionMode,TransportConfig,TransactionRequest,Priority,ResponseValidator};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -16,10 +18,9 @@ use crate::modbus::decode::{
 use crate::modbus::frame::{
     parse_tcp_response, request, response, validate_response_function, Pdu,
 };
-use crate::transport::serial::{SerialPortConfig, SerialTransport};
-use crate::transport::tcp::TcpTransport;
-use crate::transport::udp::UdpTransport;
-use crate::transport::{Transport, TransportError};
+use crate::transport::serial::SerialPortConfig;
+use crate::transport::tcp::{TcpConfig,TcpFraming};
+use crate::transport::TransportError;
 
 use crate::state::AppState;
 
@@ -170,74 +171,68 @@ fn verify_write_ack(response: &Pdu, request: &[u8]) -> Result<(), ModbusError> {
     Ok(())
 }
 
+fn manual_definition(target:&ManualTarget,timeout:Duration)->Result<ConnectionDefinition,TransportError>{
+    let transport=match target.kind{
+        TransportKind::Rtu|TransportKind::Ascii=>{
+            let sp=target.serial.clone().ok_or_else(||TransportError::Other("serial params required".into()))?;
+            let mode=if target.kind==TransportKind::Ascii{SerialMode::Ascii}else{SerialMode::Rtu};
+            if target.serial_mode.is_some_and(|m|m!=mode){return Err(TransportError::Other("serial mode does not match transport kind".into()));}
+            TransportConfig::Serial{config:SerialPortConfig{port_name:sp.port_name,baud_rate:sp.baud_rate,data_bits:sp.data_bits.into(),parity:sp.parity.into(),stop_bits:sp.stop_bits.into(),frame_gap:Duration::from_millis(2)},mode}
+        },
+        TransportKind::Tcp=>TransportConfig::Tcp(TcpConfig{host:target.endpoint.clone(),port:target.port.unwrap_or(502),connect_timeout:timeout,framing:TcpFraming::Mbap,tls:None}),
+        TransportKind::Udp=>TransportConfig::Udp{host:target.endpoint.clone(),port:target.port.unwrap_or(502),mbap:false},
+    };
+    Ok(ConnectionDefinition{id:format!("manual:{:032x}",rand::random::<u128>()),name:"Manual".into(),transport,policy:ConnectionPolicy{mode:ConnectionMode::OnDemand,..Default::default()}})
+}
+
 async fn manual_transact(
+    manager:Arc<ConnectionManager>,
     req: &impl HasTarget,
     adu: Vec<u8>,
     expected_hint: usize,
     policy: ManualRetryPolicy,
+    structured_pdu:Option<&[u8]>,
 ) -> Result<(Vec<u8>, u128), TransportError> {
-    let target = req.target();
-    let timing = req.timing();
-    let timeout = Duration::from_millis(
-        timing.map(|t| t.timeout_ms).unwrap_or(800).clamp(50, 10_000) as u64,
-    );
-    let retries = permitted_retries(timing, policy);
-
-    let mut attempts = 0u32;
-    loop {
-        let started = Instant::now();
-        let res: Result<Vec<u8>, TransportError> = match target.kind {
-            TransportKind::Rtu | TransportKind::Ascii => {
-                let mode = match target.serial_mode {
-                    Some(SerialMode::Ascii) => SerialMode::Ascii,
-                    _ => SerialMode::Rtu,
-                };
-                let sp = target
-                    .serial
-                    .clone()
-                    .ok_or_else(|| TransportError::Other("serial params required".into()))?;
-                let cfg = SerialPortConfig {
-                    port_name: sp.port_name,
-                    baud_rate: sp.baud_rate,
-                    data_bits: sp.data_bits.into(),
-                    parity: sp.parity.into(),
-                    stop_bits: sp.stop_bits.into(),
-                    frame_gap: Duration::from_millis(2),
-                };
-                let mut t = SerialTransport::open(cfg, mode).await?;
-                let res = t.transact(&adu, timeout, expected_hint).await;
-                let _ = t.close().await;
-                res
-            }
-            TransportKind::Tcp => {
-                let mut t = TcpTransport::connect(crate::transport::tcp::TcpConfig {
-                    host: target.endpoint.clone(),
-                    port: target.port.unwrap_or(502),
-                    connect_timeout: timeout,
-                    framing: crate::transport::tcp::TcpFraming::Mbap,
-                tls: None,
-                })
-                .await?;
-                let res = t.transact(&adu, timeout, expected_hint).await;
-                let _ = t.close().await;
-                res
-            }
-            TransportKind::Udp => {
-                let mut t = UdpTransport::connect(&target.endpoint, target.port.unwrap_or(502)).await?;
-                t.transact(&adu, timeout, expected_hint).await
-            }
-        };
-
-        match res {
-            Ok(resp) => return Ok((resp, started.elapsed().as_micros())),
-            Err(e) => {
-                attempts += 1;
-                if attempts > retries {
-                    return Err(e);
-                }
+    let target=req.target();
+    let timing=req.timing();
+    let timeout=Duration::from_millis(timing.map(|t|t.timeout_ms).unwrap_or(800).clamp(50,10_000) as u64);
+    let retries=permitted_retries(timing,policy);
+    let connection=manager.temporary(manual_definition(target,timeout)?)?;
+    let result=async{
+        let mut attempts=0;
+        loop{
+            let validator:Option<ResponseValidator>=structured_pdu.map(|pdu|{
+                let pdu=pdu.to_vec();let kind=target.kind;let unit=target.unit_id;
+                Box::new(move |bytes:&[u8]|{
+                    let fc=pdu[0];
+                    let response=verify_and_parse(kind,unit,fc,bytes)?;
+                    if !response.is_exception(){
+                        match &response{
+                            Pdu::Response{data,..} if matches!(fc,1..=4)=>{
+                                let qty=u16::from_be_bytes([pdu[3],pdu[4]]);
+                                crate::modbus::frame::response::parse_read_values(fc,data,qty)?;
+                            },
+                            _=>verify_write_ack(&response,&pdu)?,
+                        }
+                    }
+                    Ok(())
+                }) as ResponseValidator
+            });
+            let outcome=connection.transact(TransactionRequest{adu:adu.clone(),response_timeout:timeout,expected_hint,priority:Priority::High},validator).await?;
+            let rtt=outcome.timing.rtt_us.map(u128::from).unwrap_or_default();
+            // Preserve invalid complete ADU for the existing ManualResponse parser.
+            if let Some(bytes)=outcome.rejected_response{return Ok((bytes,rtt));}
+            match outcome.result{
+                Ok(bytes)=>return Ok((bytes,rtt)),
+                Err(e)=>{
+                    attempts+=1;
+                    if attempts>retries||matches!(e,TransportError::Cancelled){return Err(e);}
+                },
             }
         }
-    }
+    }.await;
+    let closed=connection.close().await;
+    match (result,closed){(Ok(v),Ok(()))=>Ok(v),(Err(e),_)|(_,Err(e))=>Err(e)}
 }
 
 trait HasTarget {
@@ -399,7 +394,7 @@ pub async fn read_registers(
     state: State<'_, AppState>,
     req: ReadRequest,
 ) -> Result<ManualResponse, String> {
-    let _ = &state;
+    let manager=state.scanner.communication().manager.clone();
     validate_read(req.function, req.start_address, req.quantity)?;
     let expected_fc = req.function;
     let pdu = match expected_fc {
@@ -411,7 +406,7 @@ pub async fn read_registers(
     };
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
-    match manual_transact(&req, adu, 3 + (req.quantity as usize) * 2, ManualRetryPolicy::ReadOnly).await {
+    match manual_transact(manager, &req, adu, 3 + (req.quantity as usize) * 2, ManualRetryPolicy::ReadOnly, Some(&pdu)).await {
         Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
@@ -480,7 +475,7 @@ pub async fn write_registers(
     state: State<'_, AppState>,
     req: WriteRequest,
 ) -> Result<ManualResponse, String> {
-    let _ = &state;
+    let manager=state.scanner.communication().manager.clone();
     if !req.confirm_write { return Err("explicit write confirmation required".into()); }
     if req.target.unit_id == 0 {
         return Err("broadcast writes (unit 0) are blocked on every transport".into());
@@ -505,7 +500,7 @@ pub async fn write_registers(
     };
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
-    match manual_transact(&req, adu, 8, ManualRetryPolicy::SingleShot).await {
+    match manual_transact(manager, &req, adu, 8, ManualRetryPolicy::SingleShot, Some(&pdu)).await {
         Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
@@ -564,7 +559,7 @@ pub async fn send_raw_frame(
     state: State<'_, AppState>,
     req: RawFrameRequest,
 ) -> Result<ManualResponse, String> {
-    let _ = &state;
+    let manager=state.scanner.communication().manager.clone();
     if !req.confirm_unsafe { return Err("explicit unsafe-frame confirmation required".into()); }
     if req.target.unit_id == 0 {
         return Err("broadcast raw requests (unit 0) are blocked on every transport".into());
@@ -586,7 +581,7 @@ pub async fn send_raw_frame(
         return Err("broadcast raw ADU (unit 0) is blocked".into());
     }
 
-    match manual_transact(&req, adu, 8, ManualRetryPolicy::SingleShot).await {
+    match manual_transact(manager, &req, adu, 8, ManualRetryPolicy::SingleShot, None).await {
         Ok((resp, rtt)) => Ok(ManualResponse {
             ok: true,
             error: None,
@@ -799,7 +794,7 @@ mod write_safety_tests {
                 "dangerous automatic retry created a second connection"
             );
         });
-        let err = manual_transact(&request, frame, 8, ManualRetryPolicy::SingleShot)
+        let err = manual_transact(Arc::new(ConnectionManager::new()), &request, frame, 8, ManualRetryPolicy::SingleShot, Some(&pdu))
             .await.expect_err("silent write response must not be successful");
         assert!(matches!(err, TransportError::Timeout(_)));
         server.await.unwrap();
@@ -828,7 +823,7 @@ mod write_safety_tests {
                 "raw frame was replayed after a response timeout"
             );
         });
-        assert!(manual_transact(&request, frame, 8, ManualRetryPolicy::SingleShot)
+        assert!(manual_transact(Arc::new(ConnectionManager::new()), &request, frame, 8, ManualRetryPolicy::SingleShot, None)
             .await.is_err());
         server.await.unwrap();
     }
@@ -859,7 +854,7 @@ mod write_safety_tests {
             }
         });
         let (response, _) = manual_transact(
-            &request, frame, 8, ManualRetryPolicy::ReadOnly,
+            Arc::new(ConnectionManager::new()), &request, frame, 8, ManualRetryPolicy::ReadOnly, Some(&[3,0,0,0,1]),
         ).await.expect("read-only retry succeeded");
         let decoded = verify_and_parse(TransportKind::Tcp, 1, 3, &response).unwrap();
         match decoded {

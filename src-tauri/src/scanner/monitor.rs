@@ -6,6 +6,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
+use crate::communication::service::CommunicationService;
+use crate::transport::connection::SerialLease;
 use tokio::sync::{mpsc, Mutex};
 
 use crate::modbus::common::TransportKind;
@@ -36,6 +38,7 @@ pub enum ControlMsg {
 
 /// Cheap cloneable handle stored in Tauri state.
 pub struct MonitorHandle {
+    communication: Arc<CommunicationService>,
     control_tx: Mutex<Option<mpsc::Sender<ControlMsg>>>,
     values: Arc<RwLock<HashMap<String, Channel>>>,
 }
@@ -47,8 +50,10 @@ impl Default for MonitorHandle {
 }
 
 impl MonitorHandle {
-    pub fn new() -> Self {
+    pub fn new() -> Self {Self::with_communication(Arc::new(CommunicationService::default()))}
+    pub fn with_communication(communication:Arc<CommunicationService>)->Self {
         Self {
+            communication,
             control_tx: Mutex::new(None),
             values: Arc::new(RwLock::new(HashMap::new())),
         }
@@ -102,6 +107,7 @@ impl MonitorHandle {
                     return Err("monitor already running".into());
                 }
             }
+            let lease=self.communication.manager.lease_serials(watches.iter().filter_map(|w|super::engine::device_serial_port(&w.target))).map_err(|e|e.to_string())?;
             let (tx, rx) = mpsc::channel(4);
             *guard = Some(tx);
 
@@ -117,7 +123,7 @@ impl MonitorHandle {
             defaults.retries = 0;
             let engine = EngineParams::from_scan_params(&defaults);
 
-            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine, session_id.clone()));
+            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine, session_id.clone(), lease));
             Ok(session_id)
         }
     }
@@ -142,6 +148,7 @@ async fn monitor_task(
     values: Arc<RwLock<HashMap<String, Channel>>>,
     engine: EngineParams,
     session_id: String,
+    serial_lease: SerialLease,
 ) {
     let mut serial_transport: Option<SerialTransport> = None;
     let mut serial_signature: Option<String> = None;
@@ -296,6 +303,7 @@ async fn monitor_task(
     if let Some(mut t) = serial_transport.take() {
         let _ = t.close().await;
     }
+    drop(serial_lease);
     let _ = done_tx.send(());
     let _ = ui_task.await;
     emit_delta(&sink, &values, &metrics, micros(started), &session_id, false);

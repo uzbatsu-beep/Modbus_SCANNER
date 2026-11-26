@@ -35,10 +35,11 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             use state::AppState;
+            let communication=std::sync::Arc::new(communication::service::CommunicationService::default());
             app.manage(AppState {
-                scanner: std::sync::Arc::new(scanner::ScannerHandle::new()),
+                scanner: std::sync::Arc::new(scanner::ScannerHandle::with_communication(communication.clone())),
                 api: parking_lot::Mutex::new(None),
-                monitor: scanner::monitor::MonitorHandle::new(),
+                monitor: scanner::monitor::MonitorHandle::with_communication(communication),
                 traffic: std::sync::Arc::new(state::TrafficLogHandle::new()),
                 loggers: std::sync::Arc::new(state::LoggerHandle::new()),
                 config: parking_lot::Mutex::new(state::Config::default()),

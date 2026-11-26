@@ -1,5 +1,5 @@
 //! PR #17.A: bounded, single-owner connection workers.
-//! No caller integration in this phase. Existing authorization and codecs remain caller responsibilities.
+//! Shared resource ownership. Existing authorization and codecs remain caller responsibilities.
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
@@ -257,13 +257,13 @@ struct Entry {
 pub struct ConnectionManager {
     entries: parking_lot::Mutex<HashMap<String,Arc<Entry>>>,
     factory: Arc<dyn TransportFactory>,
-    exclusive: parking_lot::Mutex<HashSet<String>>,
+    exclusive: Arc<parking_lot::Mutex<HashSet<String>>>,
 }
 impl Default for ConnectionManager {fn default()->Self{Self::new()}}
 impl ConnectionManager {
     pub fn new()->Self{Self::with_factory(Arc::new(NativeFactory))}
     pub fn with_factory(factory:Arc<dyn TransportFactory>)->Self{
-        Self{entries:parking_lot::Mutex::new(HashMap::new()),factory,exclusive:parking_lot::Mutex::new(HashSet::new())}
+        Self{entries:parking_lot::Mutex::new(HashMap::new()),factory,exclusive:Arc::new(parking_lot::Mutex::new(HashSet::new()))}
     }
 
     /// Register one lazy worker. Opening occurs on its first request.
@@ -289,14 +289,30 @@ impl ConnectionManager {
 
     /// Exclusive lease for discovery which must change serial framing.
     /// No registered worker can own this port until the lease is dropped.
-    pub fn lease_serial(&self,port:&str)->TransportResult<SerialLease<'_>>{
-        let resource=serial_key(port)?;
+    pub fn lease_serial(&self,port:&str)->TransportResult<SerialLease>{
+        self.lease_serials([port])
+    }
+
+    /// Atomically claim all ports in a legacy operation, including a serial
+    /// sweep. The owned guard can be moved into a spawned task.
+    pub fn lease_serials<'a>(&self,ports:impl IntoIterator<Item=&'a str>)->TransportResult<SerialLease>{
+        let resources:HashSet<String>=ports.into_iter().map(serial_key).collect::<TransportResult<_>>()?;
         let entries=self.entries.lock();
         let mut exclusive=self.exclusive.lock();
-        if entries.values().any(|e|e.resource==resource)||!exclusive.insert(resource.clone()){
-            return Err(invalid("physical resource already owned"));
+        if resources.iter().any(|r|entries.values().any(|e|&e.resource==r)||exclusive.contains(r)){
+            return Err(invalid("physical serial resource already owned"));
         }
-        Ok(SerialLease{manager:self,resource})
+        exclusive.extend(resources.iter().cloned());
+        Ok(SerialLease{exclusive:self.exclusive.clone(),resources})
+    }
+
+    /// A bounded, operation-local worker. Used while the persistent connection
+    /// editor and shared session lifecycle are not yet integrated.
+    /// Call close().await for deterministic cleanup; Drop is a cancellation fallback.
+    pub fn temporary(self:&Arc<Self>,definition:ConnectionDefinition)->TransportResult<TemporaryConnection>{
+        let id=definition.id.clone();
+        self.register(definition)?;
+        Ok(TemporaryConnection{manager:self.clone(),id,scope:Arc::new(OperationScope::default()),closed:false})
     }
 
     fn entry(&self,id:&str)->TransportResult<Arc<Entry>>{
@@ -370,8 +386,40 @@ impl ConnectionManager {
     }
 }
 
-pub struct SerialLease<'a>{manager:&'a ConnectionManager,resource:String}
-impl Drop for SerialLease<'_>{fn drop(&mut self){self.manager.exclusive.lock().remove(&self.resource);}}
+pub struct SerialLease{exclusive:Arc<parking_lot::Mutex<HashSet<String>>>,resources:HashSet<String>}
+impl Drop for SerialLease{
+    fn drop(&mut self){let mut owned=self.exclusive.lock();for resource in &self.resources{owned.remove(resource);}}
+}
+
+pub struct TemporaryConnection {
+    manager:Arc<ConnectionManager>,
+    id:String,
+    scope:Arc<OperationScope>,
+    closed:bool,
+}
+impl TemporaryConnection{
+    pub async fn transact(&self,request:TransactionRequest,validator:Option<ResponseValidator>)->TransportResult<TransactionOutcome>{
+        self.manager.transact_scoped(&self.id,request,self.scope.clone(),validator).await
+    }
+    pub async fn close(mut self)->TransportResult<()>{
+        self.scope.stop().await;
+        let result=self.manager.disconnect(&self.id).await;
+        self.closed=true;
+        result
+    }
+}
+impl Drop for TemporaryConnection{
+    fn drop(&mut self){
+        if self.closed{return;}
+        self.scope.cancel();
+        // temporary() required a Tokio runtime to register. If the runtime
+        // is already shutting down, dropping the manager also signals workers.
+        if let Ok(runtime)=tokio::runtime::Handle::try_current(){
+            let manager=self.manager.clone();let id=self.id.clone();
+            runtime.spawn(async move{let _=manager.disconnect(&id).await;});
+        }
+    }
+}
 
 impl Drop for ConnectionManager {
     fn drop(&mut self){
