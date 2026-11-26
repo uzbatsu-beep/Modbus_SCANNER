@@ -1,5 +1,7 @@
 //! Canonical observations, bounded history and session statistics.
 use std::collections::VecDeque;
+use std::time::Instant;
+use crate::transport::timing::{micros, TransactionTiming};
 use crate::modbus::decode::{decode, DecodedValue};
 use super::types::{DataQuality, MonitorSample, MonitorValueState, MonitorWatch};
 
@@ -42,8 +44,16 @@ impl Channel {
         }
     }
 
+    #[cfg(test)]
     pub fn observe(&mut self, timestamp_ms: u64, elapsed_us: u64,
         result: Result<Vec<u16>, (DataQuality, Option<u8>, String)>) -> LogObservation {
+        self.observe_timed(timestamp_ms, elapsed_us, result, TransactionTiming::default(), Instant::now())
+    }
+
+    pub fn observe_timed(&mut self, timestamp_ms: u64, elapsed_us: u64,
+        result: Result<Vec<u16>, (DataQuality, Option<u8>, String)>,
+        mut timing: TransactionTiming, acquisition_start: Instant) -> LogObservation {
+        let decode_start = Instant::now();
         let (raw, value, quality, exception_code, detail) = match result {
             Ok(words) => {
                 let decoded = if words.len() != self.state.watch.quantity as usize { None }
@@ -55,8 +65,11 @@ impl Channel {
             }
             Err((quality, code, detail)) => (None, None, quality, code, Some(detail)),
         };
+        if raw.is_some() { timing.decode_us = Some(micros(decode_start)); }
+        if quality == DataQuality::DecodeError { timing.failure_stage = Some("decode".into()); }
+        timing.acquisition_us = Some(micros(acquisition_start));
         let sequence = self.state.latest.as_ref().map_or(1, |s| s.sequence + 1);
-        let sample = MonitorSample { sequence, timestamp_ms, elapsed_us, raw, value, quality, exception_code, detail };
+        let sample = MonitorSample { sequence, timestamp_ms, elapsed_us, timing, raw, value, quality, exception_code, detail };
         self.state.quality = quality;
         if quality == DataQuality::Good {
             self.state.valid_samples += 1;
