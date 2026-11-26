@@ -89,6 +89,8 @@ pub struct TransactionOutcome {
     pub result: TransportResult<Vec<u8>>,
     pub timing: TransactionTiming,
     pub queue_wait_us: u64,
+    /// Complete ADU rejected by the validator; retain it for traffic diagnostics.
+    pub rejected_response: Option<Vec<u8>>,
 }
 
 fn invalid(message: &str) -> TransportError { TransportError::Other(message.into()) }
@@ -206,7 +208,7 @@ impl Drop for ActiveScope{
         self.0.active.send_replace(count.saturating_sub(1));
     }
 }
-type ResponseValidator = Box<dyn Fn(&[u8])->TransportResult<()> + Send + Sync>;
+pub type ResponseValidator = Box<dyn Fn(&[u8])->TransportResult<()> + Send + Sync>;
 
 struct Job {
     request: TransactionRequest,
@@ -398,7 +400,7 @@ fn recovery_pause(definition:&ConnectionDefinition,timeout:Duration)->Duration{
     configured.max(gap)
 }
 fn cancelled(job:Job){
-    let _=job.reply.send(TransactionOutcome{result:Err(TransportError::Cancelled),timing:TransactionTiming::default(),queue_wait_us:micros(job.queued)});
+    let _=job.reply.send(TransactionOutcome{result:Err(TransportError::Cancelled),timing:TransactionTiming::default(),queue_wait_us:micros(job.queued),rejected_response:None});
 }
 
 async fn worker(
@@ -424,11 +426,12 @@ async fn worker(
         if *stop.borrow(){cancelled(job);break;}
         let Job{request,queued,mut reply,_slot,_regular,scope,started,validator}=job;
         if reply.is_closed(){continue;}
-        let Some(_active)=scope.begin(&started) else {let _=reply.send(TransactionOutcome{result:Err(TransportError::Cancelled),timing:TransactionTiming::default(),queue_wait_us:micros(queued)});continue;};
+        let Some(_active)=scope.begin(&started) else {let _=reply.send(TransactionOutcome{result:Err(TransportError::Cancelled),timing:TransactionTiming::default(),queue_wait_us:micros(queued),rejected_response:None});continue;};
         drop(_slot);drop(_regular);
         let queue_wait_us=micros(queued);
         state.lock().active_requests=1;
         let mut timing=TransactionTiming::default();
+        let mut rejected_response=None;
         let result=async{
             if transport.is_none(){
                 if faulted&&!definition.policy.auto_reconnect {
@@ -470,7 +473,7 @@ async fn worker(
                         let start=Instant::now();
                         let checked=validate(&bytes);
                         timing.validation_us=Some(micros(start));
-                        if let Err(error)=checked{timing.failure_stage=Some("validation".into());return Err(error);}
+                        if let Err(error)=checked{timing.failure_stage=Some("validation".into());rejected_response=Some(bytes);return Err(error);}
                     }
                     Ok(bytes)
                 },
@@ -497,7 +500,7 @@ async fn worker(
             }
         }
         state.lock().active_requests=0;
-        let _=reply.send(TransactionOutcome{result,timing,queue_wait_us});
+        let _=reply.send(TransactionOutcome{result,timing,queue_wait_us,rejected_response});
     }
     set_status(&state,ConnectionStatus::Disconnecting);
     rx.close();

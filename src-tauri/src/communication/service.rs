@@ -27,6 +27,7 @@ fn invalid(reason:&str)->TransportError{TransportError::Modbus(ModbusError::Inva
 fn word(bytes:&[u8])->u16{u16::from_be_bytes([bytes[0],bytes[1]])}
 fn validate_request(r:&ProtocolRequest,kind:TransportKind)->TransportResult<()>{
     if r.unit==0 || (matches!(kind,TransportKind::Rtu|TransportKind::Ascii)&&r.unit>247){return Err(invalid("unsupported unit id"));}
+    if r.timeout.is_zero()||r.timeout>Duration::from_secs(60){return Err(invalid("response timeout bounds"));}
     let p=&r.pdu;
     let Some(&fc)=p.first() else{return Err(invalid("empty PDU"));};
     if !(1..=253).contains(&p.len()){return Err(invalid("PDU length"));}
@@ -61,7 +62,7 @@ fn verify_payload(pdu:&Pdu,request:&[u8])->TransportResult<()>{
         match *function{
             1..=4=>{parse_read_values(*function,data,word(&request[3..5]))?;},
             5|6|15|16=>{if data.as_slice()!=&request[1..5]{return Err(invalid("write echo mismatch"));}},
-            0x2b=>{parse_device_identification(data)?;},
+            0x2b=>{let id=parse_device_identification(data)?;if id.read_code!=request[2]{return Err(invalid("FC43 read code mismatch"));}},
             _=>return Err(invalid("unsupported response")),
         }
     }
@@ -77,7 +78,7 @@ impl CommunicationService{
             Err(error)=>{
                 let old=self.manager.definitions().into_iter().find(|d|d.id==id);
                 if let Some(old)=old{
-                    if serde_json::to_value(&old).ok()==serde_json::to_value(&definition).ok(){return Ok(id);}
+                    if let (Ok(a),Ok(b))=(serde_json::to_value(&old),serde_json::to_value(&definition)){if a==b{return Ok(id);}}
                 }
                 Err(error)
             }
@@ -123,5 +124,43 @@ mod tests{
         if let TransportConfig::Tcp(c)=&mut d.transport{c.port=503;}
         assert!(service.ensure(d).is_err());
         service.manager.disconnect("one").await.unwrap();
+    }
+}
+
+#[cfg(test)]
+mod loopback_tests{
+    use super::*;
+    use crate::transport::tcp::TcpConfig;
+    use tokio::io::{AsyncReadExt,AsyncWriteExt};
+    #[tokio::test]
+    async fn valid_exception_keeps_socket_wrong_tid_reopens_and_retains_raw(){
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port=listener.local_addr().unwrap().port();
+        let server=tokio::spawn(async move{
+            let (mut socket,_)=listener.accept().await.unwrap();
+            let mut req=[0u8;12];
+            socket.read_exact(&mut req).await.unwrap();
+            socket.write_all(&[req[0],req[1],0,0,0,3,req[6],0x83,2]).await.unwrap();
+            socket.read_exact(&mut req).await.unwrap();
+            socket.write_all(&[req[0],req[1].wrapping_add(1),0,0,0,5,req[6],3,2,0,42]).await.unwrap();
+            let (mut socket,_)=listener.accept().await.unwrap();
+            socket.read_exact(&mut req).await.unwrap();
+            socket.write_all(&[req[0],req[1],0,0,0,5,req[6],3,2,0,42]).await.unwrap();
+        });
+        let service=CommunicationService::default();
+        let d=ConnectionDefinition{id:"loop".into(),name:"loop".into(),transport:TransportConfig::Tcp(TcpConfig{port,..Default::default()}),policy:Default::default()};
+        let request=||ProtocolRequest{unit:1,pdu:vec![3,0,0,0,1],timeout:Duration::from_secs(2),priority:Priority::Normal};
+        let scope=Arc::new(OperationScope::default());
+        let a=service.execute(&d,request(),scope.clone()).await.unwrap();
+        assert_eq!(a.transaction.result.unwrap()[7..], [0x83,2]);
+        let b=service.execute(&d,request(),scope.clone()).await.unwrap();
+        assert!(b.transaction.result.is_err());
+        assert_eq!(b.transaction.timing.failure_stage.as_deref(),Some("validation"));
+        assert_eq!(b.transaction.rejected_response.unwrap().len(),11);
+        let c=service.execute(&d,request(),scope).await.unwrap();
+        assert_eq!(c.transaction.result.unwrap()[7..],[3,2,0,42]);
+        assert_eq!(service.manager.snapshot()[0].reconnect_count,1);
+        service.manager.disconnect("loop").await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3),server).await.unwrap().unwrap();
     }
 }
