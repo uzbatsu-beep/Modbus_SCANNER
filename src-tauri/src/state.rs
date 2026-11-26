@@ -315,3 +315,47 @@ impl Default for Config {
         }
     }
 }
+
+#[cfg(test)]
+mod logger_v2_tests {
+    use super::*;
+    use crate::scanner::types::{DataQuality, DeviceTarget, MonitorSample, MonitorWatch};
+    use crate::modbus::common::TransportKind;
+    fn record(quality: DataQuality, sequence: u64) -> LogObservation {
+        LogObservation { session_id: "session".into(), watch: MonitorWatch {
+            key:"tag:a".into(), target:DeviceTarget { kind:TransportKind::Tcp, endpoint:"localhost".into(), port:Some(502), unit_id:1, serial:None, serial_mode:None },
+            function:3,address:8193,quantity:1,name:Some("a;\"b".into()),unit:Some("Hz".into()),tag_id:Some("a".into()),spec:None,
+        }, sample: MonitorSample { sequence,timestamp_ms:100,elapsed_us:100,raw:(quality==DataQuality::Good).then(||vec![0xec78]),
+            value:(quality==DataQuality::Good).then_some(DecodedValue::Float{value:-50.0}),quality,exception_code:None,detail:None } }
+    }
+    #[test]
+    fn csv_fields_match_and_timeout_has_no_value() {
+        let good=log_fields(&record(DataQuality::Good,1));
+        let bad=log_fields(&record(DataQuality::Timeout,2));
+        assert_eq!(good.len(),LOG_HEADER.split(';').count());
+        assert_eq!(good[13],"EC78");
+        assert_eq!(good[14],"-50");
+        assert_eq!(bad[13],"");
+        assert_eq!(bad[14],"");
+        assert_eq!(bad[16],"timeout");
+        assert_eq!(quoted(&good[7]),"\"a;\"\"b\"");
+    }
+    #[test]
+    fn separate_v2_paths_and_session_rotation() {
+        let config=LoggerConfig{id:"a".into(),path:"old.csv".into(),format:LogFormat::Csv,rotation:RotationMode::Session,keys:vec![],enabled:true};
+        assert_eq!(log_path(&config,&record(DataQuality::Good,1),0),"old.v2_session.csv");
+    }
+    #[test]
+    fn writer_records_each_observation_once() {
+        let path=std::env::temp_dir().join(format!("modbus-log-test-{:032x}.csv",rand::random::<u128>()));
+        let config=LoggerConfig{id:"a".into(),path:path.to_string_lossy().into_owned(),format:LogFormat::Csv,rotation:RotationMode::None,keys:vec![],enabled:true};
+        let mut state=LoggerState{config,records_written:0,failed_records:0,last_write_ms:None,error:None,current_file:String::new(),rotation_index:0,rotation_session:String::new()};
+        write_observation(&mut state,&record(DataQuality::Good,1)).unwrap();
+        write_observation(&mut state,&record(DataQuality::Timeout,2)).unwrap();
+        let text=std::fs::read_to_string(&state.current_file).unwrap();
+        assert_eq!(text.lines().count(),3);
+        assert_eq!(text.matches("EC78").count(),1);
+        assert_eq!(state.records_written,2);
+        std::fs::remove_file(&state.current_file).unwrap();
+    }
+}

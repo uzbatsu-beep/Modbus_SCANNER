@@ -64,7 +64,7 @@ export const useMonitorStore = defineStore("monitor", {
       finally { this.busy = false; }
     },
     async refreshLoggers() { this.loggers = await api.scanner.getLoggers(); },
-    async setLoggers(configs: LoggerConfig[]) { this.loggers = await api.scanner.setLoggers(configs); },
+    async setLoggers(configs: LoggerConfig[]) { try { this.loggers = await api.scanner.setLoggers(configs); } catch (e) { this.error = String(e); } },
     async stop() {
       if (this.busy) return;
       this.busy = true;

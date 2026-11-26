@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "@/i18n";
-import { computed, ref, watch } from "vue";
+import { computed, reactive, ref, watch, onMounted, onUnmounted } from "vue";
+import { trendSegments } from "@/types/measurement";
 import { addressSpace, readFunction, registerKey } from "@/types/registerIdentity";
 
 import type { DecodedValue, LogFormat, LoggerConfig, MonitorValueState, MonitorWatch, RotationMode } from "@/types/ipc";
@@ -23,7 +24,11 @@ const error = ref<string | null>(null);
 
 // P3-07: file loggers attached to the monitor cycle.
 const loggerConfigs = ref<LoggerConfig[]>([]);
-const loggerForm = reactiveLoggerForm();
+const loggerForm = reactive(reactiveLoggerForm());
+const clock = ref(Date.now());
+let clockTimer: ReturnType<typeof setInterval> | undefined;
+onMounted(() => { clockTimer = setInterval(() => { clock.value = Date.now(); }, 1000); });
+onUnmounted(() => { if (clockTimer !== undefined) clearInterval(clockTimer); });
 
 function reactiveLoggerForm() {
   return {
@@ -133,33 +138,11 @@ function stat(value: number | null): string {
 const trendState = computed(() => monitor.values.find(v => v.key === trendKey.value) ?? null);
 const trend = computed(() => {
   const state = trendState.value;
-  const latest = state?.latest;
-  if (!state || !latest) return null;
-  const end = latest.elapsed_us;
-  const start = end - windowMs.value * 1000;
-  const samples = state.samples.filter(s => s.elapsed_us >= start && s.elapsed_us <= end);
-  const numbers = samples.flatMap(s => s.quality === "good" && typeof s.value?.value === "number" ? [s.value.value] : []);
-  if (!numbers.length) return null;
-  let lo = Math.min(0, ...numbers), hi = Math.max(0, ...numbers);
-  if (lo === hi) { lo -= 1; hi += 1; }
-  const magnitude = Math.max(Math.abs(lo), Math.abs(hi), 1);
-  const y = (v: number) => 120 - (v / magnitude - lo / magnitude) / (hi / magnitude - lo / magnitude) * 120;
-  const segments: string[][] = [];
-  let current: string[] = [];
-  let prev = 0;
-  for (const s of samples) {
-    if ((prev && s.sequence !== prev + 1) || s.quality !== "good" || typeof s.value?.value !== "number") {
-      if (current.length) segments.push(current);
-      current = [];
-    }
-    if (s.quality === "good" && typeof s.value?.value === "number") {
-      current.push(`${((s.elapsed_us - start) / (end - start) * 600).toFixed(2)},${y(s.value.value).toFixed(2)}`);
-    }
-    prev = s.sequence;
-  }
-  if (current.length) segments.push(current);
-  return { segments: segments.map(x => x.join(" ")), zero: y(0), lo, hi };
+  return state?.latest ? trendSegments(state.samples, state.latest.elapsed_us, windowMs.value) : null;
 });
+function age(state: MonitorValueState): string {
+  return state.last_good ? Math.max(0,(clock.value - state.last_good.timestamp_ms)/1000).toFixed(1) + " s" : "—";
+}
 </script>
 
 <template>
@@ -195,19 +178,19 @@ const trend = computed(() => {
 
     <table v-if="monitor.values.length" class="data">
       <thead>
-        <tr><th>{{ t("nameCol") }}</th><th>RAW</th><th>{{ t("value") }}</th><th>MIN</th><th>MAX</th><th>AVG</th><th>Δ</th><th>{{ t("qualityLabel") }}</th><th>OK / {{ t("errors") }}</th></tr>
+        <tr><th>{{ t("nameCol") }}</th><th>RAW</th><th>{{ t("value") }}</th><th>MIN</th><th>MAX</th><th>AVG</th><th>Δ</th><th>{{ t("qualityLabel") }} / Age</th><th>OK / {{ t("errors") }}</th></tr>
       </thead>
       <tbody>
         <tr v-for="v in monitor.values" :key="v.key" @click="trendKey = v.key">
           <td>{{ v.watch.name || v.key }} <span v-if="v.watch.unit" class="dim">{{ v.watch.unit }}</span></td>
           <td class="mono">{{ raw(v) }}</td>
-          <td class="mono" :class="{ dim: v.quality !== 'good' }">{{ latest(v) }} <span v-if="v.quality !== 'good' && v.last_good">({{ t("lastGood") }})</span></td>
+          <td class="mono" :class="{ dim: v.quality !== 'good' || !monitor.running }">{{ latest(v) }} <span v-if="v.quality !== 'good' && v.last_good">({{ t("lastGood") }})</span></td>
           <td class="mono">{{ stat(v.min) }}</td>
           <td class="mono">{{ stat(v.max) }}</td>
           <td class="mono">{{ stat(v.avg) }}</td>
           <td class="mono">{{ stat(v.delta) }}</td>
-          <td><span class="tag" :class="v.quality === 'good' ? 'ok' : v.quality === 'not_sampled' ? 'dim' : 'warn'" :title="v.latest?.detail || ''">{{ v.quality }}{{ v.latest?.exception_code != null ? ' 0x' + v.latest.exception_code.toString(16).padStart(2,'0') : '' }}</span>
-            <small v-if="v.quality !== 'good' && v.last_good" class="dim"> {{ new Date(v.last_good.timestamp_ms).toLocaleTimeString() }}</small></td>
+          <td><span class="tag" :class="v.quality === 'good' && monitor.running ? 'ok' : v.quality === 'not_sampled' ? 'dim' : 'warn'" :title="v.latest?.detail || ''">{{ !monitor.running && v.quality === "good" ? "stale (stopped)" : v.quality }}{{ v.latest?.exception_code != null ? ' 0x' + v.latest.exception_code.toString(16).padStart(2,'0') : '' }}</span>
+            <small v-if="v.quality !== 'good' && v.last_good" class="dim"> {{ new Date(v.last_good.timestamp_ms).toLocaleTimeString() }}</small> <small class="dim">{{ age(v) }}</small></td>
           <td>{{ v.valid_samples }} / {{ v.invalid_samples }}</td>
         </tr>
       </tbody>

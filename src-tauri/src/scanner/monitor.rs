@@ -150,7 +150,21 @@ async fn monitor_task(
     let interval = Duration::from_millis(interval_ms as u64);
 
     let started = Instant::now();
-    let mut last_emit = Instant::now();
+    let (done_tx, mut done_rx) = tokio::sync::oneshot::channel::<()>();
+    let ui_values = values.clone();
+    let ui_sink = sink.clone();
+    let ui_session = session_id.clone();
+    let ui_task = tokio::spawn(async move {
+        let mut tick = tokio::time::interval(Duration::from_millis(UI_BATCH_MS));
+        tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        tick.tick().await;
+        loop {
+            tokio::select! {
+                _ = &mut done_rx => break,
+                _ = tick.tick() => emit_delta(&ui_sink, &ui_values, &ui_session, true),
+            }
+        }
+    });
     'poll: loop {
         tokio::select! {
             msg = control_rx.recv() => {
@@ -160,7 +174,7 @@ async fn monitor_task(
         }
 
         for watch in &watches {
-            if control_rx.try_recv().is_ok() { break 'poll; }
+            if !matches!(control_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)) { break 'poll; }
             let pdu = match watch.function {
                 0x01 => request::read_coils(watch.address, watch.quantity),
                 0x02 => request::read_discrete_inputs(watch.address, watch.quantity),
@@ -252,16 +266,14 @@ async fn monitor_task(
                 all.get_mut(&watch.key).map(|channel| channel.observe(now_ms(), started.elapsed().as_micros() as u64, parsed))
             };
             if let Some(record) = record { sink.samples(&[record]); }
-            if last_emit.elapsed() >= Duration::from_millis(UI_BATCH_MS) {
-                emit_delta(&sink, &values, &session_id, true);
-                last_emit = Instant::now();
-            }
         }
     }
 
     if let Some(mut t) = serial_transport.take() {
         let _ = t.close().await;
     }
+    let _ = done_tx.send(());
+    let _ = ui_task.await;
     emit_delta(&sink, &values, &session_id, false);
 }
 

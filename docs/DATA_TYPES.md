@@ -18,3 +18,5 @@ Target specification for R01/R05. Existing decoder remains the foundation; do no
 Keep raw words unchanged. Decode order: validate length → reorder bytes/words → interpret type → apply declared scaling → format (never round internal state just for display). Exact 64-bit integer values cross JSON IPC as decimal strings; use BigInt for exact manipulation, document lossy graph conversion if necessary. Do not coerce unknown enum values or invalid IEEE float to zero.
 
 Tests: 0xEC78 signed = -5000, scaled by 0.01 = -50.00; unsigned = 60536. Include signed extrema, endian permutations, NaN/Inf, malformed lengths, uint64 max and unknown enum labels. Trends and min/max/average use engineering values; quality gaps are visible, not connected as successful samples. No device-specific ENUM definitions hard-coded in core. See [DATA_MODEL](DATA_MODEL.md).
+
+PR #14 uses canonical decoder in the inspector and monitor; 16-bit byte swap and finite scaling validation implemented. See [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md).

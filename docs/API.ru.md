@@ -116,7 +116,7 @@ spec: DecodeSpec, unit?, description? }`. Сопоставление identity р
 | `export_device` | `{ key: string, path: string, format: "csv"\|"json"\|"xml" }` | `boolean` | P2-08: экспортирует только выбранное устройство (зонды, регистры, FC43-идентификацию); ошибка, если ключ неизвестен |
 | `save_project` | `{ path: string, name: string }` | `string` (путь) | P3-04: пишет устройства + теги + историю сканов в один JSON; добавляет снимок (макс. 20) |
 | `load_project` | `{ path: string }` | `Project` | P3-04: восстанавливает результаты и теги, синхронизирует `config-v2.json` |
-| `start_monitor` | `{ watches: MonitorWatch[], interval_ms: number }` | `void` | P3-05: опрос регистров каждые 250–10000 мс |
+| `start_monitor` | `{ watches: MonitorWatch[], intervalMs: number, historyCapacity?: number }` | `string` | P3-05: опрос регистров каждые 250–10000 мс |
 | `stop_monitor` | — | `void` | Остановить опрос |
 | `get_monitor_state` | — | `MonitorValueState[]` | Текущие min/max/изменения и история выборок |
 | `get_traffic_log` | — | `TrafficRecord[]` | P3-06: последние 2000 сырых обменов |
@@ -306,23 +306,9 @@ interface DeviceIdentification {
 results: ScanResults, tags: TagDefinition[], history: ScanSnapshot[] }`, где
 `ScanSnapshot = { timestamp_ms, label, results }`.
 
-### `monitor:update` — `MonitorUpdate` (P3-05)
+### `monitor:update` — Measurement Engine (PR #14)
 
-`{ values: MonitorValueState[], cycle_ms: number }` — отправляется один раз за
-цикл опроса. `MonitorValueState` содержит `key`, `name`, `unit`, последние
-`values`, `min`/`max`, флаг `changed` и до 5000 `samples` (окно один час).
-
-`LoggerConfig` (P3-07): `{ id, path, format: "csv"|"tsv"|"json",
-rotation: "none"|"daily"|"session"|{ size_mb: number }, keys?: string[],
-enabled?: boolean }`. Логгеры получают выборки мониторинга каждый цикл;
-`keys = []` означает все точки. Ротация daily/session добавляет суффикс с
-датой/временем, size — создаёт новый файл с таймстемпом при превышении лимита.
-
-`ScanDiff` (P3-08): `{ left_label, right_label, left_devices, right_devices,
-added_devices, removed_devices, devices: DeviceDiff[], registers: RegisterDiff[],
-added, removed, changed }`. Каждый `RegisterDiff` содержит `device_key`,
-`function`, `address`, `change: "added"|"removed"|"changed"|"unchanged"`,
-`old_value`, `new_value`. В списке только изменившиеся регистры.
+`{ session_id, values: MonitorValueState[], running }` — инкрементальные пакеты новых наблюдений каждые 200 мс при наличии данных, финальный пакет при Stop. `get_monitor_state` возвращает полный ограниченный снимок. Каждый канал содержит watch (источник, tag_id, DecodeSpec), latest, last_good, quality, min/max/avg/delta, счётчики, samples. Наблюдение: sequence, timestamp_ms, elapsed_us, raw, value, quality, exception_code, detail. Неуспешные наблюдения не повторяют last_good. RAW-канал читает одно слово. Logger v2 пишет по одной записи на наблюдение, отдельные .v2-файлы, CSV/TSV/JSONL и ограниченная очередь. См. [MEASUREMENT_ENGINE](MEASUREMENT_ENGINE.md).
 
 ### `traffic:record` — `TrafficRecord` (P3-06)
 
@@ -377,4 +363,4 @@ await api.scanner.start(
 
 ## Идентификация регистров — PR #13
 
-Проекты только версии 2. Старый проект отклоняется; конфигурация хранится отдельно в config-v2.json. TagDefinition содержит id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan: start (RegisterKey), quantity; RegisterKey: device_key, address_space, нулевой адрес address. AddressSpace: coils, discrete_inputs, holding_registers, input_registers; соответственно FC01–FC04. CSV/JSON профиля требует явного поддерживаемого FC, без подстановки FC03. Монитор различает исходный регистр и именованный тег; количество слов берётся из диапазона тега. Монитор и его файловые логи до PR #14 остаются RAW, а не инженерными значениями. См. [DATA_MODEL](DATA_MODEL.md).
+Проекты только версии 2. Старый проект отклоняется; конфигурация хранится отдельно в config-v2.json. TagDefinition содержит id, source (RegisterSpan), name, spec, unit, description, profile_id. RegisterSpan: start (RegisterKey), quantity; RegisterKey: device_key, address_space, нулевой адрес address. AddressSpace: coils, discrete_inputs, holding_registers, input_registers; соответственно FC01–FC04. CSV/JSON профиля требует явного поддерживаемого FC, без подстановки FC03. Монитор различает исходный регистр и именованный тег; количество слов берётся из диапазона тега. PR #14 добавляет типизированный мониторинг и Logger v2. См. [DATA_MODEL](DATA_MODEL.md).
