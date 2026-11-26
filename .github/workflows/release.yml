@@ -47,7 +47,7 @@ jobs:
         run: node scripts/check-release-version.mjs
       - name: Verify release-gate implementation tests
         run: node --test scripts/verify-release-gates.test.mjs
-      - name: Verify main SHA, active Rulesets, 5 CI checks, QA and bench Issue
+      - name: Verify main SHA, Rulesets, main-push and full three-platform CI, QA and bench Issue
         run: node scripts/verify-release-gates.mjs
         env:
           GITHUB_TOKEN: ${{ github.token }}

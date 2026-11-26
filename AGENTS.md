@@ -13,3 +13,7 @@ Follow [VISION](docs/VISION.md), [ROADMAP](docs/ROADMAP.md) and [BACKLOG](docs/B
 - Add deterministic offline regressions before or with fixes; test Stop, timeout, invalid frames, profile validation, schema rejection, data decoding and resource ownership as applicable.
 - Run npm ci, typecheck/build, cargo check/test, generated binding drift and npm run docs:check as applicable. Report tests not executed and physical validation separately.
 - Record new architectural choices in [ADR](docs/adr/README.md); distinguish proposals from implemented functionality.
+
+## Windows-first development (maintainer approved after PR #22)
+- Routine PR/main CI: Windows native Rust check/tests, bindings and protocol smoke; Windows QA installers; platform-independent frontend and governance checks retained. Native Linux/macOS jobs are intentionally skipped, not tested. Their existing check names remain for Ruleset compatibility.
+- At final validation run CI manually on exact main SHA to execute all five jobs across Windows/Linux/macOS; a skipped or missing native job cannot satisfy the official release gate. Linux/macOS installer packaging and platform bench acceptance remain final-stage work; do not claim builds until performed. No weakening of PR, tag, bench or Windows QA protection.

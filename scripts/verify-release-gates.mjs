@@ -38,7 +38,7 @@ function activeRule(rulesets, target, ref, type) {
 
 export function validateEvidence({
   repo, tag, version, sourceSha, checkoutSha, mainSha, benchPassed, benchUrl,
-  ciRuns, qaRun, qaJobs, qaArtifacts, rulesets, benchEvidence, tagAlreadyExists = false,
+  ciRuns, fullCiRuns, qaRun, qaJobs, qaArtifacts, rulesets, benchEvidence, tagAlreadyExists = false,
   releaseAlreadyExists = false,
 }) {
   requireGate(repo === "uzbatsu-beep/Modbus_SCANNER", "unexpected repository");
@@ -94,6 +94,16 @@ export function validateEvidence({
     r.event === "push" && r.status === "completed" && r.conclusion === "success" &&
     isWorkflowPath(r.path, ".github/workflows/ci.yml")),
     "no successful main-push CI for EXACT release commit");
+  // Skipped Linux/macOS checks satisfy routine branch protection, but must
+  // never be counted as evidence of cross-platform release validation.
+  requireGate(Array.isArray(fullCiRuns) && fullCiRuns.some((r) =>
+    r.head_sha === sourceSha && r.head_branch === "main" &&
+    r.event === "workflow_dispatch" && r.status === "completed" &&
+    r.conclusion === "success" && isWorkflowPath(r.path, ".github/workflows/ci.yml") &&
+    Array.isArray(r.jobs) && REQUIRED_CHECKS.every((name) =>
+      r.jobs.some((job) => job.name === name && job.status === "completed" &&
+        job.conclusion === "success"))),
+    "no successful full three-platform CI with all 5 jobs on EXACT release commit");
   requireGate(qaRun && qaRun.head_sha === sourceSha && qaRun.head_branch === "main" &&
     ["push", "workflow_dispatch"].includes(qaRun.event) &&
     qaRun.status === "completed" && qaRun.conclusion === "success" &&
@@ -138,10 +148,12 @@ async function main() {
   const checkoutSha = execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }).trim();
   const benchMatch = benchUrl.match(/^https:\/\/github\.com\/uzbatsu-beep\/Modbus_SCANNER\/issues\/([1-9]\d*)$/);
   requireGate(benchMatch, "bench evidence URL must be a repository GitHub Issue");
-  const [mainRef, ci, qaRun, qa, qaArtifacts, list, tagRef, release, benchEvidence] = await Promise.all([
+  const [mainRef, ci, fullCi, qaRun, qa, qaArtifacts, list, tagRef, release, benchEvidence] = await Promise.all([
     githubApi(repo, "git/ref/heads/main"),
     githubApi(repo, "actions/workflows/ci.yml/runs?head_sha=" + sourceSha +
       "&branch=main&event=push&status=success&per_page=100"),
+    githubApi(repo, "actions/workflows/ci.yml/runs?head_sha=" + sourceSha +
+      "&branch=main&event=workflow_dispatch&status=success&per_page=100"),
     githubApi(repo, "actions/runs/" + qaRunId),
     githubApi(repo, "actions/runs/" + qaRunId + "/jobs?per_page=100"),
     githubApi(repo, "actions/runs/" + qaRunId + "/artifacts?per_page=100"),
@@ -152,13 +164,17 @@ async function main() {
   ]);
   const active = (list ?? []).filter((r) => r.enforcement === "active");
   const rulesets = await Promise.all(active.map((r) => githubApi(repo, "rulesets/" + r.id)));
+  const fullCiRuns = await Promise.all((fullCi.workflow_runs ?? []).map(async (run) => ({
+    ...run,
+    jobs: (await githubApi(repo, "actions/runs/" + run.id + "/jobs?filter=latest&per_page=100")).jobs,
+  })));
   const result = validateEvidence({
     repo, tag, version, sourceSha, checkoutSha, mainSha: mainRef.object.sha,
     benchPassed: process.env.BENCH_PASSED === "true", benchUrl,
-    ciRuns: ci.workflow_runs, qaRun, qaJobs: qa.jobs, qaArtifacts: qaArtifacts.artifacts,
+    ciRuns: ci.workflow_runs, fullCiRuns, qaRun, qaJobs: qa.jobs, qaArtifacts: qaArtifacts.artifacts,
     rulesets, benchEvidence, tagAlreadyExists: !!tagRef, releaseAlreadyExists: !!release,
   });
-  console.log("Release preflight PASS: all 5 CI checks, exact SHA QA, active rulesets, " +
+  console.log("Release preflight PASS: main-push CI, full three-platform CI (5 actual successful jobs), exact SHA QA, active rulesets, " +
     "same-SHA PASS bench Issue and immutable tag requirements verified.");
   console.log(JSON.stringify(result, null, 2));
 }

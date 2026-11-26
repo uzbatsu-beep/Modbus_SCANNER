@@ -43,6 +43,9 @@ function fixture() {
     ciRuns: [{ head_sha: SHA, head_branch: "main", event: "push",
       status: "completed", conclusion: "success",
       path: ".github/workflows/ci.yml" }],
+    fullCiRuns: [{ head_sha: SHA, head_branch: "main", event: "workflow_dispatch",
+      status: "completed", conclusion: "success", path: ".github/workflows/ci.yml",
+      jobs: REQUIRED_CHECKS.map((name) => ({ name, status: "completed", conclusion: "success" })) }],
     qaRun: { id: 15, head_sha: SHA, head_branch: "main",
       status: "completed", conclusion: "success", event: "workflow_dispatch",
       path: ".github/workflows/windows-qa.yml" },
@@ -75,6 +78,15 @@ const cases = [
   ["refusing release overwrite", (f) => { f.releaseAlreadyExists = true; }, /already exists/],
   ["refusing tag replacement", (f) => { f.tagAlreadyExists = true; }, /already exists/],
   ["refusing missing main CI", (f) => { f.ciRuns = []; }, /CI/],
+  ["refusing missing final cross-platform CI", (f) => { f.fullCiRuns = []; }, /full three-platform CI/],
+  ["refusing skipped Linux test", (f) => { f.fullCiRuns[0].jobs[3].conclusion = "skipped"; }, /full three-platform CI/],
+  ["refusing skipped macOS test", (f) => { f.fullCiRuns[0].jobs[4].conclusion = "skipped"; }, /full three-platform CI/],
+  ["refusing missing final platform job", (f) => { f.fullCiRuns[0].jobs.pop(); }, /full three-platform CI/],
+  ["refusing failed final platform job", (f) => { f.fullCiRuns[0].jobs[4].conclusion = "failure"; }, /full three-platform CI/],
+  ["refusing final CI on old SHA", (f) => { f.fullCiRuns[0].head_sha = "b".repeat(40); }, /full three-platform CI/],
+  ["refusing final CI on another branch", (f) => { f.fullCiRuns[0].head_branch = "feature"; }, /full three-platform CI/],
+  ["refusing routine run as final CI", (f) => { f.fullCiRuns[0].event = "push"; }, /full three-platform CI/],
+  ["refusing wrong final workflow", (f) => { f.fullCiRuns[0].path = ".github/workflows/ci.yml.untrusted"; }, /full three-platform CI/],
   ["refusing PR-only CI", (f) => { f.ciRuns[0].event = "pull_request"; }, /CI/],
   ["refusing similar but wrong CI workflow", (f) => {
     f.ciRuns[0].path = ".github/workflows/ci.yml.insecure"; }, /CI/],
@@ -154,4 +166,20 @@ test("physical bench Issue template records every attestation field", () => {
   for (const marker of ["Source SHA:", "Bench result: PENDING", "Hardware:", "Transport:", "Test summary:"]) {
     assert.ok(template.includes(marker), marker);
   }
+});
+
+
+test("Windows-first workflow preserves required names and defers native Linux/macOS jobs", () => {
+  const workflow = readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+  assert.match(workflow, /^  workflow_dispatch:/m);
+  for (const name of REQUIRED_CHECKS) assert.ok(workflow.includes("name: " + name), name);
+  for (const [job, runner] of [["backend-linux", "ubuntu-latest"], ["backend-macos", "macos-latest"]]) {
+    const block = workflow.split("  " + job + ":\n")[1].split(/\n  [a-z][\w-]*:/)[0];
+    assert.ok(block.includes("if: github.event_name == 'workflow_dispatch'"));
+    assert.ok(block.includes("runs-on: " + runner));
+    assert.ok(block.includes("cargo test --lib"));
+  }
+  const windows = workflow.split("  backend:\n")[1].split("\n  backend-linux:")[0];
+  assert.ok(windows.includes("runs-on: windows-latest"));
+  assert.ok(!windows.includes("github.event_name == 'workflow_dispatch'"));
 });
