@@ -9,7 +9,7 @@ Approved B.2.3 variant B: TCP idle 60 s, Serial idle 30 s, 32 unused cached conn
 - RecoveryBook stores non-MBAP failure deadlines by physical resource even after disconnect. New workers wait before open/TX, including different framing. Existing retry backoff remains. Expired deadlines removed; direct serial leases do not yet enforce this state. No replay.
 - Regression scenarios: compatible reuse, scoped stop, incompatible framing/policy, idle eviction vs pinned/leased, cache cap, stale lease isolation, serial exclusion, cross-generation recovery.
 
-## C.2 — pending
+## C.2 — PR #22 in progress
 Managed serial scanner/FC43, COM diagnostics, exclusive sweep reconfiguration, safe scoped Stop and recovery enforcement for all serial paths. Idle cached serial ports currently remain owned until eviction; define atomic idle retirement before exclusive discovery while refusing actively leased ports.
 
 ## C.3 — pending
@@ -22,3 +22,5 @@ Full cross-tool regression, real loopback and controlled serial tests, no direct
 C.1 — фундамент аренды соединений и сохранения Recovery между worker. Реальный перевод Scanner, Manual, Monitor и последовательной диагностики выполняется на C.2/C.3. Независимые циклы Monitor — B.3. Кэш не удерживает более 32 готовых к удалению неиспользуемых подключений; активные и явно зарегистрированные не вытесняются. Пауза снижает риск запоздалого ответа, но не исключает произвольные задержки. Не считать PR готовым по одному C.1.
 
 Additional native TCP regression: three Unit IDs from separate leases use one socket, including after all leases are released and a new lease is acquired; shutdown produces EOF. A periodic-reaper test verifies expiry without a subsequent acquisition. The labels Scanner/Manual/Monitor in this fixture simulate clients of the lifecycle API, not the existing production tool entry points.
+
+C.1 merged in PR #21 with 151 Rust tests per platform and Windows QA. PR #22 C.2 approved; see [SERIAL_MIGRATION](SERIAL_MIGRATION.md). C.2.1 introduces exclusive session and atomic cache handoff; legacy entry points remain pending.
