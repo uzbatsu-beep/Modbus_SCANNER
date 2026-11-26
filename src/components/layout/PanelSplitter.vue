@@ -34,7 +34,7 @@ function key(e:KeyboardEvent) {
 onBeforeUnmount(()=>finish());
 </script>
 <template>
-  <div role="separator" tabindex="0" class="wb-splitter" :class="{horizontal:panel==='bottom'}"
+  <div role="separator" tabindex="0" class="wb-splitter" :class="['split-'+panel,{horizontal:panel==='bottom'}]"
     :aria-label="label" :aria-orientation="panel==='bottom'?'horizontal':'vertical'"
     :aria-valuemin="LIMITS[panel][0]" :aria-valuemax="LIMITS[panel][1]" :aria-valuenow="value"
     @pointerdown="down" @pointermove="move" @pointerup="finish" @pointercancel="finish" @lostpointercapture="finish" @keydown="key" />

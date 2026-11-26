@@ -25,6 +25,8 @@ const locale = useLocaleStore();
 const wb = useWorkbenchStore();
 const devices = useDevicesStore();
 const ready = ref(false);
+const projectGeneration = ref(0);
+watch(()=>settings.loadedProject,()=>{projectGeneration.value++;wb.resultTab='devices';});
 const shell = ref<HTMLElement|null>(null);
 const width = ref(1024), height = ref(640);
 const fitted = computed(()=>fitLayout(wb.layout,width.value,height.value));
@@ -56,12 +58,13 @@ onMounted(async () => {
   ready.value = true;
   if(shell.value){observer=new ResizeObserver(([entry])=>{width.value=entry.contentRect.width;height.value=entry.contentRect.height;});observer.observe(shell.value);}
   window.addEventListener('beforeunload',persistOnExit);
-  await devices.refresh().catch(e=>scanner.addLog('error',String(e)));
-  await scanner.bindEvents();
-  await monitor.bind();
-  await monitor.refresh();
-  await monitor.refreshLoggers();
-  await traffic.bind();
+  // Bind event sources before the initial snapshot, and isolate startup failures.
+  await scanner.bindEvents().catch(e=>scanner.addLog("error",String(e)));
+  await monitor.bind().catch(e=>scanner.addLog("error",String(e)));
+  await traffic.bind().catch(e=>scanner.addLog("error",String(e)));
+  await devices.refresh().catch(e=>scanner.addLog("error",String(e)));
+  await monitor.refresh().catch(e=>scanner.addLog("error",String(e)));
+  await monitor.refreshLoggers().catch(e=>scanner.addLog("error",String(e)));
 });
 </script>
 
@@ -74,7 +77,7 @@ onMounted(async () => {
         <PanelSplitter v-if="fitted.left" panel="left" :value="fitted.left" :label="t('wbResizeLeft')" @resize="wb.resize('left',$event)" @finish="wb.persist()" />
         <main class="wb-workspace">
           <router-view v-if="ready" v-slot="{Component,route}">
-            <KeepAlive include="ResultsView,ScanView">
+            <KeepAlive :key="projectGeneration" include="ResultsView,ScanView">
               <component :is="Component" :key="route.name" class="wb-page" />
             </KeepAlive>
           </router-view>

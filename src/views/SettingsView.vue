@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { t } from "@/i18n";
-import { reactive, ref } from "vue";
+import { reactive, ref, watch } from "vue";
+import { useMonitorStore } from "@/stores/monitor";
 
 import { api } from "@/api/mod";
 import { useSettingsStore } from "@/stores/settings";
@@ -9,6 +10,7 @@ import { useDevicesStore } from "@/stores/devices";
 
 const settings = useSettingsStore();
 const scanner = useScannerStore();
+const monitor = useMonitorStore();
 
 const local = reactive({
   language: settings.config.language,
@@ -17,6 +19,7 @@ const local = reactive({
   export_dir: settings.config.export_dir ?? "",
 });
 
+watch(()=>settings.config.theme,theme=>{local.theme=theme;});
 const saving = ref(false);
 const msg = ref<string | null>(null);
 
@@ -36,6 +39,7 @@ async function saveProject() {
 
 async function loadProject() {
   projectMsg.value = null;
+  if (!scanner.canStart || monitor.running || monitor.busy) {projectMsg.value=t("wbStopBeforeLoad");return;}
   try {
     const p = await api.scanner.loadProject(project.path.trim());
     settings.loadedProject = p;
@@ -129,7 +133,7 @@ function clearLog() {
       <div class="form-row">
         <label />
         <button :disabled="!project.path.trim()" @click="saveProject">{{ t("saveProject") }}</button>
-        <button :disabled="!project.path.trim()" @click="loadProject">{{ t("loadProject") }}</button>
+        <button :disabled="!project.path.trim() || !scanner.canStart || monitor.running || monitor.busy" :title="t('wbStopBeforeLoad')" @click="loadProject">{{ t("loadProject") }}</button>
         <span v-if="projectMsg" class="msg">{{ projectMsg }}</span>
       </div>
 

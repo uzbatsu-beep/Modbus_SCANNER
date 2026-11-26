@@ -24,3 +24,12 @@ test("grouping distinguishes port and framing and preserves unit identity",()=>{
  assert.equal(gs.length,3);
  assert.deepEqual(gs.find(g=>g.records.length===2).records.map(r=>r.key),["a","b"]);
 });
+
+test("fitted geometry remains bounded across viewport sizes and visibility permutations",()=>{
+ for(const w of [320,526,546,600,712,800,1024,1920])for(const h of [200,306,480,640])for(const leftVisible of [true,false])for(const rightVisible of [true,false]){
+ const s={...DEFAULT_LAYOUT,left:480,right:520,bottom:420,leftVisible,rightVisible};const x=fitLayout(s,w,h);
+ assert.ok(x.left>=0&&x.right>=0&&x.bottom>=0);
+ if(w>=360)assert.ok(w-x.left-x.right-(x.left?6:0)-(x.right?6:0)>=360);
+ if(x.left)assert.ok(x.left>=160);if(x.right)assert.ok(x.right>=180);if(x.bottom)assert.ok(h-x.bottom-6>=200);
+ }
+});

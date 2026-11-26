@@ -15,3 +15,5 @@ Node unit tests for malformed layout, persistence round-trip, clamping, narrow w
 
 ## RU
 Оболочка Workbench реализуется поверх существующих функций. Панели изменяемые и сворачиваемые, настройки компоновки локальные. Дерево показывает только обнаруженные устройства; независимые соединения появятся в PR #17. Инспектор пока отображает сводные свойства устройства, полное редактирование регистров остаётся в рабочей области. Никаких новых сеансов и транспортных изменений. Обязательна визуальная проверка на Windows; автоматические тесты модели не заменяют её.
+
+Project load is disabled while scanner/monitor are active or monitor busy; a successful explicit project load resets cached page drafts to avoid carrying old watches into a new project. This is a UI guard, not a replacement for the upcoming connection manager. Menu dismissal supports Escape/outside click. Layout sizes adapt to actual shell size, not the screen size; narrow scan forms stack.

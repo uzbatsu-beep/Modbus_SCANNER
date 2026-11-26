@@ -8,6 +8,7 @@ import {useMonitorStore} from "@/stores/monitor";
 const devices=useDevicesStore(), settings=useSettingsStore(), wb=useWorkbenchStore(), monitor=useMonitorStore();
 const selected=computed(()=>devices.selected);
 const tags=computed(()=>settings.config.tags.filter(t=>t.source.start.device_key===selected.value?.key));
+const staleKeys=computed(()=>new Set(monitor.metrics?.channels.filter(c=>c.stale).map(c=>c.key)??[]));
 const readings=computed(()=>monitor.values.filter(v=>v.watch.target.kind===selected.value?.target.kind && v.watch.target.endpoint===selected.value?.target.endpoint && v.watch.target.port===selected.value?.target.port && v.watch.target.unit_id===selected.value?.target.unit_id && JSON.stringify(v.watch.target.serial)===JSON.stringify(selected.value?.target.serial) && v.watch.target.serial_mode===selected.value?.target.serial_mode));
 </script>
 <template>
@@ -29,7 +30,8 @@ const readings=computed(()=>monitor.values.filter(v=>v.watch.target.kind===selec
       <div v-for="v in readings" :key="v.key" class="wb-reading">
         <small>{{ v.watch.name || v.key }}</small>
         <strong>{{ v.latest?.value?.value ?? v.last_good?.value?.value ?? "—" }} {{ v.watch.unit ?? "" }}</strong>
-        <span class="wb-muted">{{ v.quality==='good' && (!monitor.running || monitor.metrics?.channels.some(c=>c.key===v.key&&c.stale))?'stale':v.quality }}</span>
+        <small v-if="v.last_good && (v.quality!=='good' || !monitor.running || staleKeys.has(v.key))" class="wb-muted">{{ t('lastGood') }}</small>
+        <span class="wb-muted">{{ v.quality==='good' && (!monitor.running || staleKeys.has(v.key))?'stale':v.quality }}</span>
       </div>
       <router-link to="/results" class="wb-link" @click="wb.resultTab='monitor'">{{ t("wbOpenMonitor") }}</router-link>
     </template>

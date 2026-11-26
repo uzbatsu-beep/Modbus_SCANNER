@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed,ref } from "vue";
+import { computed,ref,onMounted,onBeforeUnmount } from "vue";
 import { useRoute,useRouter } from "vue-router";
 import { t,type TranslationKey } from "@/i18n";
 import { useDevicesStore } from "@/stores/devices";
@@ -9,6 +9,11 @@ import { useWorkbenchStore } from "@/stores/workbench";
 import { useSettingsStore } from "@/stores/settings";
 const route=useRoute(), router=useRouter(), devices=useDevicesStore(), scanner=useScannerStore(), monitor=useMonitorStore(), wb=useWorkbenchStore(), settings=useSettingsStore();
 const commandBusy=ref(false);
+const header=ref<HTMLElement|null>(null);
+function dismissMenus(e:Event){for(const menu of header.value?.querySelectorAll<HTMLDetailsElement>("details[open]")??[]){if(!(e.target instanceof Node)||!menu.contains(e.target))menu.open=false;}}
+function escapeMenus(e:KeyboardEvent){if(e.key!=="Escape")return;for(const menu of header.value?.querySelectorAll<HTMLDetailsElement>("details[open]")??[]){menu.open=false;menu.querySelector("summary")?.focus();}}
+onMounted(()=>{document.addEventListener("pointerdown",dismissMenus);document.addEventListener("keydown",escapeMenus);});
+onBeforeUnmount(()=>{document.removeEventListener("pointerdown",dismissMenus);document.removeEventListener("keydown",escapeMenus);});
 const links=computed(()=>[{to:"/",label:t("navScan")},{to:"/results",label:t("navResults")},{to:"/profiles",label:t("navProfiles")},{to:"/diff",label:t("navDiff")},{to:"/traffic",label:t("navTraffic")},{to:"/manual",label:t("navManual")},{to:"/settings",label:t("navSettings")}]);
 function close(e:MouseEvent){const menu=(e.currentTarget as HTMLElement).closest("details");if(menu)menu.open=false;}
 async function command(action:()=>Promise<unknown>) {
@@ -22,7 +27,7 @@ const themeLabel=computed<TranslationKey>(()=>settings.config.theme==="dark"?"li
 async function theme(){const previous=settings.config.theme;settings.config.theme=previous==="dark"?"light":"dark";try{await settings.save();}catch(e){settings.config.theme=previous;throw e;}}
 </script>
 <template>
-  <header class="wb-header">
+  <header ref="header" class="wb-header">
     <div class="wb-menubar">
       <strong class="wb-brand">Modbus Scanner</strong>
       <details class="wb-menu"><summary>{{ t("wbFile") }}</summary><div class="wb-menu-list"><router-link to="/settings" @click="close">{{ t("wbProjectFiles") }}</router-link></div></details>
@@ -37,12 +42,12 @@ async function theme(){const previous=settings.config.theme;settings.config.them
       <span class="wb-command-divider"/>
       <button :disabled="!devices.selected" @click="openRegisters">{{ t("wbOpenRegisters") }}</button>
       <button @click="openMonitor">{{ t("wbOpenMonitor") }}</button>
-      <button v-if="scanner.isRunning" :disabled="commandBusy" @click="command(()=>scanner.pause())">{{ t("pause") }}</button>
+      <button v-if="scanner.status==='running'" :disabled="commandBusy" @click="command(()=>scanner.pause())">{{ t("pause") }}</button>
       <button v-if="scanner.isPaused" :disabled="commandBusy" @click="command(()=>scanner.resume())">{{ t("resume") }}</button>
       <button v-if="!scanner.canStart" class="danger" :disabled="commandBusy || scanner.status==='stopping'" @click="command(()=>scanner.stop())">{{ t("wbStopScan") }}</button>
       <button v-if="monitor.running" class="danger" :disabled="monitor.busy || commandBusy" @click="command(()=>monitor.stop())">{{ t("wbStopMonitor") }}</button>
       <span class="wb-spacer"/>
-      <button v-for="p in panels" :key="p.key" :aria-pressed="p.visible" :title="p.label" @click="wb.toggle(p.key)">{{ p.key==='left'?'◧':p.key==='right'?'◨':'▤' }}</button>
+      <button v-for="p in panels" :key="p.key" :aria-pressed="p.visible" :title="p.label" :aria-label="p.label" @click="wb.toggle(p.key)">{{ p.key==='left'?'◧':p.key==='right'?'◨':'▤' }}</button>
     </nav>
   </header>
 </template>

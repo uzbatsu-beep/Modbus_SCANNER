@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onActivated } from "vue";
+import { onActivated } from "vue";
 import {t} from "@/i18n";
 import {useWorkbenchStore} from "@/stores/workbench";
 defineOptions({name:"ResultsView"});
@@ -16,10 +16,7 @@ const scanner = useScannerStore();
 const wb=useWorkbenchStore();
 onActivated(()=>{devices.refresh().catch(e=>scanner.addLog('error',String(e)));});
 
-onMounted(() => {
-  devices.refresh().catch(() => {});
-  scanner.addLog("info", "results view opened");
-});
+
 </script>
 
 <template>

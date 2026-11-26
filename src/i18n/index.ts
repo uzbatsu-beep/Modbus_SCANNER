@@ -33,6 +33,7 @@ const ru = {
   wbStopMonitor: "Стоп мониторинга",
   wbRunning: "активен",
   wbLayoutSaveError: "Ошибка сохранения компоновки",
+  wbStopBeforeLoad: "Остановите сканирование и мониторинг перед загрузкой проекта",
   // Navigation
   navScan: "Сканер / Scanner",
   navResults: "Результаты / Results",
@@ -370,6 +371,7 @@ const en: Record<TranslationKey, string> = {
   wbStopMonitor: "Stop monitor",
   wbRunning: "running",
   wbLayoutSaveError: "Layout save failed",
+  wbStopBeforeLoad: "Stop scanning and monitoring before loading a project",
   navScan: "Scanner",
   navResults: "Results",
   navDiff: "Diff",
