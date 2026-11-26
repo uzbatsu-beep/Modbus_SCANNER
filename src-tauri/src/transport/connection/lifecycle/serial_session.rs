@@ -10,6 +10,10 @@ pub struct SerialSessionSnapshot {
     pub serial_configuration: Option<SerialPortConfig>,
     pub serial_mode: Option<SerialMode>,
     pub configuration_changes: u64,
+    pub lease_count: usize,
+    pub queue_depth: usize,
+    pub active_requests: usize,
+    pub reconnect_count: u64,
     pub recovery_remaining_ms: u64,
     pub exclusive_owner: String,
 }
@@ -145,11 +149,16 @@ impl ExclusiveSerialSession {
         let remaining = self.manager.recovery.deadline(&self.resource)
             .map(|until| until.saturating_duration_since(tokio::time::Instant::now()))
             .unwrap_or_default();
+        let (queue_depth, active_requests, reconnect_count) = self.entry.as_ref().map(|e|{
+            let state=e.state.lock();
+            (QUEUE_CAPACITY-e.slots.available_permits(),state.active_requests,state.reconnect_count)
+        }).unwrap_or_default();
         SerialSessionSnapshot {
             resource_key: self.resource.clone(),
             connection_id: self.entry.as_ref().map(|e| e.definition.id.clone()),
             serial_configuration: config, serial_mode: mode,
             configuration_changes: self.configuration_changes,
+            lease_count: 1, queue_depth, active_requests, reconnect_count,
             recovery_remaining_ms: remaining.as_millis().min(u64::MAX as u128) as u64,
             exclusive_owner: self.owner.clone(),
         }

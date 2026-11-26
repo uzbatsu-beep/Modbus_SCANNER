@@ -115,3 +115,99 @@ async fn exclusive_session_cannot_configure_other_resource(){
     s.close().await.unwrap();
     drop(other);m.shutdown().await.unwrap();
 }
+
+struct GatedFactory {
+    rx_entered:Arc<Semaphore>, rx_release:Arc<Semaphore>,
+    close_entered:Arc<Semaphore>, close_release:Arc<Semaphore>,
+    sent:Arc<AtomicUsize>,
+}
+struct GatedTransport {
+    rx_entered:Arc<Semaphore>, rx_release:Arc<Semaphore>,
+    close_entered:Arc<Semaphore>, close_release:Arc<Semaphore>,
+    sent:Arc<AtomicUsize>,
+}
+#[async_trait]
+impl TransportFactory for GatedFactory {
+    async fn open(&self,_:&TransportConfig)->TransportResult<Box<dyn Transport>>{
+        Ok(Box::new(GatedTransport{rx_entered:self.rx_entered.clone(),rx_release:self.rx_release.clone(),
+            close_entered:self.close_entered.clone(),close_release:self.close_release.clone(),sent:self.sent.clone()}))
+    }
+}
+#[async_trait]
+impl Transport for GatedTransport {
+    fn name(&self)->String{"serial gate".into()}
+    async fn reset(&mut self)->TransportResult<()>{Ok(())}
+    async fn send_raw(&mut self,_:&[u8])->TransportResult<()>{self.sent.fetch_add(1,Ordering::SeqCst);Ok(())}
+    async fn recv_raw(&mut self,_:usize)->TransportResult<Vec<u8>>{
+        self.rx_entered.add_permits(1);
+        self.rx_release.acquire().await.map_err(|_|TransportError::Cancelled)?.forget();
+        Ok(vec![1])
+    }
+    async fn close(&mut self)->TransportResult<()>{
+        self.close_entered.add_permits(1);
+        self.close_release.acquire().await.map_err(|_|TransportError::Cancelled)?.forget();
+        Ok(())
+    }
+}
+fn gated()->Arc<GatedFactory>{
+    Arc::new(GatedFactory{rx_entered:Arc::new(Semaphore::new(0)),rx_release:Arc::new(Semaphore::new(0)),
+        close_entered:Arc::new(Semaphore::new(0)),close_release:Arc::new(Semaphore::new(0)),sent:Arc::new(AtomicUsize::new(0))})
+}
+async fn entered(s:&Semaphore){tokio::time::timeout(Duration::from_secs(3),s.acquire()).await.unwrap().unwrap().forget();}
+#[tokio::test]
+async fn cancelled_idle_handoff_holds_reservation_until_worker_join(){
+    let f=gated();let m=Arc::new(ConnectionManager::with_factory(f.clone()));
+    let d=def(9600,SerialMode::Rtu);
+    let lease=m.acquire(d.clone()).unwrap();
+    f.rx_release.add_permits(1);
+    let mut request=req();request.response_timeout=Duration::from_secs(3);
+    assert!(lease.transact(request,None).await.unwrap().result.is_ok());
+    drop(lease);
+    let task={let m=m.clone();tokio::spawn(async move{m.exclusive_serial(port(),"sweep").await})};
+    entered(&f.close_entered).await;
+    // The worker is closing, and the exclusive claim was already installed.
+    assert!(m.acquire(d.clone()).is_err());
+    assert!(m.lease_serial(port()).is_err());
+    task.abort();assert!(task.await.err().unwrap().is_cancelled());
+    assert!(m.acquire(d.clone()).is_err());
+    assert!(m.lease_serial(port()).is_err());
+    f.close_release.add_permits(1);
+    tokio::time::timeout(Duration::from_secs(3),async{
+        loop{
+            if let Ok(lease)=m.lease_serial(port()){drop(lease);break;}
+            tokio::task::yield_now().await;
+        }
+    }).await.unwrap();
+    assert!(m.snapshot().is_empty());
+    assert!(m.acquire(d).is_ok());
+    m.shutdown().await.unwrap();
+}
+#[tokio::test]
+async fn exclusive_stop_finishes_active_rx_and_cancels_waiting_request(){
+    let f=gated();let m=Arc::new(ConnectionManager::with_factory(f.clone()));
+    let mut s=m.exclusive_serial(port(),"sweep").await.unwrap();
+    s.configure(def(9600,SerialMode::Rtu)).await.unwrap();
+    let s=Arc::new(s);
+    let active={let s=s.clone();tokio::spawn(async move{
+        let mut r=req();r.response_timeout=Duration::from_secs(5);s.transact(r,None).await
+    })};
+    entered(&f.rx_entered).await;
+    let pending={let s=s.clone();tokio::spawn(async move{s.transact(req(),None).await})};
+    tokio::time::timeout(Duration::from_secs(3),async{
+        while m.snapshot()[0].queue_depth!=1{tokio::task::yield_now().await;}
+    }).await.unwrap();
+    let stopping={let s=s.clone();tokio::spawn(async move{s.stop().await})};
+    let cancelled=tokio::time::timeout(Duration::from_secs(3),pending).await.unwrap().unwrap();
+    assert!(matches!(cancelled,Err(TransportError::Cancelled)));
+    assert!(!stopping.is_finished());
+    assert!(m.lease_serial(port()).is_err());
+    f.rx_release.add_permits(1);
+    assert_eq!(active.await.unwrap().unwrap().result.unwrap(),vec![1]);
+    stopping.await.unwrap();
+    assert_eq!(f.sent.load(Ordering::SeqCst),1);
+    let s=Arc::try_unwrap(s).ok().unwrap();
+    f.close_release.add_permits(1);
+    s.close().await.unwrap();
+    assert!(m.snapshot().is_empty());
+    assert!(m.lease_serial(port()).is_ok());
+}

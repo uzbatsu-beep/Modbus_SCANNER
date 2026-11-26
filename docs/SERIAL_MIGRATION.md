@@ -41,3 +41,5 @@ C.2.1 adds MockTransport and registry tests for SR-04/05/06/07/08/15/16 at API l
 
 ## RU
 Утверждён вариант B. C.2.1 реализует исключительную сессию и передачу порта из кэша без окна конкурентного доступа. Обычное сканирование и диагностика будут переведены на управляемый транспорт на C.2.2–C.2.4. Проверки C.2.5 обязательны перед слиянием. Прямые legacy-вызовы пока сохранены.
+
+Two additional gated-transport regressions cover cancellation during idle-worker close (reservation remains until join) and Stop during active RX with a queued request (only active TX finishes). Snapshot adds lease count, queue depth, active requests and reconnect count; queue_wait_us remains per TransactionOutcome. Configuration fields represent selected settings, not proof of successful physical opening. Seven new tests; virtual serial and physical RS-485 are not exercised by these fixtures.
