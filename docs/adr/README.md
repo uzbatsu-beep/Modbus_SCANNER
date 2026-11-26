@@ -16,3 +16,5 @@ Detailed design: [data model](../DATA_MODEL.md), [polling engine](../POLLING_ENG
 ADR-007 — Prototype schema break (maintainer-approved 2026-11-26): no legacy migration in PR #13. Explicit project v2 validation, separate config-v2.json, keep old files unchanged. This supersedes the backward-compatibility constraint for the prototype. Existing device_key retained until the later connection model.
 
 - [ADR-008 — Connection & Transport Manager](008-connection-manager.md): approved variant B and staged implementation.
+
+- [ADR-009 — Shared Connection Runtime](009-shared-connection-runtime.md): approved B.2.3 lifecycle, resource recovery and staged migration.
