@@ -137,3 +137,53 @@ async fn recovery_deadline_survives_worker_removal_and_config_change(){
     assert_eq!(factory.opens.load(Ordering::SeqCst),2);
     m.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn native_tcp_socket_survives_client_release_and_reacquire(){
+    use tokio::io::{AsyncReadExt,AsyncWriteExt};
+    let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port=listener.local_addr().unwrap().port();
+    let server=tokio::spawn(async move{
+        let (mut socket,_)=listener.accept().await.unwrap();
+        for unit in [1u8,2,3]{
+            let mut request=[0u8;12];
+            socket.read_exact(&mut request).await.unwrap();
+            assert_eq!(request,[0,unit,0,0,0,6,unit,3,0,0,0,1]);
+            socket.write_all(&[0,unit,0,0,0,5,unit,3,2,0,42]).await.unwrap();
+        }
+        let mut end=[0u8;1];
+        assert_eq!(socket.read(&mut end).await.unwrap(),0);
+    });
+    let m=Arc::new(ConnectionManager::new());
+    let a=m.acquire(def("scanner",port)).unwrap();
+    let b=m.acquire(def("manual",port)).unwrap();
+    let id=a.id().to_owned();
+    let read=|unit|TransactionRequest{adu:vec![0,unit,0,0,0,6,unit,3,0,0,0,1],response_timeout:Duration::from_secs(2),expected_hint:11,priority:Priority::High};
+    for (lease,unit) in [(&a,1u8),(&b,2)]{
+        let out=lease.transact(read(unit),None).await.unwrap();
+        assert_eq!(out.result.unwrap(),vec![0,unit,0,0,0,5,unit,3,2,0,42]);
+        assert_eq!(out.timing.connect_us.is_some(),unit==1);
+    }
+    drop(a);drop(b);
+    let c=m.acquire(def("monitor",port)).unwrap();
+    assert_eq!(c.id(),id);
+    let out=c.transact(read(3),None).await.unwrap();
+    assert!(out.timing.connect_us.is_none());
+    assert_eq!(out.result.unwrap(),vec![0,3,0,0,0,5,3,3,2,0,42]);
+    drop(c);m.shutdown().await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3),server).await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn periodic_reaper_releases_expired_cache_without_new_acquire(){
+    let m=Arc::new(ConnectionManager::new());
+    let lease=m.acquire(def("idle",502)).unwrap();
+    let id=lease.id().to_owned();drop(lease);
+    let entry=m.entry(&id).unwrap();
+    entry.lifecycle.lock().idle_since=Some(tokio::time::Instant::now()-IDLE_TCP-Duration::from_secs(1));
+    tokio::time::timeout(Duration::from_secs(3),async{
+        while !m.snapshot().is_empty(){tokio::time::sleep(Duration::from_millis(20)).await;}
+    }).await.unwrap();
+    assert!(m.acquire(def("new",502)).is_ok());
+    m.shutdown().await.unwrap();
+}

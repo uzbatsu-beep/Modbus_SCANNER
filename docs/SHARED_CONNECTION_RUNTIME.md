@@ -20,3 +20,5 @@ Full cross-tool regression, real loopback and controlled serial tests, no direct
 
 ## RU
 C.1 — фундамент аренды соединений и сохранения Recovery между worker. Реальный перевод Scanner, Manual, Monitor и последовательной диагностики выполняется на C.2/C.3. Независимые циклы Monitor — B.3. Кэш не удерживает более 32 готовых к удалению неиспользуемых подключений; активные и явно зарегистрированные не вытесняются. Пауза снижает риск запоздалого ответа, но не исключает произвольные задержки. Не считать PR готовым по одному C.1.
+
+Additional native TCP regression: three Unit IDs from separate leases use one socket, including after all leases are released and a new lease is acquired; shutdown produces EOF. A periodic-reaper test verifies expiry without a subsequent acquisition. The labels Scanner/Manual/Monitor in this fixture simulate clients of the lifecycle API, not the existing production tool entry points.
