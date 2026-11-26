@@ -73,8 +73,6 @@ impl MonitorHandle {
             return Err("history capacity must be 100..50000 per channel and total <= 1000000 observations".into());
         }
         let mut keys = std::collections::HashSet::new();
-        let cycle_start = Instant::now();
-        metrics.write().begin_cycle(micros(started));
         for watch in &watches {
             let space = super::types::AddressSpace::from_read_function(watch.function)?;
             super::types::RegisterSpan {
@@ -175,6 +173,8 @@ async fn monitor_task(
             _ = tokio::time::sleep(interval) => {}
         }
 
+        let cycle_start = Instant::now();
+        metrics.write().begin_cycle(micros(started));
         for watch in &watches {
             if !matches!(control_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)) { break 'poll; }
             let acquisition_start = Instant::now();
