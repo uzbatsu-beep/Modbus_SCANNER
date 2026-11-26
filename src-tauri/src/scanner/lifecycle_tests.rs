@@ -1,7 +1,7 @@
 //! Lifecycle regression tests using an isolated TCP loopback listener.
 //! Assert the absence of new outbound requests after Stop, not just UI status.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
@@ -129,23 +129,24 @@ async fn stop_discards_queued_register_reads() {
 }
 
 #[tokio::test]
-async fn stop_interrupts_silent_ip_probe_and_full_concurrency_queue() {
+async fn stop_finishes_active_ip_probe_and_discards_full_concurrency_queue() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let scanner = ScannerHandle::new();
     let mut settings = params(vec![3, 4, 3]);
     settings.request_gap_ms = 0;
-    settings.timeout_ms = 10_000;
+    settings.timeout_ms = 700;
     scanner.start(EventSink::null(), target(port, Vec::new()), settings)
         .await.expect("start scan");
 
-    // Keep the connection alive but never respond. The second work item
-    // waits on the full IP task pool, not on a timeout.
+    // The approved Stop contract now lets an already transmitted request
+    // finish or time out, but never dispatches another queued operation.
     let (_stream, _request) = recv_request(&listener).await;
-    let started = Instant::now();
     scanner.control(ControlMsg::Stop).await.expect("stop scan");
-    scanner.wait_finished(Duration::from_secs(2)).await.expect("fast cancellation");
-    assert!(started.elapsed() < Duration::from_secs(2), "Stop waited for the long I/O timeout");
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(scanner.status(),ScanStatus::Stopping);
+    scanner.wait_finished(Duration::from_secs(4)).await.expect("bounded safe completion");
+    assert!(scanner.communication().manager.snapshot().is_empty());
     assert_eq!(scanner.status(), ScanStatus::Stopped);
     assert_no_more_connections(&listener).await;
 }
@@ -204,4 +205,41 @@ async fn scanner_and_monitor_respect_same_serial_registry_before_io(){
     assert_eq!(scanner.status(),ScanStatus::Idle);
     drop(lease);
     assert!(service.manager.lease_serial(port).is_ok());
+}
+
+#[tokio::test]
+async fn network_scan_serializes_same_endpoint_and_releases_all_workers(){
+    let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port=listener.local_addr().unwrap().port();
+    let scanner=ScannerHandle::new();
+    let mut settings=params(vec![3,4,3,4]);
+    settings.ip_concurrency=8;settings.request_gap_ms=0;
+    let server=tokio::spawn(async move{
+        for _ in 0..4{
+            let (mut stream,request)=recv_request(&listener).await;
+            assert!(tokio::time::timeout(Duration::from_millis(40),listener.accept()).await.is_err(),"second worker opened same endpoint");
+            send_read_response(&mut stream,&request).await;
+        }
+    });
+    scanner.start(EventSink::null(),target(port,Vec::new()),settings).await.unwrap();
+    let result=scanner.wait_finished(Duration::from_secs(5)).await.unwrap();
+    assert_eq!(result.stats.responses_ok,4);
+    assert!(scanner.communication().manager.snapshot().is_empty());
+    server.await.unwrap();
+}
+#[tokio::test]
+async fn network_scan_cannot_open_endpoint_owned_by_manual_worker(){
+    use crate::transport::connection::{ConnectionDefinition,TransportConfig};
+    use crate::transport::tcp::TcpConfig;
+    let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port=listener.local_addr().unwrap().port();
+    let scanner=ScannerHandle::new();
+    let manager=scanner.communication().manager.clone();
+    let held=manager.temporary(ConnectionDefinition{id:"manual-held".into(),name:"Manual".into(),transport:TransportConfig::Tcp(TcpConfig{host:"127.0.0.1".into(),port,..Default::default()}),policy:Default::default()}).unwrap();
+    scanner.start(EventSink::null(),target(port,Vec::new()),params(vec![3])).await.unwrap();
+    let result=scanner.wait_finished(Duration::from_secs(3)).await.unwrap();
+    assert!(result.records.is_empty());assert!(result.stats.transport_errors>0);
+    assert_no_more_connections(&listener).await;
+    assert_eq!(manager.snapshot().len(),1);
+    held.close().await.unwrap();
 }

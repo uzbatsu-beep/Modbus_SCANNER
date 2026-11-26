@@ -57,7 +57,7 @@ fn framing(d:&ConnectionDefinition)->(TransportKind,EngineParams){
     };
     (kind,EngineParams::from_scan_params(&params))
 }
-fn verify_payload(pdu:&Pdu,request:&[u8])->TransportResult<()>{
+pub(crate) fn verify_payload(pdu:&Pdu,request:&[u8])->TransportResult<()>{
     if let Pdu::Response{function,data}=pdu{
         match *function{
             1..=4=>{parse_read_values(*function,data,word(&request[3..5]))?;},
