@@ -344,7 +344,7 @@ impl DeviceProfile {
 
     /// Turn profile registers into independently identified engineering tags.
     pub fn to_tags(&self, device_key: &str) -> Result<Vec<TagDefinition>, String> {
-        self.registers.iter().enumerate().map(|(index, r)| {
+        let tags: Vec<TagDefinition> = self.registers.iter().map(|r| {
             let source = RegisterSpan {
                 start: RegisterKey {
                     device_key: device_key.to_string(),
@@ -353,7 +353,7 @@ impl DeviceProfile {
                 },
                 quantity: register_width(r.spec.data_type),
             };
-            let id = format!("profile:{}", serde_json::to_string(&(device_key, &self.id, index)).map_err(|e| e.to_string())?);
+            let id = format!("profile:{}", serde_json::to_string(&(device_key, &self.id, r.function, r.address, &r.name)).map_err(|e| e.to_string())?);
             let tag = TagDefinition {
                 id, source, name: r.name.clone(), spec: r.spec,
                 unit: r.unit.clone(), description: r.description.clone(),
@@ -361,7 +361,9 @@ impl DeviceProfile {
             };
             tag.validate()?;
             Ok(tag)
-        }).collect()
+        }).collect::<Result<Vec<_>, String>>()?;
+        validate_tags(&tags)?;
+        Ok(tags)
     }
 }
 

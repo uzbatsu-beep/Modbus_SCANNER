@@ -3,7 +3,8 @@ import { t } from "@/i18n";
 import { computed, ref, watch } from "vue";
 
 import { api } from "@/api/mod";
-import type { DeviceProfile, ExportFormat } from "@/types/ipc";
+import type { DeviceProfile, ExportFormat, RegisterValue } from "@/types/ipc";
+import { registerKey, selectAdjacent } from "@/types/registerIdentity";
 import { FC_NAMES } from "@/types/ipc";
 import { useDevicesStore } from "@/stores/devices";
 import { useSettingsStore } from "@/stores/settings";
@@ -50,36 +51,19 @@ async function applySuggestedProfile() {
   await devices.refresh();
 }
 
-// Up to two registers can be selected for the interactive decoder.
-const selectedAddresses = ref<number[]>([]);
-watch(
-  () => dev.value?.key,
-  () => {
-    selectedAddresses.value = [];
-  }
-);
-
-function toggleAddress(address: number) {
-  const i = selectedAddresses.value.indexOf(address);
-  if (i >= 0) {
-    selectedAddresses.value.splice(i, 1);
-    return;
-  }
-  if (selectedAddresses.value.length >= 2) selectedAddresses.value.shift();
-  selectedAddresses.value.push(address);
-}
-
-const selectedValues = computed(() => {
-  if (!dev.value) return [];
-  const byAddress = new Map(
-    Object.values(dev.value.registers)
-      .flatMap((r) => (r ? [[r.address, r.raw] as [number, number]] : []))
-  );
-  return selectedAddresses.value
-    .slice()
-    .sort((a, b) => a - b)
-    .map((a) => byAddress.get(a) ?? 0);
+// Selection is FC-aware and only combines adjacent addresses in the same table.
+const selectedKeys = ref<string[]>([]);
+watch(() => dev.value?.key, () => { selectedKeys.value = []; });
+const selectedRegisters = computed(() => {
+  const byKey = new Map(registers.value.map(r => [registerKey(r.function, r.address), r]));
+  return selectedKeys.value.flatMap(key => {
+    const value = byKey.get(key);
+    return value ? [value] : [];
+  }).sort((a,b) => a.address - b.address);
 });
+function toggleRegister(reg: RegisterValue) {
+  selectedKeys.value = selectAdjacent(selectedRegisters.value, reg).map(r => registerKey(r.function, r.address));
+}
 
 const registers = computed(() => {
   if (!dev.value) return [];
@@ -205,8 +189,8 @@ async function exportResults() {
               <td>
                 <input
                   type="checkbox"
-                  :checked="selectedAddresses.includes(r.address)"
-                  @change="toggleAddress(r.address)"
+                  :checked="selectedKeys.includes(registerKey(r.function, r.address))"
+                  @change="toggleRegister(r)"
                 />
               </td>
               <td>{{ r.address.toString(16).padStart(4, "0").toUpperCase() }} ({{ r.address }})</td>
@@ -221,8 +205,7 @@ async function exportResults() {
       <RegisterInspector
         v-if="registers.length"
         :record="dev"
-        :values="selectedValues"
-        :addresses="selectedAddresses.slice().sort((a, b) => a - b)"
+        :selection="selectedRegisters"
       />
 
       <div class="section export">

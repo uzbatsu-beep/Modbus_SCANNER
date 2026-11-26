@@ -281,5 +281,8 @@ mod tests {
         assert_ne!(tags[0].source.start, tags[1].source.start);
         assert_ne!(tags[0].id, tags[1].id);
         assert_eq!(tags[0].id, p.to_tags("device").unwrap()[0].id);
+        let mut reordered = p.clone();
+        reordered.registers.reverse();
+        assert_eq!(tags[0].id, reordered.to_tags("device").unwrap()[1].id);
     }
 }
