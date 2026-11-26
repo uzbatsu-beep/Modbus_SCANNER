@@ -1,204 +1,49 @@
-# Дорожная карта / Roadmap
+# Roadmap / Дорожная карта — Modbus Engineering Workbench
 
-> Обоснование приоритетов и рыночный контекст: [RESEARCH.md](RESEARCH.md) /
-> [RESEARCH.ru.md](RESEARCH.ru.md); исследование платформы v2.0 и выбор
-> библиотек (§9):
-> [RESEARCH_V2.md](RESEARCH_V2.md) / [RESEARCH_V2.ru.md](RESEARCH_V2.ru.md).
-> Детальные задачи и критерии готовности выполненных этапов: [PLAN.md](PLAN.md) /
-> [PLAN.ru.md](PLAN.ru.md).
-> История изменений: [CHANGELOG.md](../CHANGELOG.md).
+**Revision: 2026-11-26.** Product direction approved; individual implementation contracts and future PR numbering are proposed. [VISION](VISION.md) · [BACKLOG R01–R30](BACKLOG.md) · [Previous roadmap](ROADMAP_LEGACY_2026-11-21.md) · [ADR](adr/README.md).
 
-**Дата обновления:** 2026-11-20 · **Публичный релиз:** v1.0.0 · **Кандидат:** v1.0.1 (PR #1–#9 завершены; PR #10 — индивидуальная разработка: сохранение CI/QA и ручного релиза без обязательного reviewer)
+## Baseline
+At inspection on 2026-11-26, main was `7710ef262afb56c1dc18f850a67166ef3cbdfbf1`; PR #10/#11 changes merged, CI and Windows QA successful on that SHA. Published release v1.0.0; manifests v1.0.1; physical bench PASS not established. No release is implied by this strategy PR. See [field validation](FIELD_VALIDATION_v1.0.1.md). Existing discovery, adaptive register scan, FC43, basic decoding, profiles, raw monitor, logs, CLI/API and TLS are foundation, not finished workbench capabilities.
 
----
+## Priorities
+Prototype: correct data, reliable communication, distinctive engineering workflow, useful features, UI and performance. Keep existing baseline controls; advanced security and corporate authorization belong to late stages. CI/bench constraints remain in effect. No need to delay isolated development until a public release; physical acceptance remains necessary before publishing. Do not change versions prematurely.
 
-## 1. Где мы сейчас / Current status
+| Version target | Theme | Scope / Exit gate |
+|---|---|---|
+| v1.0.1 | Stabilization | Existing candidate, automated and physical validation separate |
+| v1.1 | Engineering Core | FC-aware identity, typed monitoring, RTT/quality, connection ownership, extended types; old projects migrate |
+| v1.2 | Device Engineering | Profiles v2, import/editor, address assistant, configurable poll planner, measured performance |
+| v1.3 | Professional Workbench | Independent sessions, project tree, multi-device trends, profiles and comparison |
+| v1.4 | Virtual Engineering Bench | Profile-driven simulator, tests, record/offline replay |
+| v1.5 | Advanced Diagnostics | PCAP import, reports, PLC export, advanced diagnostic views |
+| v2.0 | Engineering Platform | Optional industry models, integrations, late security work, separately approved R&D |
 
-| Этап | Статус | Что дал |
-|------|--------|---------|
-| **v0.1.0** — MVP | ✅ релиз | Протокол RTU/ASCII/TCP/UDP, транспорты, движок сканера, UI, экспорт, документация |
-| **v0.2** — Field Discovery | ✅ в v0.1.1 | Автосвип baud/чётности, адаптивный register scan, классификация IP, FC43, экспорт по устройству, валидация MBAP tx id, выбор ADU, журнал зондов |
-| **v0.3** — Decode & Monitor | ✅ в v0.1.1 | Декодер типов и byte order, именованные теги, проекты с историей, live-мониторинг и тренды, raw TX/RX-журнал, файловые логгеры, diff сканов, RU/EN UI и светлая тема |
-| **v1.0.0** — Ecosystem & Automation | ✅ релиз | CLI, локальный API, профили устройств, Modbus TLS, автоматизация релизов, генерация типов, тесты и CI на 3 ОС; MSI + NSIS в GitHub Release |
-| **v1.0.1** — Reliability | ✅ PR #1 слит; релиз не опубликован | MBAP, RTU timings, CIDR bounds, write confirmation, regression tests |
-| **PR #2** — Field Validation & Diagnostics | ✅ слит в main; CI 4/4 | Loopback TCP-сценарии: обычный ответ, exception, неверный transaction ID, таймаут, фрагментация; проверка FC whitelist; отчёт для стенда |
-| **PR #3** — Windows QA installers | ✅ слит; QA CI прошёл | EXE/MSI тестовые установщики; SHA256/версия/коммит; без публикации Release |
-| **PR #4** — Scanner lifecycle & cancellation | ✅ слит; CI и Windows QA прошли | Независимый сигнал Stop; отмена активных запросов; очистка pending; единый terminal status; тесты отсутствия TX после Stop |
-| **PR #5** — Strict Modbus response validation | ✅ слит; CI и Windows QA прошли | Строгая структура PDU, проверка FC/exception, точные количества бит/регистров, отсутствие ложных успешных чтений, негативные loopback-тесты |
-| **PR #6** — Safe manual I/O & transport stability | ✅ слит; CI/Windows QA успешны | Запись и Raw Frame без повторов, точная проверка FC05/06/10, RTU-over-TCP с задержками ответа, ограничение RX буферов |
-| **PR #7 / #8** — OT Safety Policy | ✅ изменения в main через PR #8; PR #7 дублирует работу | IP/CIDR allowlist, исключения, Quiet Mode 2 req/s, Bearer/Origin защита HTTP+WS API |
-| **PR #9** — Repository Governance & Release Gates | ✅ слит; Rulesets main/v* активированы | Обязательный PR, пять CI-проверок, защита тегов, ручной Release с проверкой стенда |
-| **PR #10** — Solo-maintainer release governance | 🔧 Draft | 0 обязательных reviewer (PR остаётся обязательным), manual Release, физический bench Issue по точному SHA, Windows QA и SHA256 |
-| **v1.1** — Diagnostics | 📋 следующий | FC08/07/0B/0C, FC support map, автоопределение диапазонов, bitfields, XLSX, пассивный fingerprinting, quiet mode |
-| **v1.2** — Workflow | 📋 запланирован | Шаблоны и расписание сканов, отчёты, автосохранение, hotkeys, доступность |
-| **v2.0** — Platform | 💡 исследование + выбор стека | Шлюзы MQTT/OPC UA, web-компаньон, политики IEC 62443, плагины; BACnet отложен (см. §9 RESEARCH_V2) |
+## Implementation sequence (indicative PR numbering)
+| PR | Scope | Backlog | Completion |
+|---|---|---|---|
+| #12 | Strategy and roadmap | all | design docs and existing CI |
+| #13 | Register Identity & Tag Model | R02 | FC/table preserved across storage, import and monitor; migration tests |
+| #14 | Typed Monitoring Engine | R01 | signed values, consistent table/trend/log, quality |
+| #15 | Communication Metrics | R04 | measured RTT, cycle/period, error categories |
+| #16 | Connection & Transport Manager | R20, baseline R03 | serial resource ownership, independent sessions/cancellation |
+| #17 | Extended Data Types | R05 | golden vectors, exact 64-bit IPC, ENUM/bitfields |
+| #18 | Profile Schema v2 | R06 | versioned schema and round-trip migration |
+| #19 | Profile Editor & Spreadsheet Import | R21/R22 | user mapping, preview, validation |
+| #20 | Addressing Assistant | R07 | explicit notation and conversion |
+| #21 | Polling Engine v2 | R09/R26 | single/group/adaptive selection; benchmark evidence |
+| #22 | Multi-device Workspace | R08/R19/R25 | independent sessions, saved workspace, stable tree |
+| #23 | Advanced Trends & Oscilloscope | R01/R08 | multiple series, time cursor, quality gaps |
+| #24 | Industrial Profiles | R14/R24 | provenance, firmware, comparison |
+| #25 | Modbus Simulator | R12 | isolated profile-driven device |
+| #26 | Engineering Test Center | R16 | repeatable assertions on virtual bench |
+| #27 | Session Recorder & Replay | R13 | capture and offline playback |
+| #28 | PCAP Analyzer | R11 | offline authorized import and transaction diagnostics |
+| #29 | Engineering Reports | R10/R29 | reproducible exports and typed PLC mapping |
 
-**Кандидат v1.0.1:** Rulesets `main` и `v*` активированы; для индивидуальной работы PR #10 отменяет обязательное участие второго reviewer, сохраняя PR и пять CI-checks. Для GitHub Release нужны успешные CI/Windows QA **на точном SHA main**, реальная стендовая приёмка (Issue с SHA и `PASS`) и **ручной** запуск Release. Второй пользователь и Environment не требуются. Последний публичный релиз — v1.0.0.
+R15, R23, R27, R28 are follow-up P2 features; R03 expanded, R17 and R&D R18/R30 require separate decisions after core maturity. No blind probing of all FC codes; only known read-only functions/subfunctions, with explicit bounds. Do not use line count as refactoring target.
 
-**Качество:** main после PR #9 прошёл CI (Governance, Frontend и Rust на Windows/Linux/macOS), а Windows QA EXE/MSI выполняется отдельно. QA не заменяет физический стенд. Изменение JSON в PR #10 не меняет действующий Ruleset: администратор должен исправить существующее правило через Settings.
+## Design and acceptance references
+[DATA_MODEL](DATA_MODEL.md), [DATA_TYPES](DATA_TYPES.md), [PROFILE_SCHEMA](PROFILE_SCHEMA.md), [POLLING_ENGINE](POLLING_ENGINE.md), [UX_DESIGN](UX_DESIGN.md), [TEST_STRATEGY](TEST_STRATEGY.md), [BENCHMARKS](BENCHMARKS.md). Each PR should have explicit dependencies, scope, tests and known limitations, not a promised delivery date.
 
----
-
-## 2. Принципы (не меняются от релиза к релизу)
-
-1. **Обнаружение = только чтение** — 0 write-запросов в контуре discovery, проверяется тестом.
-2. **Никакой фоновой активности и телеметрии** — всё запускается пользователем, данные остаются локальными.
-3. **Явная авторизация для OT** — «тихий» режим и предупреждения при сканированииindustrial-сетей.
-4. **Собственный протокольный стек** — контроль таймингов и фрейминга, не заменять на pymodbus-подобную библиотеку.
-5. **Синхронизация контрактов** — Rust IPC-типы и `src/types/ipc.ts` меняются в одном PR.
-6. **Документация EN/RU в том же PR** — иначе фича не считается готовой.
-
----
-
-## 3. v1.0 — Ecosystem & Automation (4–6 недель, приоритет P0)
-
-**Цель:** сделать движок доступным не только из GUI — для автоматизации, интеграций и безопасного подключения к совремённым сетям.
-
-| ID | Задача | Почему (источник) | Оценка | Зависимости |
-|----|--------|-------------------|--------|-------------|
-| E-01 ✅ | Выделить ядро движка от `tauri::AppHandle`: событийный адаптер (`EventSink`) вместо прямого `app.emit` | Готово: `EventSink`, `TrafficSink`, `SampleSink` и `bridge.rs`; ядро не содержит `tauri::` | L | — |
-| E-02 ✅ | Headless CLI: `modbus-scanner scan --port COM3 --auto --output report.json` | Готово: JSON в stdout/файл, serial-auto и TCP/UDP-цели, общий движок через `EventSink` | M | E-01 |
-| E-03 ✅ | Локальный REST + WebSocket API (`127.0.0.1`, без авторизации по умолчанию, только read) | Готово: axum, `/health`, `/api/v1/*`, WS-поток событий, CLI `serve` и Tauri-команды | L | E-01 |
-| E-04 ✅ | Профили устройств: библиотека известных register map, импорт CSV/JSON, автоподстановка декодера по FC43 | Готово: `DeviceProfile`, импорт CSV/JSON, match по identity, вкладка Profiles и подсказка в карточке | M | P3-01, P3-04 |
-| E-05 ✅ | Modbus Security (TLS, порт 802, X.509) — исследование и MVP-поддержка | Готово: `tokio-rustls`, MBAP в TLS, webpki CA, mTLS, CLI `--tls`, UI-чекбокс | L | — |
-| E-06 ✅ | Управляемый Release: ручной запуск после независимой приёмки | PR #9: `release.yml` только workflow_dispatch → CI/QA/ruleset/bench preflight → Windows build → protected environment → GH Release; без автопубликации по тегу | S | — |
-| E-07 ✅ | Генерация `src/types/ipc.ts` из Rust (`ts-rs` или свой генератор схем) | Готово: 67 файлов в `src/types/generated`, фасад, `npm run gen:types`, CI-проверка | M | — |
-| E-08 ✅ | Юнит-тесты стратегий/движка с mock-транспортом; CI-матрица Linux/macOS | Готово: `MockTransport`, тесты конвейера build→transact→verify, CI на Windows/Linux/macOS | M | E-01 |
-
-**Критерии выхода v1.0:** CLI собирает отчёт без GUI; API отвечает на `/health` и `/scan`; профиль применяется к найденному устройству по Vendor/Product; релиз публикуется кнопкой в CI; все IPC-типы генерируются; тесты проходят на 3 ОС.
-
----
-
-## 4. v1.1 — Diagnostics & Engineering (4 недели, приоритет P1)
-
-| ID | Задача | Обоснование |
-|----|--------|-------------|
-| D-01 | FC08 Diagnostics + FC07/0B/0C (только serial, read-only), журнал событий и счётчиков | Производственная диагностика шины |
-| D-02 | FC support map: опрос FC 1–127 в режиме «только чтение», тайминги | Аналог `modbus-probe` без write-тестов |
-| D-03 | Автоопределение непрерывных диапазонов регистров с настраиваемым шагом | Ускорение разбора незнакомой карты |
-| D-04 | Пресеты декодирования: float32/uint32/int32/bitfields, scaling-шаблоны | [RESEARCH](RESEARCH.md): самый частый запрос после обнаружения |
-| D-05 | CSV/XLSX-экспорт с декодированными колонками и единицами | Готовность отчёта для инженера |
-| D-06 | Пассивный fingerprinting (прослушивание трафика) как исследовательский прототип | IEEE 11471618, MOSTO: активное сканирование OT опасно |
-| D-07 | «Тихий» режим с жёстким rate-limit и проверкой авторизации | IEC 62443, NIS2 |
-
-**Критерии выхода v1.1:** 0 write-запросов в контуре discovery (интеграционный
-тест в CI); FC support map для одного устройства строится ≤ 60 с; XLSX открывается
-в Excel/LibreOffice; quiet mode детерминированно ограничивает частоту опроса и
-требует явного подтверждения пользователя.
-
----
-
-## 5. v1.2 — Workflow & Reliability (3–4 недели, приоритет P1)
-
-- Шаблоны сканов и расписание (cron-like) с запуском через CLI/API.
-- Рабочее пространство из нескольких проектов, сравнение проектов между файлами.
-- Генератор отчётов HTML/PDF с графиками трендов и сравнением сканов (diff).
-- Автосохранение результатов после каждого цикла, восстановление после сбоя.
-- Горячие клавиши, доступность (ARIA, контраст светлой темы).
-- Ротация диагностических логов самого приложения.
-
----
-
-## 6. v2.0 — Platform (8–12 недель, приоритет P2)
-
-Исследование завершено, включая выбор библиотек:
-[RESEARCH_V2.md](RESEARCH_V2.md) §9 / [RESEARCH_V2.ru.md](RESEARCH_V2.ru.md) §9.
-Приоритеты ниже основаны на нём.
-
-| ID | Задача | Оценка | Выбор стека (§9) |
-|----|--------|--------|------------------|
-| G-01 | Движок политик: allowlist зон/целей, quiet mode, read-only, подтверждение авторизации | 9/M/High | ядро без новых зависимостей |
-| G-02 | MQTT-паблишер (JSON + Sparkplug B) в локальный брокер, opt-in | 8/L/Medium | `rumqttc` + `prost`, свой кодек Sparkplug |
-| G-03 | OPC UA-сервер: карта тегов как адресное пространство, подпись/шифрование | 8/L/Medium | `async-opcua` (server, зафиксировать версию) |
-| G-04 | Web-компаньон для просмотра проектов и трендов через локальный REST/WS API | 7/M/Low | Vue 3 + существующий API |
-| G-05 | BACnet/IP-коннектор (read-only объекты, COV) — отложен | 6/L/Medium | наблюдение за `bacnet-rs` 0.3.x, feature-флаг |
-| G-06 | Plugin SDK: стабильные трейты + WASM-песочница для декодеров/транспортов | 6/L/High | in-tree трейты → `extism` + `wasmtime` |
-
-Порядок работ: **G-01 → G-04 → G-02 → G-03 → G-06 → G-05** (быстрый выигрыш и
-низкий риск сначала; BACnet — последним из-за незрелости стека 0.3.x).
-Расширение протоколов (DNP3, EtherNet/IP) — только после стабилизации ядра.
-Ключевые ограничения: никакого pass-through, никакой телеметрии, MQTT только по
-opt-in с локальным брокером по умолчанию; WASM вместо сырых dylib.
-
----
-
-## 7. Приоритизация / Scoring
-
-| Критерий | Вес | Вопрос |
-|----------|-----|--------|
-| Impact | 3 | Сколько пользовательских проблем закрывает? |
-| Confidence | 2 | Насколько подтверждён спрос (исследования, issue, аналоги)? |
-| Effort | 1 | Оценка в днях (чем меньше, тем лучше) |
-| Risk | 1 | Насколько велик риск сломать ядро/безопасность? |
-
-Примерные оценки: E-01 (9/10/6/3), E-02 (8/9/3/2), E-03 (7/8/8/3), E-04 (9/9/5/2), E-05 (6/7/12/4), D-06 (5/8/10/4). Порядок в таблицах выше уже учитывает этот score.
-
----
-
-## 8. Метрики качества / KPI
-
-| Метрика | Цель |
-|---------|------|
-| Write-запросов в discovery | 0 (интеграционный тест в CI) |
-| Время поиска при неизвестном baud/parity | ≤ 5 мин |
-| Ложные «устройства» на открытом порту | 0 |
-| Покрытие протокольного слоя тестами | ≥ 80% линий |
-| CI | зелёный на Windows / Linux / macOS |
-| Размер инсталлятора | ≤ 10 МБ |
-| Синхронизация IPC-типов | 100% (генерация) |
-| Документация | EN/RU-пары для каждого раздела |
-
----
-
-## 9. Риски и митигации
-
-| Риск | Митигация |
-|------|-----------|
-| Декоплинг движка от Tauri — большой рефакторинг | Ввести `EventSink` тонким слоем, не переписывать логику |
-| Write-функции в security-режиме | Только opt-in, двойное подтверждение, rollback, дисклеймер |
-| Перегрузка OT-устройств | Quiet mode, request gap, concurrency cap, таймауты 200–800 мс |
-| Дубли адресов на шине → CRC-коллизии | Подозрение на коллизию в UI, point-to-point подсказка |
-| Расхождение Rust/TS типов | Генератор типов в v1.0 |
-| Регрессия локализации | Словарь как единственный источник, проверка ключей в CI |
-
----
-
-## 10. Вне текущего объёма
-
-- Мобильные платформы (Tauri Android/iOS) — desktop-only UI.
-- Режим Modbus-сервера/симулятора.
-- Запись в процессе обнаружения.
-- Интеграция с пакетами программирования ПЛК (WinCC, TIA Portal).
-- Облачная синхронизация проектов и телеметрия пользователей.
-
----
-
-## 11. English summary
-
-**Status:** v1.0.0 released with Windows installers (NSIS + MSI); all six CI
-and release checks are green on Windows/Linux/macOS. Next milestones:
-
-- **v1.1 Diagnostics (next)** — FC08/07/0B/0C, read-only FC support map,
-  contiguous range detection, bitfield decoding presets, CSV/XLSX reports,
-  passive fingerprinting and a quiet OT mode. Exit: zero discovery writes,
-  ≤60 s FC map, deterministic rate limiting.
-- **v1.2 Workflow** — scan templates/schedules, multi-project workspace,
-  HTML/PDF reports, autosave/crash recovery, hotkeys/accessibility.
-- **v2.0 Platform** — Modbus→MQTT/OPC UA gateways, web companion, IEC 62443
-  zone-aware policies, plugin architecture; BACnet deferred. Library choices
-  are backed by live registry data in [RESEARCH_V2.md](RESEARCH_V2.md) §9:
-  `rumqttc` + an own Sparkplug encoder, pinned `async-opcua` in server mode,
-  `extism`/`wasmtime` for WASM plugins, `bacnet-rs` on a watchlist.
-
-Priorities are derived from [RESEARCH.md](RESEARCH.md) (official specs, field
-tools, community and academic sources). Hard rules stay unchanged: read-only
-discovery, explicit user action, no telemetry, own protocol stack, EN/RU docs
-in the same PR. KPI: zero discovery writes, <5 min unknown-baud discovery,
-zero false devices on open ports, ≥80% protocol test coverage, green CI on
-3 OS, installers ≤10 MB.
-
-## 12. Release governance and audit checkpoint — 2026-11-21
-
-**Shipped:** v1.0.0 only. **Candidate:** v1.0.1; PR #10 is open and proposes solo-maintainer release gates. **Active GitHub setting:** `main` still requires one independent review (Ruleset `27728708`), even though the PR #10 JSON template proposes zero. Documentation-only PR #11 is stacked on PR #10; merging it does not constitute equipment acceptance.
-
-**Next P0 gates:** update the *live* Ruleset without weakening the five CI checks, validate the exact merged `main` SHA with Windows QA, collect physical bench PASS evidence, then manually publish only after the release preflight passes. **Do not equate merged code, CI status, QA installer and GitHub Release.** See [dated audit](AUDIT_2026-11-21.md), [release policy](RELEASE_GATES.ru.md) and [navigation](INDEX.md).
+## Русское резюме
+Основной продукт — локальная инженерная среда для АСУ ТП, от обнаружения оборудования до проверенной карты регистров, мониторинга и виртуального стенда. Сначала исправляем потерю Function Code и неверное декодирование, затем измеряем качество связи и строим менеджер соединений. Дальше — типы, профили, импорт, пользовательская настройка опроса, многоприборный интерфейс. Расширенная безопасность, корпоративная авторизация и шлюзы откладываются; базовые ограничения и защита от некорректного обмена сохраняются. Предыдущая редакция сохранена отдельно.
