@@ -14,13 +14,12 @@ use std::sync::Arc;
 use serde::{Deserialize, Serialize};
 use tauri::State;
 
-use crate::modbus::common::{SerialMode,TransportKind};
-use crate::modbus::common::UnitId;
+use crate::modbus::common::SerialMode;
+use crate::communication::{configuration::serial_definition,service::{CommunicationService,ProtocolRequest,framing}};
 use crate::modbus::frame::{request,Pdu};
-use crate::scanner::{engine::{EngineParams,verify_adu},types::ScanParams};
-use crate::transport::connection::{ConnectionManager,ConnectionDefinition,TransportConfig,TransactionRequest,Priority};
+use crate::scanner::{engine::verify_adu,types::SerialPortParams};
+use crate::transport::connection::{ConnectionManager,Priority};
 use crate::state::AppState;
-use crate::transport::serial::SerialPortConfig;
 
 /// Information about one available serial port.
 #[derive(Debug, Clone, Serialize, Deserialize, TS)]
@@ -116,10 +115,9 @@ async fn run_serial_test(manager:Arc<ConnectionManager>,params:TestSerialParams)
     let data_bits=match params.data_bits{5=>DataBitsSerde::Five,6=>DataBitsSerde::Six,7=>DataBitsSerde::Seven,8=>DataBitsSerde::Eight,_=>return Err("invalid data bits".into())};
     let parity=match params.parity.as_str(){"even"=>ParitySerde::Even,"odd"=>ParitySerde::Odd,"none"=>ParitySerde::None,_=>return Err("invalid parity".into())};
     let stop_bits=match params.stop_bits{1=>StopBitsSerde::One,2=>StopBitsSerde::Two,_=>return Err("invalid stop bits".into())};
-    let definition=ConnectionDefinition{id:"serial-diagnostic".into(),name:"Serial diagnostic".into(),
-        transport:TransportConfig::Serial{config:SerialPortConfig{
-            port_name:params.port_name.clone(),baud_rate:params.baud_rate,data_bits,parity,stop_bits,frame_gap:Duration::from_millis(2),
-        },mode:params.mode},policy:Default::default()};
+    let definition=serial_definition("Serial diagnostic",&SerialPortParams{
+        port_name:params.port_name.clone(),baud_rate:params.baud_rate,data_bits,parity,stop_bits,
+    },params.mode);
     definition.resource_key().map_err(|e|e.to_string())?;
     let mut result=TestSerialResult{opened:false,error:None,modbus_responded:false,exception_code:None,rtt_us:None,response_hex:None};
     if !params.test_modbus{
@@ -143,26 +141,22 @@ async fn run_serial_test(manager:Arc<ConnectionManager>,params:TestSerialParams)
     }
     let pdu=match fc{1=>request::read_coils(address,quantity),2=>request::read_discrete_inputs(address,quantity),
         3=>request::read_holding_registers(address,quantity),_=>request::read_input_registers(address,quantity)};
-    let (kind,adu)=match params.mode{
-        SerialMode::Rtu=>(TransportKind::Rtu,crate::modbus::rtu::encode(UnitId(unit),&pdu)),
-        SerialMode::Ascii=>(TransportKind::Ascii,crate::modbus::ascii::encode(UnitId(unit),&pdu)),
-    };
     let lease=match manager.acquire(definition){Ok(l)=>l,Err(e)=>{result.error=Some(e.to_string());return Ok(result);}};
-    let validator_pdu=pdu.clone();
-    let validator=Box::new(move|bytes:&[u8]|{
-        let decoded=verify_adu(kind,unit,fc,bytes,0,EngineParams::from_scan_params(&ScanParams::default()))?;
-        crate::communication::service::verify_payload(&decoded,&validator_pdu)
-    });
-    let outcome=lease.transact(TransactionRequest{adu,response_timeout:Duration::from_millis(u64::from(timeout)),expected_hint:8,priority:Priority::High},Some(validator)).await;
+    let (kind,engine)=framing(lease.definition());
+    let outcome=CommunicationService::execute_leased(&lease,ProtocolRequest{
+        unit,pdu,timeout:Duration::from_millis(u64::from(timeout)),priority:Priority::High,
+    }).await;
     match outcome{
         Err(e)=>result.error=Some(e.to_string()),
-        Ok(o)=>{
+        Ok(protocol)=>{
+            let tx=protocol.transaction_id;
+            let o=protocol.transaction;
             result.opened=o.timing.failure_stage.as_deref()!=Some("connect") && (o.timing.connect_us.is_some()||o.timing.reset_us.is_some()||o.timing.tx_us.is_some());
             if let Some(bytes)=o.rejected_response{result.response_hex=Some(hex::encode(bytes));}
             match o.result{
                 Ok(bytes)=>{
                     result.opened=true;result.response_hex=Some(hex::encode(&bytes));
-                    match verify_adu(kind,unit,fc,&bytes,0,EngineParams::from_scan_params(&ScanParams::default())){
+                    match verify_adu(kind,unit,fc,&bytes,tx,engine){
                         Ok(decoded)=>{
                             result.modbus_responded=true;
                             result.rtt_us=o.timing.rtt_us.map(u128::from);
@@ -183,7 +177,8 @@ async fn run_serial_test(manager:Arc<ConnectionManager>,params:TestSerialParams)
 mod tests{
     use super::*;
     use crate::transport::{Transport,TransportResult,mock::MockTransport};
-    use crate::transport::connection::TransportFactory;
+    use crate::transport::connection::{TransportFactory,TransportConfig};
+    use crate::modbus::common::UnitId;
     use std::sync::atomic::{AtomicUsize,Ordering};
     struct Factory{opens:AtomicUsize,mock:MockTransport}
     #[async_trait::async_trait]

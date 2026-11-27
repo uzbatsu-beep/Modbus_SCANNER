@@ -39,3 +39,5 @@ Windows CI/QA, exact SHA, integrated production tool tests; C.4 full B.2 accepta
 
 ## RU
 Утверждён вариант B. Первый коммит — общий конфигуратор транспорта, подготовка PDU/ADU для арендованного worker и граница отмены после Reset. Это не завершённая интеграция инструментов; C.3.3–C.3.7 и IPC остаются открыты. Физические и виртуальные испытания не выполнены.
+
+Serial Diagnostics structured request now calls execute_leased, and both Serial Scanner and Serial Diagnostics construct identical serial settings through the common constructor. Existing four diagnostic regression functions exercise this production call; IPC shape unchanged. Manual, network Scanner and Monitor still pending.
