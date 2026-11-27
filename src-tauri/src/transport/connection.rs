@@ -195,6 +195,12 @@ impl OperationScope {
         let mut active=self.active.subscribe();
         while *active.borrow_and_update()!=0 {if active.changed().await.is_err(){break;}}
     }
+    // This is the logical TX commitment point, serialized with scope.cancel.
+    // Do not hold a blocking mutex across physical I/O.
+    fn admit_tx(&self,allowed:impl FnOnce()->bool)->bool{
+        let _guard=self.gate.lock();
+        !self.is_cancelled()&&allowed()
+    }
     fn begin(self:&Arc<Self>,started:&AtomicBool)->Option<ActiveScope>{
         let _guard=self.gate.lock();
         if self.is_cancelled(){return None;}
@@ -542,7 +548,8 @@ async fn worker(
             let t=transport.as_mut().ok_or(TransportError::Closed)?;
             // Bound reset/TX as well as RX; the existing response timeout still applies.
             let budget=request.response_timeout.saturating_add(Duration::from_secs(2));
-            match tokio::time::timeout(budget,t.transact_measured(&request.adu,request.response_timeout,request.expected_hint,&mut timing)).await{
+            let mut admit=||scope.admit_tx(|| !*stop.borrow()&&!reply.is_closed());
+            match tokio::time::timeout(budget,t.transact_guarded(&request.adu,request.response_timeout,request.expected_hint,&mut timing,&mut admit)).await{
                 Ok(result)=>{
                     let bytes=result?;
                     if let Some(validate)=validator{
@@ -564,7 +571,11 @@ async fn worker(
                     set_status(&state,ConnectionStatus::Disconnected);
                 }
             }
-            Err(TransportError::Cancelled)=>{},
+            Err(TransportError::Cancelled)=>{
+                if definition.policy.mode==ConnectionMode::OnDemand{
+                    close(&mut transport).await;set_status(&state,ConnectionStatus::Disconnected);
+                }
+            },
             Err(e)=>{
                 close(&mut transport).await;
                 faulted=true;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use crate::modbus::{common::{ModbusError,SerialMode,TransportKind},frame::{Pdu,response::parse_read_values,parse_device_identification}};
 use crate::scanner::{engine::{build_adu,verify_adu,next_transaction_id,EngineParams},types::ScanParams};
-use crate::transport::{TransportError,TransportResult,connection::{ConnectionManager,ConnectionDefinition,TransportConfig,TransactionRequest,TransactionOutcome,Priority,OperationScope}};
+use crate::transport::{TransportError,TransportResult,connection::{ConnectionManager,ConnectionDefinition,TransportConfig,TransactionRequest,TransactionOutcome,Priority,OperationScope,ConnectionLease,ResponseValidator}};
 
 pub struct CommunicationService {
     pub manager: Arc<ConnectionManager>,
@@ -48,7 +48,7 @@ fn validate_request(r:&ProtocolRequest,kind:TransportKind)->TransportResult<()>{
     }
     Ok(())
 }
-fn framing(d:&ConnectionDefinition)->(TransportKind,EngineParams){
+pub(crate) fn framing(d:&ConnectionDefinition)->(TransportKind,EngineParams){
     let mut params=ScanParams::default();
     let kind=match &d.transport{
         TransportConfig::Serial{mode,..}=>if *mode==SerialMode::Rtu{TransportKind::Rtu}else{TransportKind::Ascii},
@@ -59,6 +59,9 @@ fn framing(d:&ConnectionDefinition)->(TransportKind,EngineParams){
 }
 pub(crate) fn verify_payload(pdu:&Pdu,request:&[u8])->TransportResult<()>{
     if let Pdu::Response{function,data}=pdu{
+        if request.first()!=Some(function){return Err(invalid("response function mismatch"));}
+        let min=if *function==0x2b{4}else{5};
+        if request.len()<min{return Err(invalid("request payload too short"));}
         match *function{
             1..=4=>{parse_read_values(*function,data,word(&request[3..5]))?;},
             5|6|15|16=>{if data.as_slice()!=&request[1..5]{return Err(invalid("write echo mismatch"));}},
@@ -85,21 +88,60 @@ impl CommunicationService{
         }
     }
     pub async fn execute(&self,definition:&ConnectionDefinition,request:ProtocolRequest,scope:Arc<OperationScope>)->TransportResult<ProtocolOutcome>{
-        let (kind,engine)=framing(definition);
-        validate_request(&request,kind)?;
+        let prepared=PreparedRequest::new(definition,request)?;
         if scope.is_cancelled(){return Err(TransportError::Cancelled);}
         let id=self.ensure(definition.clone())?;
+        let (request,validator,tx_adu,transaction_id)=prepared.into_parts();
+        let transaction=self.manager.transact_scoped(&id,request,scope,Some(validator)).await?;
+        Ok(ProtocolOutcome{transaction,tx_adu,transaction_id})
+    }
+
+    /// Execute against the actual leased generation, not a caller's stale
+    /// transport settings or ID. Each invocation prepares one attempt.
+    /// Read retry policy and write authorization stay with the tool.
+    pub async fn execute_leased(lease:&ConnectionLease,request:ProtocolRequest)->TransportResult<ProtocolOutcome>{
+        let (request,validator,tx_adu,transaction_id)=PreparedRequest::new(lease.definition(),request)?.into_parts();
+        let transaction=lease.transact(request,Some(validator)).await?;
+        Ok(ProtocolOutcome{transaction,tx_adu,transaction_id})
+    }
+}
+
+/// One validated structured attempt; build and verify use the same framing
+/// and transaction ID. Never automatically retransmit a PDU.
+struct PreparedRequest{
+    request:TransactionRequest,
+    validator:ResponseValidator,
+    tx_adu:Vec<u8>,
+    transaction_id:u16,
+}
+impl PreparedRequest{
+    fn new(definition:&ConnectionDefinition,request:ProtocolRequest)->TransportResult<Self>{
+        definition.resource_key()?;
+        let (kind,engine)=framing(definition);
+        validate_request(&request,kind)?;
         let tx=next_transaction_id();
         let unit=request.unit;
         let pdu=request.pdu;
         let adu=build_adu(kind,unit,&pdu,engine.clone(),tx);
-        let verify=move |bytes:&[u8]|{
+        let expected_hint=match pdu[0]{
+            1..=4=>{
+                let qty=usize::from(word(&pdu[3..5]));
+                let bytes=if pdu[0]<=2{qty.div_ceil(8)}else{qty*2};
+                if kind==TransportKind::Ascii{2*(4+bytes)+3}else{9+bytes}
+            },
+            0x2b=>if kind==TransportKind::Ascii{513}else{260},
+            _=>16,
+        };
+        let validator=Box::new(move |bytes:&[u8]|{
             let decoded=verify_adu(kind,unit,pdu[0],bytes,tx,engine.clone())?;
             verify_payload(&decoded,&pdu)
-        };
-        let transaction=self.manager.transact_scoped(&id,TransactionRequest{adu:adu.clone(),response_timeout:request.timeout,expected_hint:8,priority:request.priority},scope,Some(Box::new(verify))).await?;
-        Ok(ProtocolOutcome{transaction,tx_adu:adu,transaction_id:tx})
+        });
+        Ok(Self{request:TransactionRequest{adu:adu.clone(),response_timeout:request.timeout,expected_hint,priority:request.priority},validator,tx_adu:adu,transaction_id:tx})
     }
+    fn into_parts(self)->(TransactionRequest,ResponseValidator,Vec<u8>,u16){
+        (self.request,self.validator,self.tx_adu,self.transaction_id)
+    }
+
 }
 #[cfg(test)]
 mod tests{
@@ -162,5 +204,93 @@ mod loopback_tests{
         assert_eq!(service.manager.snapshot()[0].reconnect_count,1);
         service.manager.disconnect("loop").await.unwrap();
         tokio::time::timeout(Duration::from_secs(3),server).await.unwrap().unwrap();
+    }
+}
+
+
+#[cfg(test)]
+mod leased_tests{
+    use super::*;
+    use crate::communication::configuration::{network_definition,NetworkProtocol,serial_definition};
+    use crate::transport::{Transport,connection::TransportFactory,mock::MockTransport,serial::{DataBitsSerde,ParitySerde,StopBitsSerde},tls::TlsParams};
+    use crate::scanner::types::SerialPortParams;
+    use tokio::io::{AsyncReadExt,AsyncWriteExt};
+    use std::sync::atomic::{AtomicUsize,Ordering};
+
+    #[tokio::test]
+    async fn leased_service_uses_one_socket_and_distinct_transaction_ids(){
+        let listener=tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port=listener.local_addr().unwrap().port();
+        let server=tokio::spawn(async move{
+            let (mut socket,_)=listener.accept().await.unwrap();
+            let mut last=None;
+            for unit in [1u8,2,3]{
+                let mut req=[0u8;12];socket.read_exact(&mut req).await.unwrap();
+                let tid=u16::from_be_bytes([req[0],req[1]]);
+                assert_ne!(last,Some(tid));last=Some(tid);
+                assert_eq!(&req[6..],&[unit,3,0,0,0,1]);
+                socket.write_all(&[req[0],req[1],0,0,0,5,unit,3,2,0,42]).await.unwrap();
+            }
+        });
+        let service=CommunicationService::default();
+        let d=network_definition("shared","127.0.0.1",Some(port),NetworkProtocol::TcpMbap,None).unwrap();
+        let a=service.manager.acquire(d.clone()).unwrap();
+        let b=service.manager.acquire(d).unwrap();assert_eq!(a.id(),b.id());
+        for (lease,unit,timeout) in [(&a,1,500),(&b,2,1000),(&b,3,1500)]{
+            let out=CommunicationService::execute_leased(lease,ProtocolRequest{unit,pdu:vec![3,0,0,0,1],timeout:Duration::from_millis(timeout),priority:Priority::Normal}).await.unwrap();
+            assert!(out.transaction.result.is_ok());assert!(out.transaction.timing.rtt_us.is_some());
+            assert_eq!(out.transaction.timing.connect_us.is_some(),unit==1);
+            if unit==1{a.stop().await;}
+        }
+        let r=CommunicationService::execute_leased(&a,ProtocolRequest{unit:1,pdu:vec![3,0,0,0,1],timeout:Duration::from_secs(1),priority:Priority::Low}).await;
+        assert!(matches!(r,Err(TransportError::Cancelled)));
+        drop(a);drop(b);service.manager.shutdown().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(3),server).await.unwrap().unwrap();
+    }
+
+    struct Factory{opens:AtomicUsize}
+    #[async_trait::async_trait]
+    impl TransportFactory for Factory{
+        async fn open(&self,_:&TransportConfig)->TransportResult<Box<dyn Transport>>{
+            self.opens.fetch_add(1,Ordering::SeqCst);Ok(Box::new(MockTransport::new(vec![])))
+        }
+    }
+    #[tokio::test]
+    async fn malformed_leased_request_never_opens_transport(){
+        let f=Arc::new(Factory{opens:AtomicUsize::new(0)});
+        let manager=Arc::new(ConnectionManager::with_factory(f.clone()));
+        let lease=manager.acquire(network_definition("bad","127.0.0.1",None,NetworkProtocol::TcpMbap,None).unwrap()).unwrap();
+        for (unit,pdu) in [(0,vec![3,0,0,0,1]),(1,vec![3,0,0,0,0]),(1,vec![16,0,0,0,2,2,0,1]),(1,vec![3]) ]{
+            assert!(CommunicationService::execute_leased(&lease,ProtocolRequest{unit,pdu,timeout:Duration::from_secs(1),priority:Priority::High}).await.is_err());
+        }
+        assert_eq!(f.opens.load(Ordering::SeqCst),0);
+        drop(lease);manager.shutdown().await.unwrap();
+    }
+
+    #[test]
+    fn seven_modes_encode_and_validate_with_the_same_prepared_context(){
+        let port=SerialPortParams{port_name:"COM99".into(),baud_rate:9600,data_bits:DataBitsSerde::Eight,parity:ParitySerde::None,stop_bits:StopBitsSerde::One};
+        let mut defs=vec![serial_definition("rtu",&port,SerialMode::Rtu),serial_definition("ascii",&port,SerialMode::Ascii)];
+        for mode in [NetworkProtocol::TcpMbap,NetworkProtocol::TcpRtu,NetworkProtocol::TcpTls{tls:TlsParams::default()},NetworkProtocol::UdpMbap,NetworkProtocol::UdpRtu]{
+            defs.push(network_definition("test","127.0.0.1",None,mode,None).unwrap());
+        }
+        for d in defs{
+            let prepared=PreparedRequest::new(&d,ProtocolRequest{unit:7,pdu:vec![3,0,0,0,1],timeout:Duration::from_secs(1),priority:Priority::Normal}).unwrap();
+            let tx=prepared.transaction_id;
+            let (kind,engine)=framing(&d);
+            let good=build_adu(kind,7,&[3,2,0,42],engine.clone(),tx);
+            assert!((prepared.validator)(&good).is_ok());
+            let exception=build_adu(kind,7,&[0x83,2],engine.clone(),tx);
+            assert!((prepared.validator)(&exception).is_ok());
+            let wrong=build_adu(kind,8,&[3,2,0,42],engine.clone(),tx);
+            assert!((prepared.validator)(&wrong).is_err());
+            let short=build_adu(kind,7,&[3,4,0,42],engine.clone(),tx);
+            assert!((prepared.validator)(&short).is_err());
+            if matches!(&d.transport,TransportConfig::Tcp(c) if c.framing==crate::transport::tcp::TcpFraming::Mbap)||matches!(&d.transport,TransportConfig::Udp{mbap:true,..}){
+                assert_eq!(&prepared.tx_adu[..2],&tx.to_be_bytes());
+                let stale=build_adu(kind,7,&[3,2,0,42],engine,tx.wrapping_add(1));
+                assert!((prepared.validator)(&stale).is_err());
+            }
+        }
     }
 }

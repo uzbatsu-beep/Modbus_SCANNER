@@ -6,7 +6,7 @@
 use ts_rs::TS;
 use std::time::Duration;
 use std::sync::Arc;
-use crate::transport::connection::{ConnectionManager,ConnectionDefinition,ConnectionPolicy,ConnectionMode,TransportConfig,TransactionRequest,Priority,ResponseValidator};
+use crate::transport::connection::{ConnectionManager,ConnectionDefinition,ConnectionPolicy,ConnectionMode,TransactionRequest,Priority};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -18,8 +18,8 @@ use crate::modbus::decode::{
 use crate::modbus::frame::{
     parse_tcp_response, request, response, validate_response_function, Pdu,
 };
-use crate::transport::serial::SerialPortConfig;
-use crate::transport::tcp::{TcpConfig,TcpFraming};
+use crate::communication::configuration::{network_definition,serial_definition,NetworkProtocol};
+use crate::communication::service::{CommunicationService,ProtocolRequest};
 use crate::transport::TransportError;
 
 use crate::state::AppState;
@@ -171,18 +171,19 @@ fn verify_write_ack(response: &Pdu, request: &[u8]) -> Result<(), ModbusError> {
     Ok(())
 }
 
-fn manual_definition(target:&ManualTarget,timeout:Duration)->Result<ConnectionDefinition,TransportError>{
-    let transport=match target.kind{
+fn manual_definition(target:&ManualTarget)->Result<ConnectionDefinition,TransportError>{
+    let mut definition=match target.kind{
         TransportKind::Rtu|TransportKind::Ascii=>{
-            let sp=target.serial.clone().ok_or_else(||TransportError::Other("serial params required".into()))?;
+            let sp=target.serial.as_ref().ok_or_else(||TransportError::Other("serial params required".into()))?;
             let mode=if target.kind==TransportKind::Ascii{SerialMode::Ascii}else{SerialMode::Rtu};
             if target.serial_mode.is_some_and(|m|m!=mode){return Err(TransportError::Other("serial mode does not match transport kind".into()));}
-            TransportConfig::Serial{config:SerialPortConfig{port_name:sp.port_name,baud_rate:sp.baud_rate,data_bits:sp.data_bits.into(),parity:sp.parity.into(),stop_bits:sp.stop_bits.into(),frame_gap:Duration::from_millis(2)},mode}
+            serial_definition("Manual",sp,mode)
         },
-        TransportKind::Tcp=>TransportConfig::Tcp(TcpConfig{host:target.endpoint.clone(),port:target.port.unwrap_or(502),connect_timeout:timeout,framing:TcpFraming::Mbap,tls:None}),
-        TransportKind::Udp=>TransportConfig::Udp{host:target.endpoint.clone(),port:target.port.unwrap_or(502),mbap:false},
+        TransportKind::Tcp=>network_definition("Manual",&target.endpoint,target.port,NetworkProtocol::TcpMbap,None)?,
+        TransportKind::Udp=>network_definition("Manual",&target.endpoint,target.port,NetworkProtocol::UdpRtu,None)?,
     };
-    Ok(ConnectionDefinition{id:format!("manual:{:032x}",rand::random::<u128>()),name:"Manual".into(),transport,policy:ConnectionPolicy{mode:ConnectionMode::OnDemand,..Default::default()}})
+    definition.id=format!("manual:{:032x}",rand::random::<u128>());
+    Ok(definition)
 }
 
 async fn manual_transact(
@@ -192,45 +193,39 @@ async fn manual_transact(
     expected_hint: usize,
     policy: ManualRetryPolicy,
     structured_pdu:Option<&[u8]>,
-) -> Result<(Vec<u8>, u128), TransportError> {
+) -> Result<(Vec<u8>, Option<u128>, u16), TransportError> {
     let target=req.target();
     let timing=req.timing();
     let timeout=Duration::from_millis(timing.map(|t|t.timeout_ms).unwrap_or(800).clamp(50,10_000) as u64);
     let retries=permitted_retries(timing,policy);
-    let connection=manager.temporary(manual_definition(target,timeout)?)?;
-    let result=async{
+    let mut definition=manual_definition(target)?;
+    if let Some(pdu)=structured_pdu {
+        let lease=manager.acquire(definition)?;
         let mut attempts=0;
-        loop{
-            let validator:Option<ResponseValidator>=structured_pdu.map(|pdu|{
-                let pdu=pdu.to_vec();let kind=target.kind;let unit=target.unit_id;
-                Box::new(move |bytes:&[u8]|{
-                    let fc=pdu[0];
-                    let response=verify_and_parse(kind,unit,fc,bytes)?;
-                    if !response.is_exception(){
-                        match &response{
-                            Pdu::Response{data,..} if matches!(fc,1..=4)=>{
-                                let qty=u16::from_be_bytes([pdu[3],pdu[4]]);
-                                crate::modbus::frame::response::parse_read_values(fc,data,qty)?;
-                            },
-                            _=>verify_write_ack(&response,&pdu)?,
-                        }
-                    }
-                    Ok(())
-                }) as ResponseValidator
-            });
-            let outcome=connection.transact(TransactionRequest{adu:adu.clone(),response_timeout:timeout,expected_hint,priority:Priority::High},validator).await?;
-            let rtt=outcome.timing.rtt_us.map(u128::from).unwrap_or_default();
-            // Preserve invalid complete ADU for the existing ManualResponse parser.
-            if let Some(bytes)=outcome.rejected_response{return Ok((bytes,rtt));}
-            match outcome.result{
-                Ok(bytes)=>return Ok((bytes,rtt)),
-                Err(e)=>{
+        loop {
+            let request=ProtocolRequest{unit:target.unit_id,pdu:pdu.to_vec(),timeout,priority:Priority::High};
+            let out=CommunicationService::execute_leased(&lease,request).await?;
+            let rtt=out.transaction.timing.rtt_us.map(u128::from);
+            let tx=out.transaction_id;
+            // Preserve complete rejected ADUs for the existing ManualResponse
+            // parser, which checks the actual transaction ID and read/write payload.
+            if let Some(bytes)=out.transaction.rejected_response{return Ok((bytes,rtt,tx));}
+            match out.transaction.result{
+                Ok(bytes)=>return Ok((bytes,rtt,tx)),
+                Err(error)=>{
                     attempts+=1;
-                    if attempts>retries||matches!(e,TransportError::Cancelled){return Err(e);}
-                },
+                    if attempts>retries||matches!(error,TransportError::Cancelled){return Err(error);}
+                }
             }
         }
-    }.await;
+    }
+    // Raw retains an operation-local worker and is always single-shot.
+    definition.policy=ConnectionPolicy{mode:ConnectionMode::OnDemand,..Default::default()};
+    let connection=manager.temporary(definition)?;
+    let result=match connection.transact(TransactionRequest{adu,response_timeout:timeout,expected_hint,priority:Priority::High},None).await{
+        Ok(outcome)=>outcome.result.map(|bytes|(bytes,outcome.timing.rtt_us.map(u128::from),0)),
+        Err(error)=>Err(error),
+    };
     let closed=connection.close().await;
     match (result,closed){(Ok(v),Ok(()))=>Ok(v),(Err(e),_)|(_,Err(e))=>Err(e)}
 }
@@ -272,6 +267,7 @@ fn verify_and_parse(
     unit_id: u8,
     expected_fc: u8,
     resp: &[u8],
+    expected_tx:u16,
 ) -> Result<Pdu, ModbusError> {
     let pdu = match kind {
         TransportKind::Rtu => {
@@ -294,8 +290,7 @@ fn verify_and_parse(
             }
             f.pdu
         }
-        // Manual requests use transaction id 0 in build_adu.
-        TransportKind::Tcp => parse_tcp_response(resp, unit_id, 0)?,
+        TransportKind::Tcp => parse_tcp_response(resp, unit_id, expected_tx)?,
         TransportKind::Udp => {
             let f = crate::modbus::rtu::decode(resp)?;
             if f.unit_id.0 != unit_id {
@@ -411,7 +406,7 @@ pub async fn read_registers(
     // not two bytes per bit (which exceeded the manager hint bound).
     let hint=if req.target.kind==TransportKind::Ascii{2*(3+data_bytes)+3}else{9+data_bytes};
     match manual_transact(manager, &req, adu, hint, ManualRetryPolicy::ReadOnly, Some(&pdu)).await {
-        Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
+        Ok((resp, rtt, tx)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp, tx) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
                     Ok(ManualResponse {
@@ -420,7 +415,7 @@ pub async fn read_registers(
                         exception_code: Some(code),
                         values: Vec::new(),
                         response_hex: Some(hex::encode(&resp)),
-                        rtt_us: Some(rtt),
+                        rtt_us: rtt,
                     })
                 } else {
                     unreachable!()
@@ -442,7 +437,7 @@ pub async fn read_registers(
                         exception_code: None,
                         values,
                         response_hex: Some(hex::encode(&resp)),
-                        rtt_us: Some(rtt),
+                        rtt_us: rtt,
                     }),
                     Err(error) => Ok(ManualResponse {
                         ok: false,
@@ -450,7 +445,7 @@ pub async fn read_registers(
                         exception_code: None,
                         values: Vec::new(),
                         response_hex: Some(hex::encode(&resp)),
-                        rtt_us: Some(rtt),
+                        rtt_us: rtt,
                     }),
                 }
             }
@@ -460,7 +455,7 @@ pub async fn read_registers(
                 exception_code: None,
                 values: Vec::new(),
                 response_hex: Some(hex::encode(&resp)),
-                rtt_us: Some(rtt),
+                rtt_us: rtt,
             }),
         },
         Err(e) => Ok(ManualResponse {
@@ -505,7 +500,7 @@ pub async fn write_registers(
     let adu = build_adu(req.target.kind, req.target.unit_id, &pdu);
 
     match manual_transact(manager, &req, adu, 8, ManualRetryPolicy::SingleShot, Some(&pdu)).await {
-        Ok((resp, rtt)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp) {
+        Ok((resp, rtt, tx)) => match verify_and_parse(req.target.kind, req.target.unit_id, expected_fc, &resp, tx) {
             Ok(p) if p.is_exception() => {
                 if let Pdu::Exception { code, .. } = p {
                     Ok(ManualResponse {
@@ -514,7 +509,7 @@ pub async fn write_registers(
                         exception_code: Some(code),
                         values: Vec::new(),
                         response_hex: Some(hex::encode(&resp)),
-                        rtt_us: Some(rtt),
+                        rtt_us: rtt,
                     })
                 } else {
                     unreachable!()
@@ -527,7 +522,7 @@ pub async fn write_registers(
                     exception_code: None,
                     values: req.values.clone(),
                     response_hex: Some(hex::encode(&resp)),
-                    rtt_us: Some(rtt),
+                    rtt_us: rtt,
                 }),
                 Err(error) => Ok(ManualResponse {
                     ok: false,
@@ -535,7 +530,7 @@ pub async fn write_registers(
                     exception_code: None,
                     values: Vec::new(),
                     response_hex: Some(hex::encode(&resp)),
-                    rtt_us: Some(rtt),
+                    rtt_us: rtt,
                 }),
             },
             Err(e) => Ok(ManualResponse {
@@ -544,7 +539,7 @@ pub async fn write_registers(
                 exception_code: None,
                 values: Vec::new(),
                 response_hex: Some(hex::encode(&resp)),
-                rtt_us: Some(rtt),
+                rtt_us: rtt,
             }),
         },
         Err(e) => Ok(ManualResponse {
@@ -586,13 +581,13 @@ pub async fn send_raw_frame(
     }
 
     match manual_transact(manager, &req, adu, 8, ManualRetryPolicy::SingleShot, None).await {
-        Ok((resp, rtt)) => Ok(ManualResponse {
+        Ok((resp, rtt, _)) => Ok(ManualResponse {
             ok: true,
             error: None,
             exception_code: None,
             values: Vec::new(),
             response_hex: Some(hex::encode(&resp)),
-            rtt_us: Some(rtt),
+            rtt_us: rtt,
         }),
         Err(e) => Ok(ManualResponse {
             ok: false,
@@ -618,7 +613,7 @@ mod reliability_tests {
     fn manual_tcp_response_exposes_register_data() {
         // Tx=0, protocol=0, length=5 (UnitId+FC+byteCount+2 data bytes).
         let adu = [0, 0, 0, 0, 0, 5, 1, 3, 2, 0x12, 0x34];
-        let response = verify_and_parse(TransportKind::Tcp, 1, 0x03, &adu).unwrap();
+        let response = verify_and_parse(TransportKind::Tcp, 1, 0x03, &adu, 0).unwrap();
         match response {
             Pdu::Response { function, data } => {
                 assert_eq!(function, 0x03);
@@ -635,12 +630,12 @@ mod reliability_tests {
             let mut broken = good;
             broken[position] = value;
             assert!(
-                verify_and_parse(TransportKind::Tcp, 1, 3, &broken).is_err(),
+                verify_and_parse(TransportKind::Tcp, 1, 3, &broken, 0).is_err(),
                 "manual TCP accepted malformed MBAP/PDU at offset {position}"
             );
         }
         let short_register_data = [0, 0, 0, 0, 0, 4, 1, 3, 2, 0x12];
-        let p = verify_and_parse(TransportKind::Tcp, 1, 3, &short_register_data)
+        let p = verify_and_parse(TransportKind::Tcp, 1, 3, &short_register_data, 0)
             .expect("MBAP alone cannot determine the requested register count");
         match p {
             Pdu::Response { data, .. } => assert!(
@@ -649,7 +644,7 @@ mod reliability_tests {
             _ => panic!("expected raw read response"),
         }
         let wrong_exception = [0, 0, 0, 0, 0, 3, 1, 0x84, 2];
-        assert!(verify_and_parse(TransportKind::Tcp, 1, 3, &wrong_exception).is_err());
+        assert!(verify_and_parse(TransportKind::Tcp, 1, 3, &wrong_exception, 0).is_err());
     }
 
     #[test]
@@ -697,6 +692,19 @@ mod write_safety_tests {
             serial: None,
             serial_mode: None,
         }
+    }
+
+    #[test]
+    fn manual_definition_uses_shared_default_connect_timeout_and_explicit_port() {
+        let definition=manual_definition(&tcp_target(1502)).unwrap();
+        match &definition.transport {
+            crate::transport::connection::TransportConfig::Tcp(config)=>{
+                assert_eq!(config.connect_timeout,Duration::from_millis(2000));
+                assert_eq!(config.port,1502);
+            }
+            _=>panic!("TCP definition expected"),
+        }
+        assert!(definition.resource_key().is_ok());
     }
 
     fn timing(retries: u32) -> ManualTiming {
@@ -790,7 +798,7 @@ mod write_safety_tests {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut bytes = vec![0; sent.len()];
             stream.read_exact(&mut bytes).await.unwrap();
-            assert_eq!(bytes, sent);
+            assert_eq!(&bytes[2..], &sent[2..]);
             // Timeout is ambiguous: the device may have applied the write,
             // even though the response never arrived.
             assert!(
@@ -846,21 +854,24 @@ mod write_safety_tests {
         let frame = build_adu(TransportKind::Tcp, 1, &request::read_holding_registers(0, 1));
         let expected = frame.clone();
         let server = tokio::spawn(async move {
+            let mut previous=None;
             for attempt in 0..2 {
                 let (mut stream, _) = listener.accept().await.unwrap();
                 let mut bytes = vec![0; expected.len()];
                 stream.read_exact(&mut bytes).await.unwrap();
-                assert_eq!(bytes, expected);
+                assert_eq!(&bytes[2..], &expected[2..]);
+                assert_ne!(previous,Some([bytes[0],bytes[1]]));
+                previous=Some([bytes[0],bytes[1]]);
                 if attempt == 1 {
-                    stream.write_all(&[0, 0, 0, 0, 0, 5, 1, 3, 2, 0, 42])
+                    stream.write_all(&[bytes[0], bytes[1], 0, 0, 0, 5, 1, 3, 2, 0, 42])
                         .await.unwrap();
                 }
             }
         });
-        let (response, _) = manual_transact(
+        let (response, _, tx) = manual_transact(
             Arc::new(ConnectionManager::new()), &request, frame, 8, ManualRetryPolicy::ReadOnly, Some(&[3,0,0,0,1]),
         ).await.expect("read-only retry succeeded");
-        let decoded = verify_and_parse(TransportKind::Tcp, 1, 3, &response).unwrap();
+        let decoded = verify_and_parse(TransportKind::Tcp, 1, 3, &response, tx).unwrap();
         match decoded {
             Pdu::Response { data, .. } => {
                 assert_eq!(response::parse_registers(&data).unwrap(), [42]);
@@ -907,10 +918,11 @@ mod managed_manual_tests{
         let manager=Arc::new(ConnectionManager::new());
         let req=WriteRequest{target:ManualTarget{kind:TransportKind::Tcp,endpoint:"127.0.0.1".into(),port:Some(port),unit_id:1,serial:None,serial_mode:None},function:6,start_address:1,values:vec![42],confirm_write:true,timing:Some(ManualTiming{timeout_ms:500,retries:5})};
         let pdu=request::write_single_register(1,42);
-        let (bytes,_)=manual_transact(manager.clone(),&req,build_adu(TransportKind::Tcp,1,&pdu),8,ManualRetryPolicy::SingleShot,Some(&pdu)).await.unwrap();
-        let parsed=verify_and_parse(TransportKind::Tcp,1,6,&bytes).unwrap();
+        let (bytes,_,tx)=manual_transact(manager.clone(),&req,build_adu(TransportKind::Tcp,1,&pdu),8,ManualRetryPolicy::SingleShot,Some(&pdu)).await.unwrap();
+        let parsed=verify_and_parse(TransportKind::Tcp,1,6,&bytes,tx).unwrap();
         assert!(verify_write_ack(&parsed,&pdu).is_err());
-        assert!(manager.snapshot().is_empty());
+        assert_eq!(manager.snapshot().len(),1);
+        manager.shutdown().await.unwrap();
         server.await.unwrap();
     }
     #[tokio::test]
@@ -921,16 +933,17 @@ mod managed_manual_tests{
             let (mut socket,_)=listener.accept().await.unwrap();
             let mut adu=[0u8;12];socket.read_exact(&mut adu).await.unwrap();
             assert_eq!(&adu[10..],[0x07,0xd0]);
-            let mut reply=vec![0,0,0,0,0,253,1,1,250];reply.extend([0xff;250]);
+            let mut reply=vec![adu[0],adu[1],0,0,0,253,1,1,250];reply.extend([0xff;250]);
             socket.write_all(&reply).await.unwrap();
         });
         let manager=Arc::new(ConnectionManager::new());
         let req=ReadRequest{target:ManualTarget{kind:TransportKind::Tcp,endpoint:"127.0.0.1".into(),port:Some(port),unit_id:1,serial:None,serial_mode:None},function:1,start_address:0,quantity:2000,timing:Some(ManualTiming{timeout_ms:500,retries:0})};
         let pdu=request::read_coils(0,2000);
-        let (bytes,_)=manual_transact(manager.clone(),&req,build_adu(TransportKind::Tcp,1,&pdu),259,ManualRetryPolicy::ReadOnly,Some(&pdu)).await.unwrap();
-        let Pdu::Response{data,..}=verify_and_parse(TransportKind::Tcp,1,1,&bytes).unwrap()else{panic!("expected coil data")};
+        let (bytes,_,tx)=manual_transact(manager.clone(),&req,build_adu(TransportKind::Tcp,1,&pdu),259,ManualRetryPolicy::ReadOnly,Some(&pdu)).await.unwrap();
+        let Pdu::Response{data,..}=verify_and_parse(TransportKind::Tcp,1,1,&bytes,tx).unwrap()else{panic!("expected coil data")};
         assert_eq!(response::parse_read_values(1,&data,2000).unwrap(),vec![1;2000]);
-        assert!(manager.snapshot().is_empty());
+        assert_eq!(manager.snapshot().len(),1);
+        manager.shutdown().await.unwrap();
         server.await.unwrap();
     }
 }
