@@ -121,6 +121,40 @@ impl ExclusiveSerialSession {
         Ok(())
     }
 
+    /// Open and close without submitting any ADU. The manager owns the
+    /// exclusive reservation through recovery, open, and close, even if
+    /// the IPC caller drops its future.
+    pub async fn test_open(&mut self, definition: ConnectionDefinition) -> TransportResult<()> {
+        if self.scope.is_cancelled(){return Err(TransportError::Cancelled);}
+        if !matches!(&definition.transport,TransportConfig::Serial{..}) || definition.resource_key()?!=self.resource{
+            return Err(invalid("configuration must target reserved serial resource"));
+        }
+        self.retire_current().await?;
+        let manager=self.manager.clone();
+        let resource=self.resource.clone();
+        let reservation=self.reservation.clone();
+        let scope=self.scope.clone();
+        // Await the bounded task; if the caller is cancelled, the task
+        // still holds the reservation until physical close/drop.
+        self.runtime.spawn(async move{
+            let _reservation=reservation;
+            let started=AtomicBool::new(false);
+            let Some(_active)=scope.begin(&started)else{return Err(TransportError::Cancelled);};
+            if let Some(until)=manager.recovery.deadline(&resource){
+                let mut cancelled=scope.cancelled.subscribe();
+                tokio::select!{biased;
+                    _=async{let _=cancelled.wait_for(|v|*v).await;}=>return Err(TransportError::Cancelled),
+                    _=tokio::time::sleep_until(until)=>{}
+                }
+            }
+            if scope.is_cancelled(){return Err(TransportError::Cancelled);}
+            let mut transport=tokio::time::timeout(MAX_OPEN,manager.factory.open(&definition.transport)).await
+                .map_err(|_|TransportError::Timeout(MAX_OPEN))??;
+            tokio::time::timeout(CLOSE_TIMEOUT,transport.close()).await
+                .map_err(|_|TransportError::Timeout(CLOSE_TIMEOUT))?
+        }).await.map_err(|e|TransportError::Other(e.to_string()))?
+    }
+
     async fn retire_current(&mut self) -> TransportResult<()> {
         if let Some(entry) = self.entry.clone() {
             // Keep entry in self until join completes, so Drop can finish a

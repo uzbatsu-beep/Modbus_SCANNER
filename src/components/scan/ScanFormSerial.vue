@@ -34,6 +34,9 @@ const form = reactive({
 
 const testing = ref(false);
 const testResult = ref<string | null>(null);
+const diagnostic = reactive({ unit_id: 1, function: 3, address: 0, quantity: 1, timeout_ms: 800 });
+const diagnosticMax = computed(() => diagnostic.function <= 2 ? 2000 : 125);
+const validDiagnostic = computed(() => Number.isInteger(diagnostic.unit_id) && diagnostic.unit_id >= 1 && diagnostic.unit_id <= 247 && Number.isInteger(diagnostic.address) && diagnostic.address >= 0 && Number.isInteger(diagnostic.quantity) && diagnostic.quantity >= 1 && diagnostic.quantity <= diagnosticMax.value && diagnostic.address + diagnostic.quantity <= 65536 && Number.isInteger(diagnostic.timeout_ms) && diagnostic.timeout_ms >= 50 && diagnostic.timeout_ms <= 10000);
 
 // P2-01: automatic serial-settings sweep.
 const autoSweep = ref(false);
@@ -62,7 +65,7 @@ const canStart = computed(
     form.unit_from <= form.unit_to &&
     (!autoSweep.value ||
       (selectedBauds.value.length > 0 && selectedParities.value.length > 0)) &&
-    scanner.canStart
+    scanner.canStart && !testing.value
 );
 
 onMounted(() => {
@@ -73,7 +76,7 @@ onMounted(() => {
   });
 });
 
-async function testPort() {
+async function testPort(testModbus: boolean) {
   testing.value = true;
   testResult.value = null;
   try {
@@ -84,17 +87,19 @@ async function testPort() {
       parity: form.parity,
       stop_bits: Number(form.stop_bits === "two" ? 2 : 1),
       mode: form.mode,
-      test_modbus: true,
+      test_modbus: testModbus,
+      ...diagnostic,
     });
-    if (res.error && !res.modbus_responded) {
-      testResult.value = `ошибка: ${res.error}`;
+    if (res.error) {
+      testResult.value = `${t("serialTestError")}: ${res.error}`;
     } else if (res.modbus_responded) {
-      testResult.value = `порт открыт, Modbus ответил (${res.response_hex})`;
+      const label = res.exception_code === null ? t("serialTestReadOk") : `${t("serialTestException")} 0x${res.exception_code.toString(16).padStart(2,"0")}`;
+      testResult.value = `${label} · ${res.rtt_us ?? "—"} µs · ${res.response_hex ?? "—"}`;
     } else {
-      testResult.value = "порт открыт, нет ответа Modbus";
+      testResult.value = res.opened ? t("serialTestOpenOk") : t("serialTestError");
     }
   } catch (e) {
-    testResult.value = `ошибка: ${e}`;
+    testResult.value = `${t("serialTestError")}: ${e}`;
   } finally {
     testing.value = false;
   }
@@ -153,7 +158,7 @@ function start() {
         <option v-if="serial.ports.length === 0" value="">{{ t("noPorts") }}</option>
       </select>
       <button :disabled="testing || scanner.isRunning" @click="serial.refresh()">↻</button>
-      <button :disabled="testing || scanner.isRunning" @click="testPort">{{ t("test") }}</button>
+      <button :disabled="testing || scanner.isRunning || !form.port_name || autoSweep" @click="testPort(false)">{{ t("serialPortTest") }}</button>
       <span v-if="testResult" class="test-result">{{ testResult }}</span>
     </div>
 
@@ -225,6 +230,23 @@ function start() {
         <option value="one">1</option>
         <option value="two">2</option>
       </select>
+    </div>
+
+    <div class="form-row sweep-options">
+      <label>{{ t("serialCommunicationTest") }}</label>
+      <label class="short">Unit ID</label>
+      <input v-model.number="diagnostic.unit_id" type="number" min="1" max="247" :disabled="testing || scanner.isRunning || autoSweep" />
+      <label class="short">FC</label>
+      <select v-model.number="diagnostic.function" :disabled="testing || scanner.isRunning || autoSweep">
+        <option v-for="fc in [1,2,3,4]" :key="fc" :value="fc">FC0{{ fc }}</option>
+      </select>
+      <label class="short">{{ t("address") }}</label>
+      <input v-model.number="diagnostic.address" type="number" min="0" max="65535" :disabled="testing || scanner.isRunning || autoSweep" />
+      <label class="short">{{ t("quantity") }}</label>
+      <input v-model.number="diagnostic.quantity" type="number" min="1" :max="diagnosticMax" :disabled="testing || scanner.isRunning || autoSweep" />
+      <label class="short">{{ t("timeout") }}</label>
+      <input v-model.number="diagnostic.timeout_ms" type="number" min="50" max="10000" :disabled="testing || scanner.isRunning || autoSweep" />
+      <button :disabled="testing || scanner.isRunning || !form.port_name || autoSweep || !validDiagnostic" @click="testPort(true)">{{ t("serialCommunicationTest") }}</button>
     </div>
 
     <div class="form-row">
