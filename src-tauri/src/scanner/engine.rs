@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
 use crate::communication::service::CommunicationService;
-use crate::transport::connection::{SerialLease, ConnectionManager, ConnectionDefinition, ConnectionMode, ConnectionPolicy, TransportConfig, TransactionRequest, Priority, OperationScope, ResponseValidator};
+use crate::transport::connection::{ConnectionLease, ExclusiveSerialSession, ConnectionManager, ConnectionDefinition, ConnectionMode, ConnectionPolicy, TransportConfig, TransactionRequest, Priority, OperationScope, ResponseValidator};
 use tokio::sync::{mpsc, watch, Mutex};
 
 use crate::modbus::common::{ModbusError, SerialMode, TransportKind, UnitId};
@@ -167,9 +167,6 @@ impl QuietGate {
 }
 
 impl EngineParams {
-    async fn before_tx(&self) {
-        if let Some(gate) = &self.quiet_gate { gate.wait().await; }
-    }
     async fn before_ip_connect(&self) {
         if let Some(gate) = &self.connect_gate { gate.wait().await; }
     }
@@ -399,13 +396,13 @@ impl ScannerHandle {
 
         let mut engine_params = EngineParams::from_scan_params(&params);
         engine_params.network=Some(Arc::new(ScanNetwork::new(self.communication.manager.clone())));
-        let serial_port=scan_serial_port(&target).map(str::to_owned);
+        let serial_target=target.clone();
         let strategy = build_strategy(target, params).map_err(|error| {
             self.status_tx.send_replace(ScanStatus::Failed);
             error
         })?;
 
-        let lease=serial_port.as_deref().map(|port|self.communication.manager.lease_serial(port)).transpose().map_err(|e|e.to_string())?;
+        let serial=ManagedSerial::start(&self.communication.manager,&serial_target).await.map_err(|e|e.to_string())?;
         let (tx, rx) = mpsc::channel(8);
         let (cancel_tx, cancel_rx) = watch::channel(false);
         let (pause_tx, pause_rx) = watch::channel(false);
@@ -433,7 +430,7 @@ impl ScannerHandle {
             (pause_tx, pause_rx),
             self.results.clone(),
             self.status_tx.clone(),
-            lease,
+            serial,
         ));
         Ok(())
     }
@@ -465,15 +462,74 @@ impl ScannerHandle {
     }
 }
 
-fn scan_serial_port(target:&ScanTarget)->Option<&str>{
-    match target{
-        ScanTarget::UnitIdRange{port,..}=>Some(&port.port_name),
-        ScanTarget::SerialAuto{sweep}=>Some(&sweep.port_name),
-        ScanTarget::RegisterScan{scan}=>device_serial_port(&scan.target),
-        ScanTarget::SingleDevice{target,..}=>device_serial_port(target),
-        ScanTarget::IpRange{..}=>None,
+/// Fixed serial configuration is shared; only a parameter sweep owns the
+/// port exclusively. Unit IDs never form part of a connection definition.
+enum ManagedSerial {
+    Shared(ConnectionLease),
+    Exclusive(ExclusiveSerialSession),
+}
+fn serial_definition(port:&SerialPortParams,mode:SerialMode)->ConnectionDefinition{
+    ConnectionDefinition{id:"serial-scanner".into(),name:"Serial Scanner".into(),
+        transport:TransportConfig::Serial{config:SerialPortConfig{
+            port_name:port.port_name.clone(),baud_rate:port.baud_rate,
+            data_bits:port.data_bits,parity:port.parity,stop_bits:port.stop_bits,
+            frame_gap:Duration::from_millis(2),
+        },mode},policy:Default::default()}
+}
+fn device_serial_definition(target:&DeviceTarget)->Result<Option<ConnectionDefinition>,TransportError>{
+    let mode=match target.kind{TransportKind::Rtu=>SerialMode::Rtu,TransportKind::Ascii=>SerialMode::Ascii,_=>return Ok(None)};
+    if target.serial_mode.is_some_and(|m|m!=mode){
+        return Err(TransportError::Other("serial framing mismatch".into()));
+    }
+    let port=target.serial.as_ref().ok_or_else(||TransportError::Other("serial params required".into()))?;
+    Ok(Some(serial_definition(port,mode)))
+}
+impl ManagedSerial{
+    async fn start(manager:&Arc<ConnectionManager>,target:&ScanTarget)->Result<Option<Self>,TransportError>{
+        let definition=match target{
+            ScanTarget::UnitIdRange{port,mode,..}=>Some(serial_definition(port,*mode)),
+            ScanTarget::SerialAuto{sweep}=>return Ok(Some(Self::Exclusive(manager.exclusive_serial(&sweep.port_name,"Scanner Auto Discovery").await?))),
+            ScanTarget::RegisterScan{scan}=>device_serial_definition(&scan.target)?,
+            ScanTarget::SingleDevice{target,..}=>device_serial_definition(target)?,
+            ScanTarget::IpRange{..}=>None,
+        };
+        definition.map(|d|manager.acquire(d).map(Self::Shared)).transpose()
+    }
+    async fn finish(self){
+        match self{
+            Self::Shared(lease)=>lease.stop().await,
+            Self::Exclusive(session)=>{if let Err(e)=session.close().await{tracing::warn!("serial session cleanup: {e}");}}
+        }
     }
 }
+async fn serial_transact(serial:&mut Option<ManagedSerial>,engine:&EngineParams,target:&DeviceTarget,pdu:&[u8],adu:&[u8],tx:u16,hint:usize)->Result<Vec<u8>,TransportError>{
+    let serial=serial.as_mut().ok_or_else(||TransportError::Other("missing managed serial session".into()))?;
+    let definition=device_serial_definition(target)?.ok_or_else(||TransportError::Other("serial target required".into()))?;
+    // Hold the scanner quiet gate through transaction completion. This is
+    // conservative even when queue wait or recovery delays the actual TX.
+    let mut quiet=if let Some(gate)=&engine.quiet_gate{
+        let guard=gate.next.lock().await;
+        tokio::time::sleep_until(*guard).await;Some(guard)
+    }else{None};
+    if let ManagedSerial::Exclusive(session)=serial{session.configure(definition).await?;}
+    let request=pdu.to_vec();let unit=target.unit_id;let kind=target.kind;let verification=engine.clone();
+    let validator:ResponseValidator=Box::new(move |bytes|{
+        let decoded=verify_adu(kind,unit,request[0],bytes,tx,verification.clone())?;
+        crate::communication::service::verify_payload(&decoded,&request)
+    });
+    let request=TransactionRequest{adu:adu.to_vec(),response_timeout:engine.timeout,expected_hint:hint,priority:Priority::Low};
+    let result=match serial{
+        ManagedSerial::Shared(lease)=>lease.transact(request,Some(validator)).await,
+        ManagedSerial::Exclusive(session)=>session.transact(request,Some(validator)).await,
+    };
+    if let Some(guard)=quiet.as_mut(){**guard=tokio::time::Instant::now()+Duration::from_millis(500);}
+    let outcome=result?;
+    // Keep complete invalid ADUs for the existing scanner classification and
+    // traffic logger. The worker has already quarantined the failed response.
+    if let Some(raw)=outcome.rejected_response{return Ok(raw);}
+    outcome.result
+}
+
 pub(crate) fn device_serial_port(target:&DeviceTarget)->Option<&str>{
     if matches!(target.kind,TransportKind::Rtu|TransportKind::Ascii){target.serial.as_ref().map(|s|s.port_name.as_str())}else{None}
 }
@@ -491,7 +547,7 @@ async fn wait_for_cancel(receiver: &mut watch::Receiver<bool>) {
     }
 }
 
-/// The engine task. User Stop is a hard boundary: cancel in-flight operations,
+/// The engine task. User Stop cancels waiting operations and finishes active I/O,
 /// discard follow-up reads and publish Stopped only after all tasks have exited.
 async fn engine_task(
     sink: EventSink,
@@ -502,14 +558,12 @@ async fn engine_task(
     (pause_tx, mut pause_rx): (watch::Sender<bool>, watch::Receiver<bool>),
     results: Arc<RwLock<ScanResults>>,
     status_tx: watch::Sender<ScanStatus>,
-    serial_lease: Option<SerialLease>,
+    mut serial_transport: Option<ManagedSerial>,
 ) {
     let total = strategy.total();
     let request_gap = engine.request_gap;
     let ip_concurrency = engine.ip_concurrency;
     let mut done: u64 = 0;
-    let mut serial_transport: Option<SerialTransport> = None;
-    let mut serial_signature: Option<String> = None;
     let mut pending: std::collections::VecDeque<WorkItem> = std::collections::VecDeque::new();
     // A canceled worker returns None; all other outcomes are normal probe results.
     let mut ip_tasks: tokio::task::JoinSet<Option<ProbeOutcome>> = tokio::task::JoinSet::new();
@@ -673,7 +727,7 @@ async fn engine_task(
                         }
                     });
                 } else {
-                    // Cancellation also interrupts serial port setup and blocking RX.
+                    // Cancel the caller; worker cleanup below waits for any active I/O.
                     let outcome = tokio::select! {
                         biased;
                         _ = wait_for_cancel(&mut cancel_rx) => {
@@ -681,9 +735,6 @@ async fn engine_task(
                             break 'main;
                         }
                         value = async {
-                            ensure_serial_settings(
-                                &mut serial_transport, &mut serial_signature, &target,
-                            ).await;
                             execute_probe(
                                 &sink, &mut serial_transport, &target,
                                 function, &pdu, &results, engine.clone(),
@@ -706,11 +757,6 @@ async fn engine_task(
                         break 'main;
                     }
                     value = async {
-                        if let WorkItem::RegisterRead { target, .. } = &item {
-                            ensure_serial_settings(
-                                &mut serial_transport, &mut serial_signature, target,
-                            ).await;
-                        }
                         execute_work(
                             &sink, &item, &mut serial_transport, &results, engine.clone(),
                         ).await
@@ -780,11 +826,6 @@ async fn engine_task(
                     break;
                 }
                 value = async {
-                    if let WorkItem::RegisterRead { target, .. } = &item {
-                        ensure_serial_settings(
-                            &mut serial_transport, &mut serial_signature, target,
-                        ).await;
-                    }
                     execute_work(
                         &sink, &item, &mut serial_transport, &results, engine.clone(),
                     ).await
@@ -814,7 +855,7 @@ async fn engine_task(
         status_tx.send_replace(ScanStatus::Stopping);
         emit_event(&sink, &ScanEvent::StatusChanged {
             status: ScanStatus::Stopping,
-            message: "discarding queued reads and finishing active network transactions".into(),
+            message: "discarding queued reads and finishing active managed transactions".into(),
         });
         pending.clear();
         ip_tasks.abort_all();
@@ -827,10 +868,7 @@ async fn engine_task(
     }
     // Drop transports and close the control receiver before the terminal
     // watch update. A caller may restart immediately after wait_finished().
-    if let Some(mut transport) = serial_transport.take() {
-        let _ = transport.close().await;
-    }
-    drop(serial_lease);
+    if let Some(serial)=serial_transport.take(){serial.finish().await;}
     control_rx.close();
     user_cancelled |= *cancel_rx.borrow();
     {
@@ -1086,7 +1124,7 @@ mod mbap_tests {
 #[allow(unused_assignments)]
 async fn execute_probe(
     sink: &EventSink,
-    serial_transport: &mut Option<SerialTransport>,
+    serial_transport: &mut Option<ManagedSerial>,
     target: &DeviceTarget,
     function: u8,
     pdu: &[u8],
@@ -1099,7 +1137,6 @@ async fn execute_probe(
 
     let mut attempts = 0u32;
     let retries = engine.retries;
-    let timeout = engine.timeout;
     let mut last_err: Option<TransportError> = None;
 
     loop {
@@ -1108,50 +1145,7 @@ async fn execute_probe(
         // speaks Modbus is different from a refused/unreachable endpoint.
         let mut tcp_connected = false;
         let res: Result<Vec<u8>, TransportError> = match target.kind {
-            TransportKind::Rtu | TransportKind::Ascii => {
-                let mode = match target.serial_mode {
-                    Some(SerialMode::Ascii) => SerialMode::Ascii,
-                    _ => SerialMode::Rtu,
-                };
-                if serial_transport.is_none() {
-                    let sp = match target.serial.clone() {
-                        Some(sp) => sp,
-                        None => {
-                            last_err = Some(TransportError::Other("serial params required".into()));
-                            break;
-                        }
-                    };
-                    let cfg = SerialPortConfig {
-                        port_name: sp.port_name,
-                        baud_rate: sp.baud_rate,
-                        data_bits: sp.data_bits.into(),
-                        parity: sp.parity.into(),
-                        stop_bits: sp.stop_bits.into(),
-                        frame_gap: Duration::from_millis(2),
-                    };
-                    match SerialTransport::open(cfg, mode).await {
-                        Ok(t) => *serial_transport = Some(t),
-                        Err(e) => {
-                            let mut r = results.write();
-                            r.stats.transport_errors += 1;
-                            last_err = Some(e);
-                            break;
-                        }
-                    }
-                }
-                let t = serial_transport.as_mut().unwrap();
-                engine.before_tx().await;
-                match t.transact(&adu, timeout, 8).await {
-                    Ok(resp) => Ok(resp),
-                    Err(e) => {
-                        if matches!(e, TransportError::Timeout(_)) {
-                            // after a timeout, reset the RX buffer
-                            let _ = t.reset().await;
-                        }
-                        Err(e)
-                    }
-                }
-            }
+            TransportKind::Rtu | TransportKind::Ascii => serial_transact(serial_transport,&engine,target,pdu,&adu,transaction_id,8).await,
             TransportKind::Tcp | TransportKind::Udp => {
                 let (result,connected)=network_transact(&engine,target,pdu,&adu,transaction_id,8).await;
                 tcp_connected=connected;result
@@ -1346,7 +1340,7 @@ async fn execute_probe(
 async fn execute_work(
     sink: &EventSink,
     item: &WorkItem,
-    serial_transport: &mut Option<SerialTransport>,
+    serial_transport: &mut Option<ManagedSerial>,
     results: &Arc<RwLock<ScanResults>>,
     engine: EngineParams,
 ) -> Option<RegisterReadOutcome> {
@@ -1374,7 +1368,7 @@ async fn execute_work(
 #[allow(clippy::too_many_arguments)]
 async fn execute_register_read(
     sink: &EventSink,
-    serial_transport: &mut Option<SerialTransport>,
+    serial_transport: &mut Option<ManagedSerial>,
     target: &DeviceTarget,
     function: u8,
     start: u16,
@@ -1385,18 +1379,10 @@ async fn execute_register_read(
 ) -> RegisterReadOutcome {
     let transaction_id = next_transaction_id();
     let adu = build_adu(target.kind, target.unit_id, pdu, engine.clone(), transaction_id);
-    let timeout = engine.timeout;
     let started = Instant::now();
 
     let res: Result<Vec<u8>, TransportError> = match target.kind {
-        TransportKind::Rtu | TransportKind::Ascii => {
-            if serial_transport.is_none() {
-                return RegisterReadOutcome::Error;
-            }
-            let t = serial_transport.as_mut().unwrap();
-            engine.before_tx().await;
-            t.transact(&adu, timeout, 3 + (quantity as usize) * 2).await
-        }
+        TransportKind::Rtu | TransportKind::Ascii => serial_transact(serial_transport,&engine,target,pdu,&adu,transaction_id,8).await,
         TransportKind::Tcp | TransportKind::Udp => network_transact(&engine,target,pdu,&adu,transaction_id,8).await.0,
     };
 
@@ -1597,7 +1583,7 @@ fn note_ip_status(
 /// Try FC43/MEI14 identification once a device is known to answer.
 async fn identify_device(
     sink: &EventSink,
-    serial_transport: &mut Option<SerialTransport>,
+    serial_transport: &mut Option<ManagedSerial>,
     target: &DeviceTarget,
     results: &Arc<RwLock<ScanResults>>,
     key: &str,
@@ -1614,13 +1600,9 @@ async fn identify_device(
         engine.clone(),
         transaction_id,
     );
-    let timeout = engine.timeout;
     let started = Instant::now();
     let res: Result<Vec<u8>, TransportError> = match target.kind {
-        TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
-            Some(t) => { engine.before_tx().await; t.transact(&adu, timeout, 32).await },
-            None => return,
-        },
+        TransportKind::Rtu | TransportKind::Ascii => serial_transact(serial_transport,&engine,target,&read_device_identification(1,0),&adu,transaction_id,32).await,
         TransportKind::Tcp | TransportKind::Udp => network_transact(&engine,target,&read_device_identification(1,0),&adu,transaction_id,32).await.0,
     };
     let tx_status = match &res {
@@ -1686,7 +1668,7 @@ pub(crate) fn serial_signature(target: &DeviceTarget) -> Option<String> {
     ))
 }
 
-/// Reopen the shared serial port when the sweep moves to different settings.
+/// Legacy monitor-only helper; scanner now uses managed serial sessions.
 pub(crate) async fn ensure_serial_settings(
     transport: &mut Option<SerialTransport>,
     signature: &mut Option<String>,

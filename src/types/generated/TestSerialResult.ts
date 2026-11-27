@@ -9,6 +9,10 @@ export type TestSerialResult = { opened: boolean, error: string | null,
  */
 modbus_responded: boolean, 
 /**
+ * Valid exception confirms communication, not successful reading.
+ */
+exception_code: number | null, 
+/**
  * Response time in microseconds (probe roundtrip).
  */
 rtt_us: number | null, 

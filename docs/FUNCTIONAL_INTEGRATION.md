@@ -38,3 +38,5 @@ Probe result storage and traffic classification also use the same quantity-aware
 PR #20 merged; main CI and Windows QA passed. Approved variant B, TCP idle 60 s, serial idle 30 s, 32 unused cached workers, resource-level recovery, Monitor transport migration without changing its polling scheduler, exclusive discovery rejects busy ports, C.1–C.4 and no merge before review. See [SHARED_CONNECTION_RUNTIME](SHARED_CONNECTION_RUNTIME.md). C.1 is an isolated lifecycle foundation; existing production callers still use previous entry paths. C.2–C.4 are pending.
 
 PR #21 merged C.1 only. PR #22 C.2 [Serial Migration](SERIAL_MIGRATION.md) approved and in progress. C.3/C.4 follow in separate PRs. No production tool migration asserted for C.2.1.
+
+PR #24: fixed serial Scanner/FC43 on shared lease and serial sweep on ExclusiveSerialSession, regression fixtures added. C.2.4/C.2.5 and Monitor/Manual migration pending. Windows-first CI.
