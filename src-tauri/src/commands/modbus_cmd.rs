@@ -6,7 +6,7 @@
 use ts_rs::TS;
 use std::time::Duration;
 use std::sync::Arc;
-use crate::transport::connection::{ConnectionManager,ConnectionDefinition,ConnectionPolicy,ConnectionMode,TransportConfig,TransactionRequest,Priority,ResponseValidator};
+use crate::transport::connection::{ConnectionManager,ConnectionDefinition,ConnectionPolicy,ConnectionMode,TransactionRequest,Priority,ResponseValidator};
 
 use serde::{Deserialize, Serialize};
 use tauri::State;
@@ -18,8 +18,7 @@ use crate::modbus::decode::{
 use crate::modbus::frame::{
     parse_tcp_response, request, response, validate_response_function, Pdu,
 };
-use crate::transport::serial::SerialPortConfig;
-use crate::transport::tcp::{TcpConfig,TcpFraming};
+use crate::communication::configuration::{network_definition,serial_definition,NetworkProtocol};
 use crate::transport::TransportError;
 
 use crate::state::AppState;
@@ -171,18 +170,20 @@ fn verify_write_ack(response: &Pdu, request: &[u8]) -> Result<(), ModbusError> {
     Ok(())
 }
 
-fn manual_definition(target:&ManualTarget,timeout:Duration)->Result<ConnectionDefinition,TransportError>{
-    let transport=match target.kind{
+fn manual_definition(target:&ManualTarget)->Result<ConnectionDefinition,TransportError>{
+    let mut definition=match target.kind{
         TransportKind::Rtu|TransportKind::Ascii=>{
-            let sp=target.serial.clone().ok_or_else(||TransportError::Other("serial params required".into()))?;
+            let sp=target.serial.as_ref().ok_or_else(||TransportError::Other("serial params required".into()))?;
             let mode=if target.kind==TransportKind::Ascii{SerialMode::Ascii}else{SerialMode::Rtu};
             if target.serial_mode.is_some_and(|m|m!=mode){return Err(TransportError::Other("serial mode does not match transport kind".into()));}
-            TransportConfig::Serial{config:SerialPortConfig{port_name:sp.port_name,baud_rate:sp.baud_rate,data_bits:sp.data_bits.into(),parity:sp.parity.into(),stop_bits:sp.stop_bits.into(),frame_gap:Duration::from_millis(2)},mode}
+            serial_definition("Manual",sp,mode)
         },
-        TransportKind::Tcp=>TransportConfig::Tcp(TcpConfig{host:target.endpoint.clone(),port:target.port.unwrap_or(502),connect_timeout:timeout,framing:TcpFraming::Mbap,tls:None}),
-        TransportKind::Udp=>TransportConfig::Udp{host:target.endpoint.clone(),port:target.port.unwrap_or(502),mbap:false},
+        TransportKind::Tcp=>network_definition("Manual",&target.endpoint,target.port,NetworkProtocol::TcpMbap,None)?,
+        TransportKind::Udp=>network_definition("Manual",&target.endpoint,target.port,NetworkProtocol::UdpRtu,None)?,
     };
-    Ok(ConnectionDefinition{id:format!("manual:{:032x}",rand::random::<u128>()),name:"Manual".into(),transport,policy:ConnectionPolicy{mode:ConnectionMode::OnDemand,..Default::default()}})
+    definition.id=format!("manual:{:032x}",rand::random::<u128>());
+    definition.policy=ConnectionPolicy{mode:ConnectionMode::OnDemand,..Default::default()};
+    Ok(definition)
 }
 
 async fn manual_transact(
@@ -197,7 +198,7 @@ async fn manual_transact(
     let timing=req.timing();
     let timeout=Duration::from_millis(timing.map(|t|t.timeout_ms).unwrap_or(800).clamp(50,10_000) as u64);
     let retries=permitted_retries(timing,policy);
-    let connection=manager.temporary(manual_definition(target,timeout)?)?;
+    let connection=manager.temporary(manual_definition(target)?)?;
     let result=async{
         let mut attempts=0;
         loop{
@@ -697,6 +698,19 @@ mod write_safety_tests {
             serial: None,
             serial_mode: None,
         }
+    }
+
+    #[test]
+    fn manual_definition_uses_shared_default_connect_timeout_and_explicit_port() {
+        let definition=manual_definition(&tcp_target(1502)).unwrap();
+        match &definition.transport {
+            crate::transport::connection::TransportConfig::Tcp(config)=>{
+                assert_eq!(config.connect_timeout,Duration::from_millis(2000));
+                assert_eq!(config.port,1502);
+            }
+            _=>panic!("TCP definition expected"),
+        }
+        assert!(definition.resource_key().is_ok());
     }
 
     fn timing(retries: u32) -> ManualTiming {

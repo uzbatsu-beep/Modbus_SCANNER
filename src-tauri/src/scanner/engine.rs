@@ -114,7 +114,7 @@ impl Drop for ScanNetwork {
 async fn network_transact(engine:&EngineParams,target:&DeviceTarget,pdu:&[u8],adu:&[u8],tx:u16,hint:usize)->(Result<Vec<u8>,TransportError>,bool) {
     let Some(runtime)=engine.network.as_ref() else{return (Err(TransportError::Other("missing scan network runtime".into())),false);};
     let transport=match target.kind{
-        TransportKind::Tcp=>TransportConfig::Tcp(TcpConfig{host:target.endpoint.clone(),port:target.port.unwrap_or(502),connect_timeout:engine.timeout,framing:engine.tcp_framing,tls:engine.tls.clone()}),
+        TransportKind::Tcp=>TransportConfig::Tcp(TcpConfig{host:target.endpoint.clone(),port:target.port.unwrap_or(502),connect_timeout:Duration::from_millis(u64::from(crate::communication::configuration::DEFAULT_TCP_CONNECT_TIMEOUT_MS)),framing:engine.tcp_framing,tls:engine.tls.clone()}),
         TransportKind::Udp=>TransportConfig::Udp{host:target.endpoint.clone(),port:target.port.unwrap_or(502),mbap:engine.udp_mbap},
         _=>return (Err(TransportError::Other("network target required".into())),false),
     };

@@ -243,7 +243,7 @@ async fn monitor_task(
                     let connected = TcpTransport::connect(TcpConfig {
                     host: watch.target.endpoint.clone(),
                     port: watch.target.port.unwrap_or(502),
-                    connect_timeout: timeout,
+                    connect_timeout: Duration::from_millis(u64::from(crate::communication::configuration::DEFAULT_TCP_CONNECT_TIMEOUT_MS)),
                     framing: engine.tcp_framing,
                 tls: engine.tls.clone(),
                 })
