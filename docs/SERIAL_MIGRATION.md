@@ -51,3 +51,5 @@ ScannerHandle acquires compatible fixed serial ConnectionLease at start or Exclu
 
 ### C.2.4 checkpoint
 Port Test uses a manager-owned exclusive reservation, waits for resource recovery, opens/closes through the transport factory without TX. Modbus Test uses a compatible shared lease, validates FC01–FC04/unit/span/timeout before I/O, reports valid exception separately and measured RTT. Default 1/FC03/0/1/800 ms. UI RU/EN exposes both operations and settings; generated result binding updated, drift check pending. Four diagnostic regression functions cover no-TX, selected read and valid exception, validation before open, wrong quantity/CRC/LRC. Production acceptance and CI pending. A physical Port Test intentionally refuses active/pinned owners; Modbus Test can borrow a compatible worker.
+
+PR #24 merged; 165 Windows Rust tests and 15 smoke tests passed, Windows QA passed. C.2.5 is not fully accepted. PR #25 foundation introduces managed pre-TX admission after reset and a regression; CI pending. Scanner timing, register-map/quiet/cleanup, virtual serial remain in C.3/C.4.

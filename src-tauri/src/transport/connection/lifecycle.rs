@@ -155,6 +155,7 @@ pub struct ConnectionLease{
 }
 impl ConnectionLease{
     pub fn id(&self)->&str{&self.entry.definition.id}
+    pub fn is_cancelled(&self)->bool{self.scope.is_cancelled()}
     pub fn definition(&self)->&ConnectionDefinition{&self.entry.definition}
     pub async fn transact(&self,request:TransactionRequest,validator:Option<ResponseValidator>)->TransportResult<TransactionOutcome>{
         self.manager.transact_entry(self.entry.clone(),request,self.scope.clone(),validator).await

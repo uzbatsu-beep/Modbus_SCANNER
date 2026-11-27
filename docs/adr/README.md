@@ -20,3 +20,5 @@ ADR-007 — Prototype schema break (maintainer-approved 2026-11-26): no legacy m
 - [ADR-009 — Shared Connection Runtime](009-shared-connection-runtime.md): approved B.2.3 lifecycle, resource recovery and staged migration.
 
 - [ADR-010 — Managed Serial Runtime](010-managed-serial-runtime.md): exclusive session and staged serial migration.
+
+- [ADR-011 — Unified Communication Service](011-unified-communication-service.md): approved C.3 configuration, execution and lifecycle contract.

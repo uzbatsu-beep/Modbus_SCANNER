@@ -284,3 +284,52 @@ async fn temporary_worker_releases_resource_after_close_and_drop(){
     }).await.unwrap();
     m.temporary(definition("three",502)).unwrap().close().await.unwrap();
 }
+
+
+struct ResetGateFactory{entered:Arc<Semaphore>,release:Arc<Semaphore>,sent:Arc<AtomicUsize>}
+struct ResetGateTransport{entered:Arc<Semaphore>,release:Arc<Semaphore>,sent:Arc<AtomicUsize>}
+#[async_trait]
+impl TransportFactory for ResetGateFactory{
+    async fn open(&self,_:&TransportConfig)->TransportResult<Box<dyn Transport>>{
+        Ok(Box::new(ResetGateTransport{entered:self.entered.clone(),release:self.release.clone(),sent:self.sent.clone()}))
+    }
+}
+#[async_trait]
+impl Transport for ResetGateTransport{
+    fn name(&self)->String{"reset gate".into()}
+    async fn reset(&mut self)->TransportResult<()>{
+        self.entered.add_permits(1);
+        self.release.acquire().await.map_err(|_|TransportError::Cancelled)?.forget();
+        Ok(())
+    }
+    async fn close(&mut self)->TransportResult<()>{Ok(())}
+    async fn send_raw(&mut self,_:&[u8])->TransportResult<()>{self.sent.fetch_add(1,Ordering::SeqCst);Ok(())}
+    async fn recv_raw(&mut self,_:usize)->TransportResult<Vec<u8>>{Ok(vec![42])}
+}
+
+#[tokio::test]
+async fn scope_stop_during_reset_prevents_tx_and_preserves_other_lease(){
+    let entered=Arc::new(Semaphore::new(0));let release=Arc::new(Semaphore::new(0));let sent=Arc::new(AtomicUsize::new(0));
+    let m=Arc::new(ConnectionManager::with_factory(Arc::new(ResetGateFactory{entered:entered.clone(),release:release.clone(),sent:sent.clone()})));
+    let a=Arc::new(m.acquire(definition("a",502)).unwrap());
+    let b=m.acquire(definition("b",502)).unwrap();
+    let active={let a=a.clone();tokio::spawn(async move{a.transact(request(Priority::Low),None).await})};
+    tokio::time::timeout(Duration::from_secs(2),entered.acquire()).await.unwrap().unwrap().forget();
+    // Wait for the sticky cancel signal before releasing reset.
+    let stopping={let a=a.clone();tokio::spawn(async move{a.stop().await})};
+    // A queued probe on the cancelled lease must return Cancelled; retrying
+    // submission would race Stop, so observe the scope through a dedicated helper.
+    tokio::time::timeout(Duration::from_secs(2),async{
+        while !a.is_cancelled(){tokio::task::yield_now().await;}
+    }).await.unwrap();
+    release.add_permits(1);
+    let out=active.await.unwrap().unwrap();
+    assert!(matches!(out.result,Err(TransportError::Cancelled)));
+    assert_eq!(out.timing.failure_stage.as_deref(),Some("pre_tx_cancelled"));
+    assert!(out.timing.tx_us.is_none());assert_eq!(sent.load(Ordering::SeqCst),0);
+    stopping.await.unwrap();
+    release.add_permits(1);
+    assert_eq!(b.transact(request(Priority::High),None).await.unwrap().result.unwrap(),vec![42]);
+    assert_eq!(sent.load(Ordering::SeqCst),1);
+    drop(a);drop(b);m.shutdown().await.unwrap();
+}

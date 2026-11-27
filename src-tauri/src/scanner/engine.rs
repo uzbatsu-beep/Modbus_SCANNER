@@ -23,7 +23,7 @@ use crate::modbus::frame::{
     parse_device_identification, parse_tcp_response, read_device_identification,
     validate_response_function, Pdu,
 };
-use crate::transport::serial::{SerialPortConfig, SerialTransport};
+use crate::transport::serial::SerialTransport;
 use crate::transport::tcp::{TcpConfig, TcpFraming};
 use crate::transport::tls::TlsParams;
 use crate::transport::{Transport, TransportError};
@@ -469,12 +469,7 @@ enum ManagedSerial {
     Exclusive(ExclusiveSerialSession),
 }
 fn serial_definition(port:&SerialPortParams,mode:SerialMode)->ConnectionDefinition{
-    ConnectionDefinition{id:"serial-scanner".into(),name:"Serial Scanner".into(),
-        transport:TransportConfig::Serial{config:SerialPortConfig{
-            port_name:port.port_name.clone(),baud_rate:port.baud_rate,
-            data_bits:port.data_bits,parity:port.parity,stop_bits:port.stop_bits,
-            frame_gap:Duration::from_millis(2),
-        },mode},policy:Default::default()}
+    crate::communication::configuration::serial_definition("Serial Scanner",port,mode)
 }
 fn device_serial_definition(target:&DeviceTarget)->Result<Option<ConnectionDefinition>,TransportError>{
     let mode=match target.kind{TransportKind::Rtu=>SerialMode::Rtu,TransportKind::Ascii=>SerialMode::Ascii,_=>return Ok(None)};

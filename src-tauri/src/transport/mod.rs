@@ -81,10 +81,20 @@ pub trait Transport: Send {
         &mut self, adu: &[u8], response_timeout: Duration, expected_hint: usize,
         timing: &mut TransactionTiming,
     ) -> TransportResult<Vec<u8>> {
+        self.transact_guarded(adu,response_timeout,expected_hint,timing,&mut || true).await
+    }
+
+    /// The worker supplies a synchronous admission gate after reset and before
+    /// TX. Once admitted, the bounded TX/RX sequence finishes without cancellation.
+    async fn transact_guarded(
+        &mut self, adu:&[u8], response_timeout:Duration, expected_hint:usize,
+        timing:&mut TransactionTiming, admit_tx:&mut (dyn FnMut()->bool+Send),
+    )->TransportResult<Vec<u8>>{
         let start = Instant::now();
         let reset = self.reset().await;
         timing.reset_us = Some(micros(start));
         if let Err(e) = reset { timing.failure_stage = Some("reset".into()); return Err(e); }
+        if !admit_tx(){timing.failure_stage=Some("pre_tx_cancelled".into());return Err(TransportError::Cancelled);}
         let tx = Instant::now();
         let sent = self.send_raw(adu).await;
         timing.tx_us = Some(micros(tx));

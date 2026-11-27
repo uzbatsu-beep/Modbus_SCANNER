@@ -3,7 +3,7 @@
 **Revision: 2026-11-26.** Product direction and UI variant B approved; future implementation contracts remain subject to review. [VISION](VISION.md) · [BACKLOG R01–R30](BACKLOG.md) · [Previous roadmap](ROADMAP_LEGACY_2026-11-21.md) · [ADR](adr/README.md).
 
 ## Baseline
-Baseline at PR #24 start: main `3b6d96e1baa081ede540ce012c4669e0839747c6`, PR #12–#23 merged; Windows-first main CI and Windows QA passed. C.2.1 merged; C.2.2–C.2.5 in progress. Published v1.0.0 / manifests v1.0.1, physical acceptance not established. FC-aware tags, typed monitor and communication metrics are implemented. See [field validation](FIELD_VALIDATION_v1.0.1.md).
+Baseline at PR #25 start: main `47016ed905149b6e98336a016707cd72a33c31fd`, PR #12–#24 merged; Windows-first main CI and Windows QA passed. C.2.2–C.2.4 merged, C.2.5 automated checkpoint passed; remaining SR acceptance carried into C.3/C.4. Published v1.0.0 / manifests v1.0.1, physical acceptance not established. FC-aware tags, typed monitor and communication metrics are implemented. See [field validation](FIELD_VALIDATION_v1.0.1.md).
 
 ## Priorities
 Prototype: correct data, reliable communication, distinctive engineering workflow, useful features, UI and performance. Keep existing baseline controls; advanced security and corporate authorization belong to late stages. CI/bench constraints remain in effect. No need to delay isolated development until a public release; physical acceptance remains necessary before publishing. Do not change versions prematurely.
@@ -33,8 +33,8 @@ Prototype: correct data, reliable communication, distinctive engineering workflo
 | #21 | 17.B.2.3 C.1 Shared Connection Lifecycle | R20/R03 | merged, shared lease and recovery foundation |
 | #22 | C.2.1 Exclusive Serial Session | R20/R03 | merged, foundation and seven regressions |
 | #23 | Windows-first CI policy | R20 | merged; routine Windows validation, final full-platform gate |
-| #24 | C.2.2–C.2.5 Serial Migration | R20/R03 | Scanner/FC43/sweep/diagnostics and SR acceptance; [contract](SERIAL_MIGRATION.md) |
-| #25 | C.3 Protocol & Cross-Tool Integration | R20/R03 | persistent Scanner/Manual/Monitor transport, framing/TLS and shutdown |
+| #24 | C.2.2–C.2.5 Serial Migration | R20/R03 | merged; automated checkpoint only, remaining SR acceptance carried forward |
+| #25 | C.3 Protocol & Cross-Tool Integration | R20/R03 | approved C.3.1–C.3.7, [contract](CROSS_TOOL_INTEGRATION.md); foundation checkpoint in progress |
 | #26 | C.4 B.2 Integration Acceptance | R20/R03 | full B.2 regression and acceptance before B.3 |
 | #27 | 17.B.3 Independent Monitoring | R20/R01 | independent per-connection monitor loops and scoped stop |
 | #28 | 17.B.4 Diagnostics & Regression | R04/R20 | queue metrics, Logger and integration acceptance |
