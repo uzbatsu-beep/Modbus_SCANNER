@@ -6,29 +6,41 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use parking_lot::RwLock;
-use crate::communication::service::CommunicationService;
-use crate::transport::connection::SerialLease;
+use crate::communication::service::{CommunicationService,ProtocolRequest,framing};
+use crate::communication::configuration::{network_definition,serial_definition,NetworkProtocol};
+use crate::transport::connection::{ConnectionLease,ConnectionDefinition,Priority};
 use tokio::sync::{mpsc, Mutex};
 
 use crate::modbus::common::TransportKind;
 use crate::modbus::frame::request;
-use crate::transport::serial::SerialTransport;
-use crate::transport::tcp::TcpConfig;
-use crate::transport::tcp::TcpTransport;
-use crate::transport::udp::UdpTransport;
-use crate::transport::{Transport, TransportError};
+use crate::transport::TransportError;
 use crate::transport::timing::{micros, TransactionTiming};
 use super::metrics::Metrics;
 use crate::modbus::frame::Pdu;
 use super::measurement::{Channel, DEFAULT_HISTORY, MAX_TOTAL_SAMPLES, UI_BATCH_MS};
 
-use super::engine::{
-    build_adu, ensure_serial_settings, next_transaction_id, verify_adu, EngineParams,
-};
+use super::engine::verify_adu;
 use super::EventSink;
 use super::types::{
-    now_ms, DataQuality, MonitorUpdate, MonitorValueState, MonitorWatch, ScanParams, register_width,
+    now_ms, DataQuality, DeviceTarget, MonitorUpdate, MonitorValueState, MonitorWatch, register_width,
 };
+
+// Legacy DeviceTarget defaults remain until C.3.1 IPC propagation is complete.
+fn monitor_definition(target:&DeviceTarget)->Result<ConnectionDefinition,TransportError>{
+    match target.kind {
+        TransportKind::Rtu|TransportKind::Ascii=>{
+            use crate::modbus::common::SerialMode;
+            let mode=if target.kind==TransportKind::Ascii{SerialMode::Ascii}else{SerialMode::Rtu};
+            if target.serial_mode.is_some_and(|value|value!=mode){
+                return Err(TransportError::Other("serial framing mismatch".into()));
+            }
+            let port=target.serial.as_ref().ok_or_else(||TransportError::Other("serial params required".into()))?;
+            Ok(serial_definition("Monitor",port,mode))
+        },
+        TransportKind::Tcp=>network_definition("Monitor",&target.endpoint,target.port,NetworkProtocol::TcpMbap,None),
+        TransportKind::Udp=>network_definition("Monitor",&target.endpoint,target.port,NetworkProtocol::UdpRtu,None),
+    }
+}
 
 /// Control messages for the monitor task.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,7 +119,13 @@ impl MonitorHandle {
                     return Err("monitor already running".into());
                 }
             }
-            let lease=self.communication.manager.lease_serials(watches.iter().filter_map(|w|super::engine::device_serial_port(&w.target))).map_err(|e|e.to_string())?;
+            // Preflight before publishing history or spawning the scheduler.
+            // Acquiring a lease registers a lazy worker; no device I/O occurs here.
+            let mut leases=Vec::with_capacity(watches.len());
+            for watch in &watches {
+                let definition=monitor_definition(&watch.target).map_err(|e|e.to_string())?;
+                leases.push(self.communication.manager.acquire(definition).map_err(|e|e.to_string())?);
+            }
             let (tx, rx) = mpsc::channel(4);
             *guard = Some(tx);
 
@@ -118,12 +136,7 @@ impl MonitorHandle {
             }
             *self.values.write() = values;
 
-            let mut defaults = ScanParams::default();
-            defaults.timeout_ms = interval_ms.min(1000);
-            defaults.retries = 0;
-            let engine = EngineParams::from_scan_params(&defaults);
-
-            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), engine, session_id.clone(), lease));
+            tokio::spawn(monitor_task(sink, watches, interval_ms, rx, self.values.clone(), session_id.clone(), leases));
             Ok(session_id)
         }
     }
@@ -146,12 +159,9 @@ async fn monitor_task(
     interval_ms: u32,
     mut control_rx: mpsc::Receiver<ControlMsg>,
     values: Arc<RwLock<HashMap<String, Channel>>>,
-    engine: EngineParams,
     session_id: String,
-    serial_lease: SerialLease,
+    leases: Vec<ConnectionLease>,
 ) {
-    let mut serial_transport: Option<SerialTransport> = None;
-    let mut serial_signature: Option<String> = None;
     let interval = Duration::from_millis(interval_ms as u64);
 
     let started = Instant::now();
@@ -182,7 +192,7 @@ async fn monitor_task(
 
         let cycle_start = Instant::now();
         metrics.write().begin_cycle(micros(started));
-        for watch in &watches {
+        for (watch,lease) in watches.iter().zip(&leases) {
             if !matches!(control_rx.try_recv(), Err(mpsc::error::TryRecvError::Empty)) { break 'poll; }
             let acquisition_start = Instant::now();
             let mut timing = TransactionTiming::default();
@@ -193,90 +203,17 @@ async fn monitor_task(
                 0x04 => request::read_input_registers(watch.address, watch.quantity),
                 _ => continue,
             };
-            if matches!(watch.target.kind, TransportKind::Rtu | TransportKind::Ascii) {
-                ensure_serial_settings(&mut serial_transport, &mut serial_signature, &watch.target).await;
-            }
-            let tx = next_transaction_id();
-            let adu = build_adu(watch.target.kind, watch.target.unit_id, &pdu, engine.clone(), tx);
-            let timeout = engine.timeout;
-            let hint = 3 + (watch.quantity as usize) * 2;
-
-            let result: Result<Vec<u8>, TransportError> = match watch.target.kind {
-                TransportKind::Rtu | TransportKind::Ascii => match serial_transport.as_mut() {
-                    Some(t) => t.transact_measured(&adu, timeout, hint, &mut timing).await,
-                    None => match watch.target.serial.clone() {
-                        Some(sp) => {
-                            let cfg = crate::transport::serial::SerialPortConfig {
-                                port_name: sp.port_name,
-                                baud_rate: sp.baud_rate,
-                                data_bits: sp.data_bits.into(),
-                                parity: sp.parity.into(),
-                                stop_bits: sp.stop_bits.into(),
-                                frame_gap: Duration::from_millis(2),
-                            };
-                            let mode = match watch.target.serial_mode {
-                                Some(crate::modbus::common::SerialMode::Ascii) => {
-                                    crate::modbus::common::SerialMode::Ascii
-                                }
-                                _ => crate::modbus::common::SerialMode::Rtu,
-                            };
-                            let connect_start = Instant::now();
-                            let opened = SerialTransport::open(cfg, mode).await;
-                            timing.connect_us = Some(micros(connect_start));
-                            match opened {
-                                Ok(t) => {
-                                    serial_transport = Some(t);
-                                    serial_transport
-                                        .as_mut()
-                                        .unwrap()
-                                        .transact_measured(&adu, timeout, hint, &mut timing)
-                                        .await
-                                }
-                                Err(e) => { timing.failure_stage = Some("connect".into()); Err(e) },
-                            }
-                        }
-                        None => { timing.failure_stage = Some("connect".into()); Err(TransportError::Other("serial params required".into())) },
-                    },
+            let (kind,engine)=framing(lease.definition());
+            let request=ProtocolRequest{unit:watch.target.unit_id,pdu,timeout:Duration::from_millis(u64::from(interval_ms.min(1000))),priority:Priority::Normal};
+            let (result,tx)=match CommunicationService::execute_leased(lease,request).await {
+                Ok(out)=>{
+                    timing=out.transaction.timing;
+                    (out.transaction.result,out.transaction_id)
                 },
-                TransportKind::Tcp => {
-                    let connect_start = Instant::now();
-                    let connected = TcpTransport::connect(TcpConfig {
-                    host: watch.target.endpoint.clone(),
-                    port: watch.target.port.unwrap_or(502),
-                    connect_timeout: Duration::from_millis(u64::from(crate::communication::configuration::DEFAULT_TCP_CONNECT_TIMEOUT_MS)),
-                    framing: engine.tcp_framing,
-                tls: engine.tls.clone(),
-                })
-                .await;
-                    timing.connect_us = Some(micros(connect_start));
-                    match connected {
-                        Ok(mut t) => {
-                            let out = t.transact_measured(&adu, timeout, hint, &mut timing).await;
-                            let _ = t.close().await;
-                            out
-                        }
-                        Err(e) => { timing.failure_stage = Some("connect".into()); Err(e) },
-                    }
-                },
-                TransportKind::Udp => {
-                    let connect_start = Instant::now();
-                    let connected = UdpTransport::connect(
-                    &watch.target.endpoint,
-                    watch.target.port.unwrap_or(502),
-                )
-                .await;
-                    timing.connect_us = Some(micros(connect_start));
-                    match connected {
-                        Ok(mut t) => t.transact_measured(&adu, timeout, hint, &mut timing).await,
-                        Err(e) => { timing.failure_stage = Some("connect".into()); Err(e) },
-                    }
-                },
+                Err(error)=>(Err(error),0),
             };
-
-            let validation_start = Instant::now();
-            let received = result.is_ok();
             let parsed = result.map_err(classify_transport).and_then(|resp| {
-                let pdu = verify_adu(watch.target.kind, watch.target.unit_id, watch.function, &resp, tx, engine.clone())
+                let pdu = verify_adu(kind, watch.target.unit_id, watch.function, &resp, tx, engine.clone())
                     .map_err(classify_transport)?;
                 match pdu {
                     Pdu::Exception { code, .. } => Err((DataQuality::ModbusException, Some(code), format!("Modbus exception 0x{code:02X}"))),
@@ -285,10 +222,6 @@ async fn monitor_task(
                     _ => Err((DataQuality::InvalidResponse, None, "unexpected PDU".into())),
                 }
             });
-            if received {
-                timing.validation_us = Some(micros(validation_start));
-                if matches!(&parsed, Err((DataQuality::InvalidResponse, _, _))) { timing.failure_stage = Some("validation".into()); }
-            }
             let record = {
                 let mut all = values.write();
                 let record = all.get_mut(&watch.key).map(|channel| channel.observe_timed(now_ms(), micros(started), parsed, timing, acquisition_start));
@@ -300,10 +233,8 @@ async fn monitor_task(
         metrics.write().complete_cycle(micros(cycle_start));
     }
 
-    if let Some(mut t) = serial_transport.take() {
-        let _ = t.close().await;
-    }
-    drop(serial_lease);
+    for lease in &leases {lease.stop().await;}
+    drop(leases);
     let _ = done_tx.send(());
     let _ = ui_task.await;
     emit_delta(&sink, &values, &metrics, micros(started), &session_id, false);

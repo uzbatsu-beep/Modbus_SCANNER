@@ -455,7 +455,27 @@ async fn typed_monitor_observes_errors_and_recovers_on_loopback() {
     use super::monitor::MonitorHandle;
     use super::types::{DataQuality, MonitorWatch, MonitorUpdate};
     use crate::modbus::decode::{DataType, DecodeSpec, DecodedValue};
-    let fixture = test_slave(vec![Reply::Data, Reply::Exception(2), Reply::WrongFunction, Reply::Data]).await;
+    // One persistent socket for valid reply, exception and invalid reply;
+    // a validation fault must retire that socket before the next observation.
+    let listener=TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let port=listener.local_addr().unwrap().port();
+    let server=tokio::spawn(async move{
+        let (mut stream,_)=listener.accept().await.unwrap();
+        let mut req=[0u8;12];
+        let mut previous=None;
+        for pdu in [vec![3,2,0,42],vec![0x83,2],vec![4,2,0,42]] {
+            stream.read_exact(&mut req).await.unwrap();
+            assert_ne!(previous,Some([req[0],req[1]]));
+            previous=Some([req[0],req[1]]);
+            let mut reply=vec![req[0],req[1],0,0,0,(pdu.len()+1) as u8,req[6]];
+            reply.extend(pdu);
+            stream.write_all(&reply).await.unwrap();
+        }
+        let (mut stream,_)=listener.accept().await.unwrap();
+        stream.read_exact(&mut req).await.unwrap();
+        assert_ne!(previous,Some([req[0],req[1]]));
+        stream.write_all(&[req[0],req[1],0,0,0,5,req[6],3,2,0,42]).await.unwrap();
+    });
     let events: Arc<Mutex<Vec<MonitorUpdate>>> = Arc::new(Mutex::new(Vec::new()));
     let collected = events.clone();
     let sink = EventSink::new(Arc::new(move |name, payload| {
@@ -465,7 +485,7 @@ async fn typed_monitor_observes_errors_and_recovers_on_loopback() {
     }), None, None);
     let watch = MonitorWatch {
         key:"tag:frequency".into(),
-        target:DeviceTarget {kind:TransportKind::Tcp,endpoint:"127.0.0.1".into(),port:Some(fixture.port),unit_id:1,serial:None,serial_mode:None},
+        target:DeviceTarget {kind:TransportKind::Tcp,endpoint:"127.0.0.1".into(),port:Some(port),unit_id:1,serial:None,serial_mode:None},
         function:3,address:0,quantity:1,name:Some("frequency".into()),unit:Some("Hz".into()),tag_id:Some("frequency".into()),
         spec:Some(DecodeSpec {data_type:DataType::Int16,divider:100.0,..Default::default()}),
     };
@@ -478,7 +498,7 @@ async fn typed_monitor_observes_errors_and_recovers_on_loopback() {
         }
     }).await.expect("monitor did not acquire four observations");
     monitor.stop().await.unwrap();
-    fixture.task.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(3),server).await.unwrap().unwrap();
     let snapshot = monitor.snapshot().remove(0);
     assert_eq!(snapshot.session_id,session);
     assert_eq!(snapshot.samples.len(),4);
@@ -488,7 +508,11 @@ async fn typed_monitor_observes_errors_and_recovers_on_loopback() {
     assert_eq!(snapshot.samples[2].quality,DataQuality::InvalidResponse);
     assert_eq!(snapshot.samples[3].quality,DataQuality::Good);
     assert_eq!((snapshot.valid_samples,snapshot.invalid_samples),(2,2));
-    assert!(snapshot.samples.iter().all(|s|s.timing.connect_us.is_some() && s.timing.tx_complete && s.timing.rx_complete));
+    assert!(snapshot.samples.iter().all(|s|s.timing.tx_complete && s.timing.rx_complete));
+    assert!(snapshot.samples[0].timing.connect_us.is_some());
+    assert!(snapshot.samples[1].timing.connect_us.is_none());
+    assert!(snapshot.samples[2].timing.connect_us.is_none());
+    assert!(snapshot.samples[3].timing.connect_us.is_some());
     assert_eq!(snapshot.samples[2].timing.failure_stage.as_deref(),Some("validation"));
     assert!(snapshot.samples[0].timing.decode_us.is_some());
     let updates=events.lock().unwrap();

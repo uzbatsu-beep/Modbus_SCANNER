@@ -23,10 +23,9 @@ use crate::modbus::frame::{
     parse_device_identification, parse_tcp_response, read_device_identification,
     validate_response_function, Pdu,
 };
-use crate::transport::serial::SerialTransport;
 use crate::transport::tcp::{TcpConfig, TcpFraming};
 use crate::transport::tls::TlsParams;
-use crate::transport::{Transport, TransportError};
+use crate::transport::TransportError;
 
 use super::strategies::{build_strategy, RegisterReadOutcome, ScanStrategy, WorkItem};
 use super::EventSink;
@@ -523,10 +522,6 @@ async fn serial_transact(serial:&mut Option<ManagedSerial>,engine:&EngineParams,
     // traffic logger. The worker has already quarantined the failed response.
     if let Some(raw)=outcome.rejected_response{return Ok(raw);}
     outcome.result
-}
-
-pub(crate) fn device_serial_port(target:&DeviceTarget)->Option<&str>{
-    if matches!(target.kind,TransportKind::Rtu|TransportKind::Ascii){target.serial.as_ref().map(|s|s.port_name.as_str())}else{None}
 }
 
 /// Wait for a stop request independently of the normal control-message queue.
@@ -1646,35 +1641,6 @@ async fn identify_device(
     };
     if let Some(record) = record {
         emit_event(sink, &ScanEvent::DeviceUpdated { record });
-    }
-}
-
-/// Settings currently required by a serial work item (None for IP targets).
-pub(crate) fn serial_signature(target: &DeviceTarget) -> Option<String> {
-    let sp = target.serial.as_ref()?;
-    Some(format!(
-        "{}|{}|{:?}|{:?}|{:?}|{:?}",
-        sp.port_name,
-        sp.baud_rate,
-        target.serial_mode,
-        sp.data_bits,
-        sp.parity,
-        sp.stop_bits
-    ))
-}
-
-/// Legacy monitor-only helper; scanner now uses managed serial sessions.
-pub(crate) async fn ensure_serial_settings(
-    transport: &mut Option<SerialTransport>,
-    signature: &mut Option<String>,
-    target: &DeviceTarget,
-) {
-    let next = serial_signature(target);
-    if next != *signature {
-        if let Some(mut old) = transport.take() {
-            let _ = old.close().await;
-        }
-        *signature = next;
     }
 }
 
