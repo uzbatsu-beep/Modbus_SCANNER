@@ -24,3 +24,5 @@ C.1 — фундамент аренды соединений и сохранен
 Additional native TCP regression: three Unit IDs from separate leases use one socket, including after all leases are released and a new lease is acquired; shutdown produces EOF. A periodic-reaper test verifies expiry without a subsequent acquisition. The labels Scanner/Manual/Monitor in this fixture simulate clients of the lifecycle API, not the existing production tool entry points.
 
 C.1 merged in PR #21 with 151 Rust tests per platform and Windows QA. PR #22 C.2 approved; see [SERIAL_MIGRATION](SERIAL_MIGRATION.md). C.2.1 introduces exclusive session and atomic cache handoff; legacy entry points remain pending.
+
+PR #23 Windows-first merged; PR #24 continues C.2.2/C.2.3 serial scanner and sweep migration. COM diagnostics and acceptance remain pending.

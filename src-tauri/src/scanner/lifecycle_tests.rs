@@ -243,3 +243,113 @@ async fn network_scan_cannot_open_endpoint_owned_by_manual_worker(){
     assert_eq!(manager.snapshot().len(),1);
     held.close().await.unwrap();
 }
+
+
+mod managed_serial {
+    use super::*;
+    use std::sync::{Arc,Mutex};
+    use std::sync::atomic::{AtomicUsize,Ordering};
+    use crate::communication::service::CommunicationService;
+    use crate::modbus::common::{SerialMode,UnitId};
+    use crate::scanner::types::{SerialPortParams,SerialSweepParams};
+    use crate::transport::connection::{ConnectionManager,ConnectionDefinition,TransportConfig,TransportFactory};
+    use crate::transport::serial::{SerialPortConfig,DataBitsSerde,ParitySerde,StopBitsSerde};
+    use crate::transport::{Transport,TransportError,TransportResult};
+    use async_trait::async_trait;
+    use tokio::sync::Semaphore;
+
+    fn port()->&'static str{if cfg!(windows){"COM99"}else{"/dev/modbus-scanner-managed"}}
+    fn settings()->SerialPortParams{SerialPortParams{port_name:port().into(),baud_rate:9600,data_bits:DataBitsSerde::Eight,parity:ParitySerde::None,stop_bits:StopBitsSerde::One}}
+    fn definition(mode:SerialMode)->ConnectionDefinition{
+        ConnectionDefinition{id:"manual-test".into(),name:"test".into(),transport:TransportConfig::Serial{config:SerialPortConfig{port_name:port().into(),..Default::default()},mode},policy:Default::default()}
+    }
+    struct Fixture {
+        opens:AtomicUsize, sent:Mutex<Vec<(u32,Vec<u8>)>>,
+        entered:Semaphore, release:Semaphore, gated:bool,
+    }
+    struct Wire { state:Arc<Fixture>, baud:u32,mode:SerialMode,last:Vec<u8> }
+    struct Factory(Arc<Fixture>);
+    #[async_trait]
+    impl TransportFactory for Factory{
+        async fn open(&self,c:&TransportConfig)->TransportResult<Box<dyn Transport>>{
+            let TransportConfig::Serial{config,mode}=c else{return Err(TransportError::Other("serial expected".into()));};
+            self.0.opens.fetch_add(1,Ordering::SeqCst);
+            Ok(Box::new(Wire{state:self.0.clone(),baud:config.baud_rate,mode:*mode,last:Vec::new()}))
+        }
+    }
+    #[async_trait]
+    impl Transport for Wire{
+        fn name(&self)->String{"managed serial fixture".into()}
+        async fn reset(&mut self)->TransportResult<()>{Ok(())}
+        async fn close(&mut self)->TransportResult<()>{Ok(())}
+        async fn send_raw(&mut self,adu:&[u8])->TransportResult<()>{
+            self.last=adu.to_vec();self.state.sent.lock().unwrap().push((self.baud,adu.to_vec()));Ok(())
+        }
+        async fn recv_raw(&mut self,_:usize)->TransportResult<Vec<u8>>{
+            self.state.entered.add_permits(1);
+            if self.state.gated{self.state.release.acquire().await.map_err(|_|TransportError::Cancelled)?.forget();}
+            if self.baud!=9600{return Err(TransportError::Timeout(Duration::from_millis(50)));}
+            let (unit,fc)=match self.mode{
+                SerialMode::Rtu=> (self.last[0],self.last[1]),
+                SerialMode::Ascii=>{let frame=crate::modbus::ascii::decode(&self.last)?;(frame.unit_id.0,frame.pdu.function())},
+            };
+            let pdu=if fc==0x2b{vec![0x2b,0x0e,1,1,0,0,1,0,3,b'A',b'B',b'C']}else{vec![fc,2,0,42]};
+            Ok(match self.mode{SerialMode::Rtu=>crate::modbus::rtu::encode(UnitId(unit),&pdu),SerialMode::Ascii=>crate::modbus::ascii::encode(UnitId(unit),&pdu)})
+        }
+    }
+    fn setup(gated:bool)->(ScannerHandle,Arc<ConnectionManager>,Arc<Fixture>){
+        let state=Arc::new(Fixture{opens:AtomicUsize::new(0),sent:Mutex::new(Vec::new()),entered:Semaphore::new(0),release:Semaphore::new(0),gated});
+        let m=Arc::new(ConnectionManager::with_factory(Arc::new(Factory(state.clone()))));
+        (ScannerHandle::with_communication(Arc::new(CommunicationService{manager:m.clone()})),m,state)
+    }
+    #[tokio::test]
+    async fn fixed_serial_scanner_reuses_existing_worker_across_units_and_fc43(){
+        for mode in [SerialMode::Rtu,SerialMode::Ascii]{
+            let (scanner,m,f)=setup(false);
+            let held=m.acquire(definition(mode)).unwrap();
+            let mut p=params(vec![3]);p.request_gap_ms=0;p.identify_devices=true;
+            scanner.start(EventSink::null(),ScanTarget::UnitIdRange{from:1,to:2,port:settings(),mode},p).await.unwrap();
+            let r=scanner.wait_finished(Duration::from_secs(5)).await.unwrap();
+            assert_eq!(r.stats.responses_ok,2);
+            assert_eq!(r.records.len(),2);
+            assert!(r.records.iter().all(|row|row.device_identification.is_some()));
+            assert_eq!(f.opens.load(Ordering::SeqCst),1);
+            assert_eq!(f.sent.lock().unwrap().len(),4);
+            assert_eq!(m.snapshot().len(),1);
+            drop(held);m.shutdown().await.unwrap();
+        }
+    }
+    #[tokio::test]
+    async fn managed_serial_stop_waits_for_rx_and_does_not_start_next_unit(){
+        let (scanner,m,f)=setup(true);
+        let mut p=params(vec![3]);p.timeout_ms=3000;p.request_gap_ms=0;
+        scanner.start(EventSink::null(),ScanTarget::UnitIdRange{from:1,to:2,port:settings(),mode:SerialMode::Rtu},p).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2),f.entered.acquire()).await.unwrap().unwrap().forget();
+        scanner.control(ControlMsg::Stop).await.unwrap();
+        wait_status(&scanner,ScanStatus::Stopping).await;
+        assert_eq!(f.sent.lock().unwrap().len(),1);
+        f.release.add_permits(1);
+        scanner.wait_finished(Duration::from_secs(4)).await.unwrap();
+        assert_eq!(scanner.status(),ScanStatus::Stopped);
+        assert_eq!(f.sent.lock().unwrap().len(),1);
+        assert_eq!(m.snapshot()[0].active_requests,0);
+        m.shutdown().await.unwrap();
+    }
+    #[tokio::test]
+    async fn serial_sweep_retires_idle_cache_and_recovers_between_settings(){
+        let (scanner,m,f)=setup(false);
+        let old=m.acquire(definition(SerialMode::Rtu)).unwrap();
+        let old_id=old.id().to_owned();drop(old);
+        let mut sweep=SerialSweepParams::defaults(port().into(),SerialMode::Rtu,1,1);
+        sweep.baud_rates=vec![19200,9600];sweep.framings.truncate(1);sweep.discovery_unit_ids=vec![1];
+        let mut p=params(vec![3]);p.request_gap_ms=0;p.timeout_ms=50;
+        scanner.start(EventSink::null(),ScanTarget::SerialAuto{sweep},p).await.unwrap();
+        let r=scanner.wait_finished(Duration::from_secs(5)).await.unwrap();
+        assert!(r.records.iter().any(|row|row.target.serial.as_ref().is_some_and(|s|s.baud_rate==9600)));
+        assert!(m.snapshot().is_empty());
+        assert!(f.opens.load(Ordering::SeqCst)>=2);
+        let sent=f.sent.lock().unwrap();assert_eq!(sent[0].0,19200);assert!(sent.iter().any(|(baud,_)|*baud==9600));drop(sent);
+        let next=m.acquire(definition(SerialMode::Rtu)).unwrap();assert_ne!(next.id(),old_id);drop(next);
+        m.shutdown().await.unwrap();
+    }
+}
